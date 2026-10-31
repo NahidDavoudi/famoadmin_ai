@@ -1,44 +1,23 @@
 # Famo Admin Panel - Agent Instructions
 
 ## Project Overview
-Static frontend SPA (Persian/Farsi, RTL) for the Famo admin panel. `index.html` holds all views; navigation is hash-free, driven by `navigateTo(page)`. There is no local backend — everything talks to the unified API at `http://localhost:8080/api/v1`.
+React 19 + TypeScript SPA (Persian/Farsi, RTL) for the Famo Academy admin panel (`پنل مدیریت - آموزشگاه فامو`). Navigation is state-driven via `navigateTo(page)`. Data is managed via the unified API client in `src/lib/api.ts` (connecting to `/api/v1` when available with automatic fallback to a persistent `localStorage` data store).
 
 ## Stack
-- **Frontend**: Tailwind CSS v4 (shared build), Vanilla JS ES modules
-- **Backend**: unified API project at `../api` (Slim + JWT), served at `/api/v1`
-- **Auth**: unified login page at `../login/index.php` (JWT in `localStorage.famo_jwt`)
+- **Frontend**: React 19, TypeScript, Vite 6, Tailwind CSS v4, Lucide React
+- **Styling**: RTL Persian layout (`Vazirmatn` font, `#445D84` primary brand palette)
+- **Testing**: `node:test` via `tsx` (`npx tsx --test src/lib/logic.test.ts`)
 
 ## Architecture
 | Path | Purpose |
 |------|---------|
-| `index.html` | Single entry point, all views + modals inline |
-| `assets/js/index.js` | Module entry point |
-| `assets/js/auth.js` | Auth guard; redirects unauthenticated users to shared login |
-| `assets/js/students.js` / `supporters.js` / `courses.js` / `instructors.js` | CRUD modules |
-| `assets/js/exams.js` / `exam-entry.js` | Exam results + entry |
-| `assets/js/files.js` / `blog.js` | File uploads + blog CRUD |
-| `assets/js/dashboard.js` / `reports.js` | Overview stats + reports chart |
-| `assets/js/chart-theme.js` | Shared ApexCharts theme for admin charts |
-| `assets/css/admin.css` | Admin-specific styles |
-
-## Shared Assets
-- API client: `../../../shared/js/api.js` (imported from `assets/js/*.js`)
-- Libraries: `../shared/js/libs/` (ApexCharts, Lucide)
-- Icons: Lucide via `../shared/js/libs/lucide.min.js` + `../shared/js/lucide-adapter.js`. Static markup uses `data-lucide="..."`; dynamic markup uses the `icon(name)` helper in `assets/js/utils.js`.
-- Styles/fonts: `../shared/css/output.css`, `../shared/css/fonts.css`
-- Images/SVG: `../shared/images/`, `../shared/svg/`
-
-## API Conventions
-- All calls go through the shared `API` client (`API.get/post/put/del/upload`).
-- Endpoints: `/students`, `/students/list`, `/courses`, `/instructors`, `/supporters`, `/exams/*`, `/files/*`, `/blog/posts`, `/reports/*`, `/dashboard/stats`.
-- Response envelope: `{ success, data, pagination, error }`.
-- File uploads use `API.upload(path, formData)` (multipart); the API merges `$_POST` for multipart fields.
-- `admin` and `supporter` roles may access the panel; others are redirected to login.
-
-## CSS Build
-- Tailwind source: `../shared/css/input.css` (scans `admin/**/*.html` and `admin/**/*.js`).
-- Build from `../shared`: `npm run build:css`. Never edit `output.css` directly.
-
-## Gotchas
-- No test/lint/typecheck tooling configured; validate JS with `node --input-type=module --check < file.js`.
-- The old local API (`admin/api/`) and its `api-client.js`/sprite assets were removed — do not recreate them.
+| `index.html` | Root HTML entry point (`lang="fa" dir="rtl"`) |
+| `src/main.tsx` | React application entry point |
+| `src/App.tsx` | Main shell, page router, keyboard shortcuts (`/`, `?`, `Escape`), and help modal |
+| `src/types.ts` | Shared TypeScript interfaces for domain entities |
+| `src/lib/api.ts` | Unified API client & seeded local persistence store |
+| `src/lib/jalali.ts` | Pure TypeScript Gregorian ↔ Jalali date utilities |
+| `src/lib/exam-math.ts` | Konkur negative-marking score calculation, validation & filtering |
+| `src/lib/logic.test.ts` | Unit tests for pure business logic |
+| `src/components/` | Reusable UI components (`Sidebar`, `Modal`, `ConfirmModal`, `ToastStack`, `Charts`) |
+| `src/pages/` | Page views (`OverviewPage`, `StudentsPage`, `CoursesPage`, `InstructorsPage`, `ExamsPage`, `ExamEntryPage`, `FilesPage`, `SupportersPage`, `BlogPage`, `ReportsPage`) |
