@@ -6,6 +6,7 @@ services:
       args:
         VITE_API_BASE: ${VITE_API_BASE:-https://api.famoacademy.ir/api/v1}
         VITE_MAIN_SITE_URL: ${VITE_MAIN_SITE_URL:-https://famoacademy.ir}
+        VITE_AUTH_URL: ${VITE_AUTH_URL:-https://auth.famoacademy.ir}
     container_name: famo-admin-panel
     ports:
       - "${PORT:-3000}:80"

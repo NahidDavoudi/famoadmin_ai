@@ -34,6 +34,7 @@ export interface ApiEnvelope<T> {
 
 const DEFAULT_API_BASE = 'https://api.famoacademy.ir/api/v1';
 const DEFAULT_MAIN_SITE_URL = 'https://famoacademy.ir';
+const DEFAULT_AUTH_URL = 'https://auth.famoacademy.ir';
 const TOKEN_STORAGE_KEY = 'famo_jwt';
 
 export function extractErrorMessage(
@@ -46,9 +47,16 @@ export function extractErrorMessage(
   return fallback;
 }
 
+function getCookieValue(name: string): string | null {
+  if (typeof document === 'undefined' || !document.cookie) return null;
+  const match = document.cookie.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]*)'));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 class FamoApiClient {
   readonly base: string;
   readonly mainSiteUrl: string;
+  readonly authUrl: string;
 
   constructor() {
     const winEnv =
@@ -63,14 +71,26 @@ class FamoApiClient {
       metaEnv.VITE_MAIN_SITE_URL ||
       DEFAULT_MAIN_SITE_URL
     ).replace(/\/+$/, '');
+    this.authUrl = (
+      winEnv.AUTH_URL ||
+      metaEnv.VITE_AUTH_URL ||
+      DEFAULT_AUTH_URL
+    ).replace(/\/+$/, '');
   }
 
   get token(): string | null {
     try {
-      return localStorage.getItem(TOKEN_STORAGE_KEY);
+      const fromStorage = localStorage.getItem(TOKEN_STORAGE_KEY);
+      if (fromStorage) return fromStorage;
     } catch {
-      return null;
+      // ignore storage errors
     }
+    return (
+      getCookieValue('famo_jwt') ||
+      getCookieValue('token') ||
+      getCookieValue('access_token') ||
+      null
+    );
   }
 
   setToken(token: string | null): void {
@@ -83,6 +103,12 @@ class FamoApiClient {
     } catch {
       // ignore storage errors
     }
+  }
+
+  getLoginRedirectUrl(): string {
+    if (typeof window === 'undefined') return this.authUrl;
+    const currentUrl = encodeURIComponent(window.location.href);
+    return `${this.authUrl}/?redirect=${currentUrl}`;
   }
 
   consumeUrlToken(): void {

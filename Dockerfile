@@ -6,8 +6,10 @@ WORKDIR /app
 # Accept build-time environment variables for Vite
 ARG VITE_API_BASE=https://api.famoacademy.ir/api/v1
 ARG VITE_MAIN_SITE_URL=https://famoacademy.ir
+ARG VITE_AUTH_URL=https://auth.famoacademy.ir
 ENV VITE_API_BASE=$VITE_API_BASE
 ENV VITE_MAIN_SITE_URL=$VITE_MAIN_SITE_URL
+ENV VITE_AUTH_URL=$VITE_AUTH_URL
 
 # Install dependencies
 COPY package.json package-lock.json* ./

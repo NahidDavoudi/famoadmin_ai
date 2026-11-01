@@ -42,10 +42,20 @@ export default function App() {
       .then((u) => {
         if (u?.username) {
           setUsername(u.username);
+        } else if (
+          typeof window !== 'undefined' &&
+          window.location.hostname.endsWith('famoacademy.ir')
+        ) {
+          window.location.href = API.getLoginRedirectUrl();
         }
       })
       .catch(() => {
-        // Session check failed or unauthenticated
+        if (
+          typeof window !== 'undefined' &&
+          window.location.hostname.endsWith('famoacademy.ir')
+        ) {
+          window.location.href = API.getLoginRedirectUrl();
+        }
       });
   }, []);
 
@@ -83,7 +93,7 @@ export default function App() {
   const handleLogout = async () => {
     await API.logout();
     showToast('از حساب کاربری خارج شدید', 'info');
-    window.location.href = `${API.mainSiteUrl}/#loginModal`;
+    window.location.href = API.getLoginRedirectUrl();
   };
 
   return (
