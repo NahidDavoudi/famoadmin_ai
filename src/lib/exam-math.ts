@@ -1,4 +1,4 @@
-import type { Student } from '../types';
+import type { AcademicField, Student } from '../types';
 
 export interface SubjectDraft {
   id: string;
@@ -14,6 +14,18 @@ export interface CalculatedSubjectMetrics {
   percentage: number | null;
   isValid: boolean;
 }
+
+export const VALID_ACADEMIC_FIELDS: readonly AcademicField[] = [
+  'ریاضی',
+  'تجربی',
+  'انسانی',
+  'زبان',
+  'هنر',
+  'عمومی',
+  'راهنمایی',
+] as const;
+
+export const VALID_GRADES: readonly number[] = [7, 8, 9, 10, 11, 12] as const;
 
 /**
  * Calculates skipped count and exam score percentage using standard Iranian Konkur formula:
@@ -47,12 +59,61 @@ export function calculateSubjectMetrics(
   };
 }
 
+/**
+ * Validates Iranian mobile phone number according to OpenAPI pattern:
+ * ^(\+98|0098|98|0)?9[0-9]{9}$
+ */
 export function isValidIranianPhone(phone: string): boolean {
-  return /^09\d{9}$/.test(phone.trim());
+  return /^(\+98|0098|98|0)?9[0-9]{9}$/.test(phone.trim());
 }
 
+/**
+ * Normalizes an Iranian mobile number to 09XXXXXXXXX format.
+ */
+export function normalizeIranianPhone(phone: string): string {
+  const trimmed = phone.trim();
+  const match = trimmed.match(/^(?:\+98|0098|98|0)?(9[0-9]{9})$/);
+  return match ? `0${match[1]}` : trimmed;
+}
+
+/**
+ * Basic 10-digit National ID check.
+ */
 export function isValidNationalId(nationalId: string): boolean {
   return /^\d{10}$/.test(nationalId.trim());
+}
+
+/**
+ * Strict Iranian 10-digit National ID (کد ملی) Mod-11 checksum validation
+ * as required by POST /api/v1/auth/register in OpenAPI 3.1.0.
+ */
+export function isValidNationalIdChecksum(nationalId: string): boolean {
+  const code = nationalId.trim();
+  if (!/^[0-9]{10}$/.test(code)) return false;
+  // Reject repeated digits like 0000000000, 1111111111, etc.
+  if (/^(\d)\1{9}$/.test(code)) return false;
+
+  const check = Number(code[9]);
+  let sum = 0;
+  for (let i = 0; i < 9; i++) {
+    sum += Number(code[i]) * (10 - i);
+  }
+  const rem = sum % 11;
+  return (rem < 2 && check === rem) || (rem >= 2 && check === 11 - rem);
+}
+
+/**
+ * Computes a valid 10-digit Iranian National ID from a 9-digit prefix.
+ */
+export function computeNationalIdWithChecksum(nineDigits: string): string {
+  const prefix = nineDigits.replace(/\D/g, '').padStart(9, '0').slice(0, 9);
+  let sum = 0;
+  for (let i = 0; i < 9; i++) {
+    sum += Number(prefix[i]) * (10 - i);
+  }
+  const rem = sum % 11;
+  const check = rem < 2 ? rem : 11 - rem;
+  return `${prefix}${check}`;
 }
 
 export interface StudentFilterCriteria {

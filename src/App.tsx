@@ -38,9 +38,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    API.getMe().then((u) => {
-      if (u?.username) setUsername(u.username);
-    });
+    API.getMe()
+      .then((u) => {
+        if (u?.username) {
+          setUsername(u.username);
+        }
+      })
+      .catch(() => {
+        // Session check failed or unauthenticated
+      });
   }, []);
 
   // Global keyboard shortcuts ('/' to focus search, '?' to open shortcuts modal)
@@ -77,6 +83,7 @@ export default function App() {
   const handleLogout = async () => {
     await API.logout();
     showToast('از حساب کاربری خارج شدید', 'info');
+    window.location.href = `${API.mainSiteUrl}/#loginModal`;
   };
 
   return (

@@ -43,19 +43,18 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedFile && !description.trim()) {
-      showToast('لطفاً فایل یا عنوان فایل را وارد کنید', 'error');
+    if (!selectedFile) {
+      showToast('لطفاً یک فایل برای آپلود انتخاب کنید', 'error');
       return;
     }
 
     setUploading(true);
     try {
       await API.uploadFile({
+        file: selectedFile,
         student_id: studentId ? Number(studentId) : null,
         exam_date: examDate,
-        description: description.trim() || selectedFile?.name || 'فایل آزمون',
-        file_name: selectedFile?.name || 'exam-document.pdf',
-        file_size: selectedFile?.size || 640000,
+        description: description.trim() || selectedFile.name,
       });
       setStudentId('');
       setDescription('');
@@ -71,10 +70,14 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    await API.deleteFile(deleteTarget.id);
-    setDeleteTarget(null);
-    loadData();
-    showToast('فایل حذف شد', 'success');
+    try {
+      await API.deleteFile(deleteTarget.id);
+      setDeleteTarget(null);
+      loadData();
+      showToast('فایل حذف شد', 'success');
+    } catch (err) {
+      showToast((err as Error).message || 'خطا در حذف فایل', 'error');
+    }
   };
 
   return (
@@ -209,17 +212,16 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            showToast(`دریافت فایل «${f.file_path}» آغاز شد`, 'info')
-                          }
+                        <a
+                          href={API.getFileDownloadUrl(f.id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
                           title="دانلود"
                           aria-label={`دانلود ${f.description}`}
                         >
                           <Download className="w-4 h-4" />
-                        </button>
+                        </a>
                         <button
                           type="button"
                           onClick={() => setDeleteTarget(f)}

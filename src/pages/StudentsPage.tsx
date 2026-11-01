@@ -209,9 +209,13 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       variant: isActive ? 'danger' : 'primary',
       onConfirm: async () => {
         setConfirmState((prev) => ({ ...prev, isOpen: false }));
-        await API.toggleStudentStatus(student.id);
-        fetchStudents(page);
-        showToast('وضعیت دانش‌آموز تغییر یافت', 'success');
+        try {
+          await API.toggleStudentStatus(student.id);
+          fetchStudents(page);
+          showToast('وضعیت دانش‌آموز تغییر یافت', 'success');
+        } catch (err) {
+          showToast((err as Error).message || 'خطا در تغییر وضعیت دانش‌آموز', 'error');
+        }
       },
     });
   };
@@ -224,9 +228,13 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       variant: 'primary',
       onConfirm: async () => {
         setConfirmState((prev) => ({ ...prev, isOpen: false }));
-        await API.createStudentAccount(student.id);
-        fetchStudents(page);
-        showToast('حساب کاربری ایجاد شد', 'success');
+        try {
+          await API.createStudentAccount(student.id);
+          fetchStudents(page);
+          showToast('حساب کاربری ایجاد شد', 'success');
+        } catch (err) {
+          showToast((err as Error).message || 'خطا در ایجاد حساب کاربری', 'error');
+        }
       },
     });
   };
@@ -239,8 +247,12 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       variant: 'primary',
       onConfirm: async () => {
         setConfirmState((prev) => ({ ...prev, isOpen: false }));
-        await API.resetStudentPassword(student.id);
-        showToast('رمز عبور به 1234 بازنشانی شد', 'success');
+        try {
+          await API.resetStudentPassword(student.id);
+          showToast('رمز عبور به 1234 بازنشانی شد', 'success');
+        } catch (err) {
+          showToast((err as Error).message || 'خطا در بازنشانی رمز عبور', 'error');
+        }
       },
     });
   };
@@ -253,9 +265,13 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       variant: 'danger',
       onConfirm: async () => {
         setConfirmState((prev) => ({ ...prev, isOpen: false }));
-        await API.deleteStudent(student.id);
-        fetchStudents(page);
-        showToast('دانش‌آموز حذف شد', 'success');
+        try {
+          await API.deleteStudent(student.id);
+          fetchStudents(page);
+          showToast('دانش‌آموز حذف شد', 'success');
+        } catch (err) {
+          showToast((err as Error).message || 'خطا در حذف دانش‌آموز', 'error');
+        }
       },
     });
   };

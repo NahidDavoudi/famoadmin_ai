@@ -73,23 +73,29 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
 
   const openEditor = async (post?: BlogPost) => {
     if (post) {
-      setEditingPostId(post.id);
-      setFormState({
-        title: post.title,
-        slug: post.slug,
-        category: post.category,
-        cover_image: post.cover_image || '',
-        excerpt: post.excerpt || '',
-        content: post.content || '',
-        meta_description: post.meta_description || '',
-        is_published: Boolean(post.is_published),
-      });
-      setIsEditingView(true);
-      setTimeout(() => {
-        if (editorRef.current) {
-          editorRef.current.innerHTML = post.content || '';
-        }
-      }, 30);
+      try {
+        const res = await API.getBlogPost(post.id);
+        const fullPost = res.data?.post || post;
+        setEditingPostId(fullPost.id);
+        setFormState({
+          title: fullPost.title,
+          slug: fullPost.slug,
+          category: fullPost.category,
+          cover_image: fullPost.cover_image || '',
+          excerpt: fullPost.excerpt || '',
+          content: fullPost.content || '',
+          meta_description: fullPost.meta_description || '',
+          is_published: Boolean(fullPost.is_published),
+        });
+        setIsEditingView(true);
+        setTimeout(() => {
+          if (editorRef.current) {
+            editorRef.current.innerHTML = fullPost.content || '';
+          }
+        }, 30);
+      } catch (err) {
+        showToast((err as Error).message || 'خطا در دریافت اطلاعات پست', 'error');
+      }
     } else {
       setEditingPostId(null);
       setFormState({
@@ -161,10 +167,14 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    await API.deleteBlogPost(deleteTarget.id);
-    setDeleteTarget(null);
-    loadPosts();
-    showToast('پست وبلاگ حذف شد', 'success');
+    try {
+      await API.deleteBlogPost(deleteTarget.id);
+      setDeleteTarget(null);
+      loadPosts();
+      showToast('پست وبلاگ حذف شد', 'success');
+    } catch (err) {
+      showToast((err as Error).message || 'خطا در حذف پست وبلاگ', 'error');
+    }
   };
 
   if (isEditingView) {

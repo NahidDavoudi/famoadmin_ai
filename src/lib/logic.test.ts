@@ -58,3 +58,15 @@ test('filterStudentsList filters by search, field, grade, and status', () => {
   assert.equal(filterStudentsList(sample, { status: 'active' }).length, 1);
   assert.equal(filterStudentsList(sample, { status: 'inactive' }).length, 1);
 });
+
+test('API client targets https://api.famoacademy.ir/api/v1 and parses error envelopes', async () => {
+  const { API, extractErrorMessage } = await import('./api');
+  assert.equal(API.base, 'https://api.famoacademy.ir/api/v1');
+  assert.equal(API.mainSiteUrl, 'https://famoacademy.ir');
+  assert.equal(
+    extractErrorMessage({ code: 'UNAUTHORIZED', message: 'توکن ارسال نشده است' }),
+    'توکن ارسال نشده است'
+  );
+  assert.equal(extractErrorMessage('خطای مستقیم'), 'خطای مستقیم');
+  assert.equal(extractErrorMessage(null, 'خطای پیش‌فرض'), 'خطای پیش‌فرض');
+});

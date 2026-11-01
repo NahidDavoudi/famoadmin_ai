@@ -105,10 +105,14 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    await API.deleteCourse(deleteTarget.id);
-    setDeleteTarget(null);
-    loadCourses();
-    showToast('دوره حذف شد', 'success');
+    try {
+      await API.deleteCourse(deleteTarget.id);
+      setDeleteTarget(null);
+      loadCourses();
+      showToast('دوره حذف شد', 'success');
+    } catch (err) {
+      showToast((err as Error).message || 'خطا در حذف دوره', 'error');
+    }
   };
 
   return (

@@ -130,10 +130,14 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    await API.deleteSupporter(deleteTarget.id);
-    setDeleteTarget(null);
-    loadSupporters();
-    showToast('پشتیبان حذف شد', 'success');
+    try {
+      await API.deleteSupporter(deleteTarget.id);
+      setDeleteTarget(null);
+      loadSupporters();
+      showToast('پشتیبان حذف شد', 'success');
+    } catch (err) {
+      showToast((err as Error).message || 'خطا در حذف پشتیبان', 'error');
+    }
   };
 
   return (

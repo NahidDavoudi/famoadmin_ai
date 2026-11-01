@@ -9,9 +9,17 @@ export type PageId =
   | 'supporters'
   | 'blog'
   | 'blog-editor'
-  | 'reports';
+  | 'reports'
+  | 'public_api';
 
-export type AcademicField = 'ریاضی' | 'تجربی' | 'انسانی' | 'راهنمایی';
+export type AcademicField =
+  | 'ریاضی'
+  | 'تجربی'
+  | 'انسانی'
+  | 'زبان'
+  | 'هنر'
+  | 'عمومی'
+  | 'راهنمایی';
 
 export interface Student {
   id: number;
@@ -27,36 +35,90 @@ export interface Student {
 export interface Course {
   id: number;
   name: string;
-  icon?: string;
-  gradient_color_from: string;
-  gradient_color_to: string;
-  description: string;
-  price: string;
+  icon: string | null;
+  gradient_color_from: string | null;
+  gradient_color_to: string | null;
+  background_image_url?: string | null;
+  description: string | null;
+  full_description?: string | null;
+  target_grades?: string | null;
+  format?: string | null;
+  badge_label?: string | null;
+  price: number;
   display_order: number;
-  background_image?: string | null;
+  features: string[];
+  created_at: string;
+}
+
+export interface SocialLink {
+  platform: string;
+  url: string;
 }
 
 export interface Instructor {
   id: number;
   name: string;
-  title: string;
-  description: string;
-  initial_letter: string;
+  title: string | null;
+  description: string | null;
+  full_bio?: string | null;
+  image_url?: string | null;
+  initial_letter: string | null;
   display_order: number;
-  image?: string | null;
+  social_links: SocialLink[];
+  created_at: string;
 }
 
 export interface Supporter {
   id: number;
   name: string;
   phone?: string;
-  grade: number;
-  field: AcademicField;
+  grade: number | null;
+  field: AcademicField | null;
   chat_id: string | null;
   username?: string;
+  avatar?: string | null;
+  avatar_url?: string | null;
   replied_count: number;
   pending_count: number;
   avg_response_hours: number | null;
+}
+
+export interface PublicSupporter {
+  id: number;
+  name: string;
+  grade: number | null;
+  field: string | null;
+  avatar: string | null;
+  avatar_url: string | null;
+}
+
+export interface BlogCategory {
+  id: number;
+  name: string;
+  slug: string;
+  icon: string | null;
+  color: string | null;
+  description: string | null;
+  sort_order: number;
+  post_count: number;
+}
+
+export interface BlogPost {
+  id: number;
+  title: string;
+  slug: string;
+  excerpt: string | null;
+  content: string;
+  cover_image: string | null;
+  category: string | null;
+  category_id: number | null;
+  published: boolean;
+  is_published: number; // 1 or 0 for admin compatibility
+  published_at: string | null;
+  views: number;
+  meta_description: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface SubjectResult {
@@ -115,20 +177,6 @@ export interface ExamFile {
   created_at: string;
 }
 
-export interface BlogPost {
-  id: number;
-  title: string;
-  slug: string;
-  category: string;
-  cover_image: string | null;
-  excerpt: string;
-  content: string;
-  meta_description: string;
-  is_published: number; // 1 or 0
-  views: number;
-  published_at: string;
-}
-
 export interface ReportDayStat {
   date: string;
   replied: number;
@@ -147,6 +195,25 @@ export interface DashboardStats {
   students_no_exam: number;
   pending_reports: number;
   avg_by_field: FieldAvgStat[];
+}
+
+export interface PaginationMeta {
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
+}
+
+export interface OpenApiErrorObject {
+  code: string;
+  message: string;
+}
+
+export interface OpenApiEnvelope<T = unknown> {
+  success: boolean;
+  data: T | null;
+  pagination: PaginationMeta | null;
+  error: OpenApiErrorObject | null;
 }
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
