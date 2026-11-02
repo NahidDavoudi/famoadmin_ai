@@ -13,21 +13,34 @@ import {
   ChevronLeft,
 } from 'lucide-react';
 import API from '../lib/api';
-import { isValidIranianPhone, isValidNationalId } from '../lib/exam-math';
+import { validateStudentForm, type FieldErrors } from '../lib/form-validation';
 import type { AcademicField, Student, ToastType } from '../types';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
 
 interface StudentsPageProps {
   showToast: (message: string, type?: ToastType) => void;
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
 }
 
-const FIELDS: AcademicField[] = ['ریاضی', 'تجربی', 'انسانی', 'راهنمایی'];
+const FIELDS: AcademicField[] = [
+  'ریاضی',
+  'تجربی',
+  'انسانی',
+  'زبان',
+  'هنر',
+  'عمومی',
+  'راهنمایی',
+];
+
+type StudentFieldKey = 'name' | 'phone' | 'national_id' | 'grade' | 'field';
 
 export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInputRef }) => {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filtering, setFiltering] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [search, setSearch] = useState('');
   const [fieldFilter, setFieldFilter] = useState('');
   const [gradeFilter, setGradeFilter] = useState('');
@@ -45,6 +58,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     grade: '12',
     field: '' as AcademicField | '',
   });
+  const [addErrors, setAddErrors] = useState<FieldErrors<StudentFieldKey>>({});
   const [submitting, setSubmitting] = useState(false);
 
   // Edit Modal State
@@ -54,8 +68,9 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     phone: '',
     national_id: '',
     grade: '12',
-    field: 'تجربی' as AcademicField,
+    field: 'تجربی' as AcademicField | '',
   });
+  const [editErrors, setEditErrors] = useState<FieldErrors<StudentFieldKey>>({});
 
   // Confirmation Dialog State
   const [confirmState, setConfirmState] = useState<{
@@ -63,7 +78,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     title: string;
     message: string;
     variant?: 'danger' | 'primary';
-    onConfirm: () => void;
+    onConfirm: () => Promise<void> | void;
   }>({
     isOpen: false,
     title: '',
@@ -111,45 +126,58 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     fetchStudents(1);
   }, [fetchStudents]);
 
-  const handleClearFilters = () => {
-    setSearch('');
-    setFieldFilter('');
-    setGradeFilter('');
-    setStatusFilter('');
-    fetchStudents(1, { search: '', field: '', grade: '', status: '' });
+  const handleFilterClick = async () => {
+    setFiltering(true);
+    try {
+      await fetchStudents(1);
+    } finally {
+      setFiltering(false);
+    }
+  };
+
+  const handleClearFilters = async () => {
+    setClearing(true);
+    try {
+      setSearch('');
+      setFieldFilter('');
+      setGradeFilter('');
+      setStatusFilter('');
+      await fetchStudents(1, { search: '', field: '', grade: '', status: '' });
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const openAddModal = () => {
+    setAddForm({ name: '', phone: '', national_id: '', grade: '12', field: '' });
+    setAddErrors({});
+    setIsAddOpen(true);
   };
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!addForm.name.trim()) {
-      showToast('نام دانش‌آموز الزامی است', 'error');
-      return;
-    }
-    if (!isValidIranianPhone(addForm.phone)) {
-      showToast('شماره موبایل نامعتبر است (فرمت: 09xxxxxxxxx)', 'error');
-      return;
-    }
-    if (!isValidNationalId(addForm.national_id)) {
-      showToast('کد ملی باید ۱۰ رقم باشد', 'error');
-      return;
-    }
-    if (!addForm.field) {
-      showToast('لطفاً رشته تحصیلی را انتخاب کنید', 'error');
+    if (submitting) return;
+
+    const errors = validateStudentForm(addForm);
+    setAddErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      showToast('لطفاً خطاهای فرم را برطرف کنید', 'error');
       return;
     }
 
     setSubmitting(true);
     try {
       await API.addStudent({
-        name: addForm.name,
-        phone: addForm.phone,
-        nationalId: addForm.national_id,
+        name: addForm.name.trim(),
+        phone: addForm.phone.trim(),
+        nationalId: addForm.national_id.trim(),
         grade: Number(addForm.grade),
         field: addForm.field as AcademicField,
       });
       setIsAddOpen(false);
       setAddForm({ name: '', phone: '', national_id: '', grade: '12', field: '' });
-      fetchStudents(1);
+      setAddErrors({});
+      await fetchStudents(1);
       showToast('دانش‌آموز اضافه شد و حساب کاربری ایجاد شد', 'success');
     } catch (err) {
       showToast((err as Error).message || 'خطا در افزودن دانش‌آموز', 'error');
@@ -160,6 +188,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
 
   const openEditModal = (student: Student) => {
     setEditingStudent(student);
+    setEditErrors({});
     setEditForm({
       name: student.name,
       phone: student.phone,
@@ -171,27 +200,27 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
 
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingStudent) return;
-    if (!isValidIranianPhone(editForm.phone)) {
-      showToast('شماره موبایل نامعتبر است (فرمت: 09xxxxxxxxx)', 'error');
-      return;
-    }
-    if (!isValidNationalId(editForm.national_id)) {
-      showToast('کد ملی باید ۱۰ رقم باشد', 'error');
+    if (!editingStudent || submitting) return;
+
+    const errors = validateStudentForm(editForm);
+    setEditErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      showToast('لطفاً خطاهای فرم را برطرف کنید', 'error');
       return;
     }
 
     setSubmitting(true);
     try {
       await API.updateStudent(editingStudent.id, {
-        name: editForm.name,
-        phone: editForm.phone,
-        nationalId: editForm.national_id,
+        name: editForm.name.trim(),
+        phone: editForm.phone.trim(),
+        nationalId: editForm.national_id.trim(),
         grade: Number(editForm.grade),
-        field: editForm.field,
+        field: editForm.field as AcademicField,
       });
       setEditingStudent(null);
-      fetchStudents(page);
+      setEditErrors({});
+      await fetchStudents(page);
       showToast('تغییرات ذخیره شد', 'success');
     } catch (err) {
       showToast((err as Error).message || 'خطا در ذخیره تغییرات', 'error');
@@ -201,17 +230,17 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
   };
 
   const handleToggleStatus = (student: Student) => {
-    const isActive = Number(student.is_active) === 1;
+    const isActive = Number(student.status ?? student.is_active ?? 1) === 1;
     setConfirmState({
       isOpen: true,
       title: isActive ? 'غیرفعال کردن دانش‌آموز' : 'فعال کردن دانش‌آموز',
       message: `آیا از تغییر وضعیت حساب «${student.name}» اطمینان دارید؟`,
       variant: isActive ? 'danger' : 'primary',
       onConfirm: async () => {
-        setConfirmState((prev) => ({ ...prev, isOpen: false }));
         try {
           await API.toggleStudentStatus(student.id);
-          fetchStudents(page);
+          setConfirmState((prev) => ({ ...prev, isOpen: false }));
+          await fetchStudents(page);
           showToast('وضعیت دانش‌آموز تغییر یافت', 'success');
         } catch (err) {
           showToast((err as Error).message || 'خطا در تغییر وضعیت دانش‌آموز', 'error');
@@ -224,14 +253,15 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     setConfirmState({
       isOpen: true,
       title: 'ایجاد حساب کاربری',
-      message: `حساب کاربری برای «${student.name}» با رمز پیش‌فرض 1234 ایجاد شود؟`,
+      message: `حساب کاربری برای «${student.name}» ایجاد شود؟`,
       variant: 'primary',
       onConfirm: async () => {
-        setConfirmState((prev) => ({ ...prev, isOpen: false }));
         try {
-          await API.createStudentAccount(student.id);
-          fetchStudents(page);
-          showToast('حساب کاربری ایجاد شد', 'success');
+          const res = await API.createStudentAccount(student.id);
+          setConfirmState((prev) => ({ ...prev, isOpen: false }));
+          await fetchStudents(page);
+          const pwd = res.data?.password ? ` (رمز: ${res.data.password})` : '';
+          showToast(`حساب کاربری ایجاد شد${pwd}`, 'success');
         } catch (err) {
           showToast((err as Error).message || 'خطا در ایجاد حساب کاربری', 'error');
         }
@@ -243,13 +273,14 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     setConfirmState({
       isOpen: true,
       title: 'بازنشانی رمز عبور',
-      message: `رمز عبور «${student.name}» به 1234 بازنشانی شود؟`,
+      message: `رمز عبور حساب «${student.name}» بازنشانی شود؟`,
       variant: 'primary',
       onConfirm: async () => {
-        setConfirmState((prev) => ({ ...prev, isOpen: false }));
         try {
-          await API.resetStudentPassword(student.id);
-          showToast('رمز عبور به 1234 بازنشانی شد', 'success');
+          const res = await API.resetStudentPassword(student.id);
+          setConfirmState((prev) => ({ ...prev, isOpen: false }));
+          const newPwd = res.data?.new_password || '1234';
+          showToast(`رمز عبور به ${newPwd} بازنشانی شد`, 'success');
         } catch (err) {
           showToast((err as Error).message || 'خطا در بازنشانی رمز عبور', 'error');
         }
@@ -264,10 +295,10 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       message: `آیا از حذف دانش‌آموز «${student.name}» و حساب کاربری مرتبط اطمینان دارید؟`,
       variant: 'danger',
       onConfirm: async () => {
-        setConfirmState((prev) => ({ ...prev, isOpen: false }));
         try {
           await API.deleteStudent(student.id);
-          fetchStudents(page);
+          setConfirmState((prev) => ({ ...prev, isOpen: false }));
+          await fetchStudents(page);
           showToast('دانش‌آموز حذف شد', 'success');
         } catch (err) {
           showToast((err as Error).message || 'خطا در حذف دانش‌آموز', 'error');
@@ -280,14 +311,14 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     <div id="page-students" className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-2xl font-bold text-[#445D84]">دانش‌آموزان</h1>
-        <button
+        <ActionButton
           type="button"
-          onClick={() => setIsAddOpen(true)}
-          className="w-full sm:w-auto bg-[#445D84] text-white px-4 py-2.5 rounded-xl hover:bg-[#5a779e] transition-colors flex items-center justify-center gap-2 font-medium text-sm cursor-pointer"
+          onClick={openAddModal}
+          icon={<Plus className="w-4 h-4" aria-hidden="true" />}
+          className="w-full sm:w-auto px-4 py-2.5"
         >
-          <Plus className="w-4 h-4" aria-hidden="true" />
           <span>افزودن دانش‌آموز</span>
-        </button>
+        </ActionButton>
       </div>
 
       {/* Filter Bar */}
@@ -300,7 +331,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') fetchStudents(1);
+              if (e.key === 'Enter') handleFilterClick();
             }}
             placeholder="جستجو نام، موبایل یا کد ملی..."
             className="px-4 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
@@ -352,22 +383,27 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
             <option value="active">فعال</option>
             <option value="inactive">غیرفعال</option>
           </select>
-          <button
+          <ActionButton
             type="button"
-            onClick={() => fetchStudents(1)}
-            className="bg-[#445D84] text-white px-4 py-2.5 rounded-xl hover:bg-[#5a779e] transition-colors flex items-center justify-center gap-2 text-sm font-medium cursor-pointer"
+            loading={filtering}
+            loadingText="جستجو..."
+            onClick={handleFilterClick}
+            icon={<Search className="w-4 h-4" aria-hidden="true" />}
+            className="px-4 py-2.5"
           >
-            <Search className="w-4 h-4" aria-hidden="true" />
             <span>فیلتر</span>
-          </button>
-          <button
+          </ActionButton>
+          <ActionButton
             type="button"
+            variant="secondary"
+            loading={clearing}
+            loadingText="پاکسازی..."
             onClick={handleClearFilters}
-            className="bg-slate-100 text-slate-700 px-4 py-2.5 rounded-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2 text-sm font-medium cursor-pointer"
+            icon={<X className="w-4 h-4" aria-hidden="true" />}
+            className="px-4 py-2.5"
           >
-            <X className="w-4 h-4" aria-hidden="true" />
             <span>پاک کردن</span>
-          </button>
+          </ActionButton>
         </div>
       </div>
 
@@ -387,14 +423,14 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
           <p className="text-sm text-slate-500 max-w-md mx-auto mb-6">
             دانش‌آموزی با این مشخصات در سیستم ثبت نشده است. می‌توانید دانش‌آموز جدیدی اضافه کنید.
           </p>
-          <button
+          <ActionButton
             type="button"
-            onClick={() => setIsAddOpen(true)}
-            className="inline-flex items-center gap-2 bg-[#445D84] text-white px-5 py-2.5 rounded-xl hover:bg-[#5a779e] transition-colors text-sm font-semibold cursor-pointer"
+            onClick={openAddModal}
+            icon={<Plus className="w-4 h-4" aria-hidden="true" />}
+            className="px-5 py-2.5"
           >
-            <Plus className="w-4 h-4" aria-hidden="true" />
             <span>افزودن دانش‌آموز</span>
-          </button>
+          </ActionButton>
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
@@ -412,8 +448,8 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {students.map((s) => {
-                  const isActive = Number(s.is_active) === 1;
-                  const hasAccount = Boolean(s.user_id);
+                  const isActive = Number(s.status ?? s.is_active ?? 1) === 1;
+                  const hasAccount = s.user_id !== undefined ? Boolean(s.user_id) : true;
                   return (
                     <tr key={s.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="px-4 py-3 font-semibold text-slate-800">{s.name}</td>
@@ -440,40 +476,44 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
                       </td>
                       <td className="px-4 py-3 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <button
+                          <ActionButton
                             type="button"
+                            variant="ghost"
                             onClick={() => openEditModal(s)}
-                            className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+                            className="p-2 rounded-lg text-blue-600 hover:bg-blue-50"
                             title="ویرایش"
                             aria-label={`ویرایش دانش‌آموز ${s.name}`}
                           >
                             <Pencil className="w-4 h-4" />
-                          </button>
+                          </ActionButton>
                           {hasAccount ? (
-                            <button
+                            <ActionButton
                               type="button"
+                              variant="ghost"
                               onClick={() => handleResetPassword(s)}
-                              className="p-2 rounded-lg text-amber-600 hover:bg-amber-50 transition-colors cursor-pointer"
+                              className="p-2 rounded-lg text-amber-600 hover:bg-amber-50"
                               title="بازنشانی رمز"
                               aria-label={`بازنشانی رمز دانش‌آموز ${s.name}`}
                             >
                               <KeyRound className="w-4 h-4" />
-                            </button>
+                            </ActionButton>
                           ) : (
-                            <button
+                            <ActionButton
                               type="button"
+                              variant="ghost"
                               onClick={() => handleCreateAccount(s)}
-                              className="p-2 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors cursor-pointer"
+                              className="p-2 rounded-lg text-emerald-600 hover:bg-emerald-50"
                               title="ایجاد حساب"
                               aria-label={`ایجاد حساب ${s.name}`}
                             >
                               <UserPlus className="w-4 h-4" />
-                            </button>
+                            </ActionButton>
                           )}
-                          <button
+                          <ActionButton
                             type="button"
+                            variant="ghost"
                             onClick={() => handleToggleStatus(s)}
-                            className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                            className={`p-2 rounded-lg ${
                               isActive
                                 ? 'text-amber-600 hover:bg-amber-50'
                                 : 'text-emerald-600 hover:bg-emerald-50'
@@ -486,16 +526,17 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
                             ) : (
                               <Plus className="w-4 h-4" />
                             )}
-                          </button>
-                          <button
+                          </ActionButton>
+                          <ActionButton
                             type="button"
+                            variant="ghost"
                             onClick={() => handleDeleteStudent(s)}
-                            className="p-2 rounded-lg text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                            className="p-2 rounded-lg text-red-600 hover:bg-red-50"
                             title="حذف"
                             aria-label={`حذف دانش‌آموز ${s.name}`}
                           >
                             <Trash2 className="w-4 h-4" />
-                          </button>
+                          </ActionButton>
                         </div>
                       </td>
                     </tr>
@@ -512,24 +553,26 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
                 کل {totalRecords} رکورد • صفحه {page} از {totalPages}
               </span>
               <div className="flex items-center gap-1.5">
-                <button
+                <ActionButton
                   type="button"
-                  disabled={page <= 1}
+                  variant="ghost"
+                  disabled={page <= 1 || loading}
                   onClick={() => fetchStudents(page - 1)}
                   aria-label="صفحه قبلی"
-                  className="p-1.5 rounded-lg border border-slate-200 disabled:opacity-40 hover:bg-slate-50 cursor-pointer"
+                  className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50"
                 >
                   <ChevronRight className="w-4 h-4" />
-                </button>
-                <button
+                </ActionButton>
+                <ActionButton
                   type="button"
-                  disabled={page >= totalPages}
+                  variant="ghost"
+                  disabled={page >= totalPages || loading}
                   onClick={() => fetchStudents(page + 1)}
                   aria-label="صفحه بعدی"
-                  className="p-1.5 rounded-lg border border-slate-200 disabled:opacity-40 hover:bg-slate-50 cursor-pointer"
+                  className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50"
                 >
                   <ChevronLeft className="w-4 h-4" />
-                </button>
+                </ActionButton>
               </div>
             </div>
           )}
@@ -539,32 +582,43 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       {/* Add Student Modal */}
       <Modal
         isOpen={isAddOpen}
-        onClose={() => setIsAddOpen(false)}
+        onClose={() => {
+          if (!submitting) {
+            setIsAddOpen(false);
+            setAddErrors({});
+          }
+        }}
         title="افزودن دانش‌آموز"
         subtitle="اطلاعات دانش‌آموز جدید را وارد کنید"
         icon={<UserPlus className="w-5 h-5" />}
         size="sm"
         footer={
           <div className="flex items-center gap-3">
-            <button
+            <ActionButton
               type="submit"
               form="addStudentForm"
-              disabled={submitting}
-              className="flex-1 bg-[#445D84] text-white py-2.5 px-4 rounded-xl font-semibold text-sm hover:bg-[#374a6b] transition-colors cursor-pointer disabled:opacity-50"
+              loading={submitting}
+              loadingText="در حال افزودن..."
+              className="flex-1 py-2.5 px-4"
             >
-              {submitting ? 'در حال افزودن...' : 'ذخیره'}
-            </button>
-            <button
+              ذخیره
+            </ActionButton>
+            <ActionButton
               type="button"
-              onClick={() => setIsAddOpen(false)}
-              className="py-2.5 px-5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-sm hover:bg-slate-200 transition-colors cursor-pointer"
+              variant="secondary"
+              disabled={submitting}
+              onClick={() => {
+                setIsAddOpen(false);
+                setAddErrors({});
+              }}
+              className="py-2.5 px-5"
             >
               انصراف
-            </button>
+            </ActionButton>
           </div>
         }
       >
-        <form id="addStudentForm" onSubmit={handleAddSubmit} className="space-y-4">
+        <form id="addStudentForm" noValidate onSubmit={handleAddSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">
               نام و نام خانوادگی <span className="text-red-500">*</span>
@@ -572,12 +626,16 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
             <input
               type="text"
               name="name"
-              required
               placeholder="نام دانش‌آموز"
+              aria-invalid={Boolean(addErrors.name)}
               value={addForm.name}
-              onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
-              className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+              onChange={(e) => {
+                setAddForm({ ...addForm, name: e.target.value });
+                if (addErrors.name) setAddErrors((prev) => ({ ...prev, name: undefined }));
+              }}
+              className={getFieldClass(Boolean(addErrors.name))}
             />
+            <FieldError message={addErrors.name} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -587,14 +645,18 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
               <input
                 type="tel"
                 name="phone"
-                required
                 maxLength={11}
                 placeholder="09123456789"
                 dir="ltr"
+                aria-invalid={Boolean(addErrors.phone)}
                 value={addForm.phone}
-                onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm text-left focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setAddForm({ ...addForm, phone: e.target.value });
+                  if (addErrors.phone) setAddErrors((prev) => ({ ...prev, phone: undefined }));
+                }}
+                className={getFieldClass(Boolean(addErrors.phone), 'text-left')}
               />
+              <FieldError message={addErrors.phone} />
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">
@@ -603,40 +665,54 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
               <input
                 type="text"
                 name="national_id"
-                required
                 maxLength={10}
                 placeholder="0012345678"
                 dir="ltr"
+                aria-invalid={Boolean(addErrors.national_id)}
                 value={addForm.national_id}
-                onChange={(e) => setAddForm({ ...addForm, national_id: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm text-left focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setAddForm({ ...addForm, national_id: e.target.value });
+                  if (addErrors.national_id)
+                    setAddErrors((prev) => ({ ...prev, national_id: undefined }));
+                }}
+                className={getFieldClass(Boolean(addErrors.national_id), 'text-left')}
               />
+              <FieldError message={addErrors.national_id} />
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">پایه</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                پایه <span className="text-red-500">*</span>
+              </label>
               <input
                 type="number"
                 name="grade"
                 min={7}
                 max={12}
-                required
+                aria-invalid={Boolean(addErrors.grade)}
                 value={addForm.grade}
-                onChange={(e) => setAddForm({ ...addForm, grade: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setAddForm({ ...addForm, grade: e.target.value });
+                  if (addErrors.grade) setAddErrors((prev) => ({ ...prev, grade: undefined }));
+                }}
+                className={getFieldClass(Boolean(addErrors.grade))}
               />
+              <FieldError message={addErrors.grade} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">رشته</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                رشته <span className="text-red-500">*</span>
+              </label>
               <select
                 name="field"
-                required
+                aria-invalid={Boolean(addErrors.field)}
                 value={addForm.field}
-                onChange={(e) =>
-                  setAddForm({ ...addForm, field: e.target.value as AcademicField })
-                }
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setAddForm({ ...addForm, field: e.target.value as AcademicField });
+                  if (addErrors.field) setAddErrors((prev) => ({ ...prev, field: undefined }));
+                }}
+                className={getFieldClass(Boolean(addErrors.field))}
               >
                 <option value="">انتخاب کنید</option>
                 {FIELDS.map((f) => (
@@ -645,6 +721,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
                   </option>
                 ))}
               </select>
+              <FieldError message={addErrors.field} />
             </div>
           </div>
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-600">
@@ -656,7 +733,12 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       {/* Edit Student Modal */}
       <Modal
         isOpen={Boolean(editingStudent)}
-        onClose={() => setEditingStudent(null)}
+        onClose={() => {
+          if (!submitting) {
+            setEditingStudent(null);
+            setEditErrors({});
+          }
+        }}
         title="ویرایش دانش‌آموز"
         subtitle="تغییر اطلاعات پایه و تماس"
         icon={<Pencil className="w-5 h-5" />}
@@ -664,88 +746,122 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
         size="sm"
         footer={
           <div className="flex items-center gap-3">
-            <button
+            <ActionButton
               type="submit"
               form="editStudentForm"
-              disabled={submitting}
-              className="flex-1 bg-[#445D84] text-white py-2.5 px-4 rounded-xl font-semibold text-sm hover:bg-[#374a6b] transition-colors cursor-pointer disabled:opacity-50"
+              loading={submitting}
+              loadingText="در حال ذخیره..."
+              className="flex-1 py-2.5 px-4"
             >
-              {submitting ? 'در حال ذخیره...' : 'ذخیره تغییرات'}
-            </button>
-            <button
+              ذخیره تغییرات
+            </ActionButton>
+            <ActionButton
               type="button"
-              onClick={() => setEditingStudent(null)}
-              className="py-2.5 px-5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-sm hover:bg-slate-200 transition-colors cursor-pointer"
+              variant="secondary"
+              disabled={submitting}
+              onClick={() => {
+                setEditingStudent(null);
+                setEditErrors({});
+              }}
+              className="py-2.5 px-5"
             >
               انصراف
-            </button>
+            </ActionButton>
           </div>
         }
       >
-        <form id="editStudentForm" onSubmit={handleEditSubmit} className="space-y-4">
+        <form id="editStudentForm" noValidate onSubmit={handleEditSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">نام</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              نام و نام خانوادگی <span className="text-red-500">*</span>
+            </label>
             <input
               type="text"
               name="name"
-              required
+              aria-invalid={Boolean(editErrors.name)}
               value={editForm.name}
-              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-              className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+              onChange={(e) => {
+                setEditForm({ ...editForm, name: e.target.value });
+                if (editErrors.name) setEditErrors((prev) => ({ ...prev, name: undefined }));
+              }}
+              className={getFieldClass(Boolean(editErrors.name))}
             />
+            <FieldError message={editErrors.name} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">شماره موبایل</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                شماره موبایل <span className="text-red-500">*</span>
+              </label>
               <input
                 type="tel"
                 name="phone"
-                required
                 maxLength={11}
                 dir="ltr"
+                aria-invalid={Boolean(editErrors.phone)}
                 value={editForm.phone}
-                onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm text-left focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setEditForm({ ...editForm, phone: e.target.value });
+                  if (editErrors.phone) setEditErrors((prev) => ({ ...prev, phone: undefined }));
+                }}
+                className={getFieldClass(Boolean(editErrors.phone), 'text-left')}
               />
+              <FieldError message={editErrors.phone} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">کد ملی</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                کد ملی <span className="text-red-500">*</span>
+              </label>
               <input
                 type="text"
                 name="national_id"
-                required
                 maxLength={10}
                 dir="ltr"
+                aria-invalid={Boolean(editErrors.national_id)}
                 value={editForm.national_id}
-                onChange={(e) => setEditForm({ ...editForm, national_id: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm text-left focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setEditForm({ ...editForm, national_id: e.target.value });
+                  if (editErrors.national_id)
+                    setEditErrors((prev) => ({ ...prev, national_id: undefined }));
+                }}
+                className={getFieldClass(Boolean(editErrors.national_id), 'text-left')}
               />
+              <FieldError message={editErrors.national_id} />
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">پایه</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                پایه <span className="text-red-500">*</span>
+              </label>
               <input
                 type="number"
                 name="grade"
                 min={7}
                 max={12}
-                required
+                aria-invalid={Boolean(editErrors.grade)}
                 value={editForm.grade}
-                onChange={(e) => setEditForm({ ...editForm, grade: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setEditForm({ ...editForm, grade: e.target.value });
+                  if (editErrors.grade) setEditErrors((prev) => ({ ...prev, grade: undefined }));
+                }}
+                className={getFieldClass(Boolean(editErrors.grade))}
               />
+              <FieldError message={editErrors.grade} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">رشته</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                رشته <span className="text-red-500">*</span>
+              </label>
               <select
                 name="field"
-                required
+                aria-invalid={Boolean(editErrors.field)}
                 value={editForm.field}
-                onChange={(e) =>
-                  setEditForm({ ...editForm, field: e.target.value as AcademicField })
-                }
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setEditForm({ ...editForm, field: e.target.value as AcademicField });
+                  if (editErrors.field) setEditErrors((prev) => ({ ...prev, field: undefined }));
+                }}
+                className={getFieldClass(Boolean(editErrors.field))}
               >
                 {FIELDS.map((f) => (
                   <option key={f} value={f}>
@@ -753,6 +869,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
                   </option>
                 ))}
               </select>
+              <FieldError message={editErrors.field} />
             </div>
           </div>
         </form>

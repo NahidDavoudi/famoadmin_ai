@@ -18,6 +18,7 @@ import type {
   ToastType,
 } from '../types';
 import { RadialGauge } from '../components/Charts';
+import { ActionButton } from '../components/FormControls';
 
 interface ExamsPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -85,11 +86,11 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
     }
   };
 
-  const handleGoBack = () => {
+  const handleGoBack = async () => {
     if (view === 'details' && selectedDate) {
-      handleSelectDate(selectedDate);
+      await handleSelectDate(selectedDate);
     } else {
-      loadDates(monthFilter);
+      await loadDates(monthFilter);
     }
   };
 
@@ -110,14 +111,16 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
 
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           {view !== 'dates' && (
-            <button
+            <ActionButton
               type="button"
+              loading={loading}
+              loadingText="در حال بازگشت..."
               onClick={handleGoBack}
-              className="px-4 py-2 bg-[#445D84] text-white rounded-xl hover:bg-[#374a6b] transition-colors flex items-center gap-2 text-sm font-medium cursor-pointer"
+              icon={<ChevronRight className="w-4 h-4" />}
+              className="px-4 py-2"
             >
-              <ChevronRight className="w-4 h-4" />
               <span>{view === 'students' ? 'بازگشت به لیست آزمون‌ها' : 'بازگشت به شرکت‌کنندگان'}</span>
-            </button>
+            </ActionButton>
           )}
           {view === 'dates' && (
             <>
@@ -129,14 +132,15 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                 className="px-3.5 py-2 border-2 border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-[#445D84]"
               />
               {monthFilter && (
-                <button
+                <ActionButton
                   type="button"
+                  variant="secondary"
                   onClick={() => setMonthFilter('')}
-                  className="px-3.5 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-colors flex items-center gap-1.5 text-sm cursor-pointer"
+                  icon={<X className="w-4 h-4" />}
+                  className="px-3.5 py-2"
                 >
-                  <X className="w-4 h-4" />
                   <span>پاک کردن فیلتر</span>
-                </button>
+                </ActionButton>
               )}
             </>
           )}
@@ -159,14 +163,14 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
             <p className="text-sm text-slate-500 mb-6">
               برای ثبت نتایج آزمون جدید از بخش «ثبت نتایج» استفاده کنید.
             </p>
-            <button
+            <ActionButton
               type="button"
               onClick={() => onNavigate('exam_entry')}
-              className="inline-flex items-center gap-2 bg-[#445D84] text-white px-5 py-2.5 rounded-xl hover:bg-[#5a779e] text-sm font-semibold cursor-pointer"
+              icon={<Plus className="w-4 h-4" />}
+              className="px-5 py-2.5"
             >
-              <Plus className="w-4 h-4" />
               <span>ثبت اولین آزمون</span>
-            </button>
+            </ActionButton>
           </div>
         ) : (
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
@@ -210,17 +214,18 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                         </span>
                       </td>
                       <td className="px-5 py-4">
-                        <button
+                        <ActionButton
                           type="button"
+                          variant="ghost"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleSelectDate(exam.exam_date);
+                            return handleSelectDate(exam.exam_date);
                           }}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs cursor-pointer"
+                          icon={<Users className="w-4 h-4" />}
+                          className="px-3 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs"
                         >
-                          <Users className="w-4 h-4" />
                           <span>مشاهده شرکت‌کنندگان</span>
-                        </button>
+                        </ActionButton>
                       </td>
                     </tr>
                   ))}
@@ -260,16 +265,19 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                       </span>
                     </td>
                     <td className="px-5 py-4">
-                      <button
+                      <ActionButton
                         type="button"
+                        variant="ghost"
                         onClick={() =>
-                          selectedDate && handleSelectStudentDetails(selectedDate, s.student_id)
+                          selectedDate
+                            ? handleSelectStudentDetails(selectedDate, s.student_id)
+                            : undefined
                         }
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs cursor-pointer"
+                        icon={<Eye className="w-4 h-4" />}
+                        className="px-3 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs"
                       >
-                        <Eye className="w-4 h-4" />
                         <span>جزئیات کارنامه</span>
-                      </button>
+                      </ActionButton>
                     </td>
                   </tr>
                 ))}

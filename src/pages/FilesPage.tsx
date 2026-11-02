@@ -2,8 +2,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Upload, FileText, Download, Trash2 } from 'lucide-react';
 import API from '../lib/api';
 import { formatGregorianToJalali } from '../lib/jalali';
+import { validateFileUploadForm, type FieldErrors } from '../lib/form-validation';
 import type { ExamFile, Student, ToastType } from '../types';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
 
 interface FilesPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -20,6 +22,7 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
   const [examDate, setExamDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [description, setDescription] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [errors, setErrors] = useState<FieldErrors<'studentId' | 'examDate' | 'file'>>({});
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -43,8 +46,17 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedFile) {
-      showToast('لطفاً یک فایل برای آپلود انتخاب کنید', 'error');
+    if (uploading) return;
+
+    const validationErrors = validateFileUploadForm({
+      studentId,
+      examDate,
+      hasFile: Boolean(selectedFile),
+    });
+    setErrors(validationErrors);
+
+    if (Object.keys(validationErrors).length > 0 || !selectedFile) {
+      showToast('لطفاً فیلدهای الزامی آپلود فایل را تکمیل کنید', 'error');
       return;
     }
 
@@ -52,14 +64,14 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
     try {
       await API.uploadFile({
         file: selectedFile,
-        student_id: studentId ? Number(studentId) : null,
-        exam_date: examDate,
+        student_id: Number(studentId),
         description: description.trim() || selectedFile.name,
       });
       setStudentId('');
       setDescription('');
       setSelectedFile(null);
-      loadData();
+      setErrors({});
+      await loadData();
       showToast('فایل با موفقیت آپلود شد', 'success');
     } catch (err) {
       showToast((err as Error).message || 'خطا در آپلود فایل', 'error');
@@ -73,7 +85,7 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
     try {
       await API.deleteFile(deleteTarget.id);
       setDeleteTarget(null);
-      loadData();
+      await loadData();
       showToast('فایل حذف شد', 'success');
     } catch (err) {
       showToast((err as Error).message || 'خطا در حذف فایل', 'error');
@@ -93,33 +105,46 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
           <span>آپلود فایل آزمون</span>
         </h2>
 
-        <form id="uploadForm" onSubmit={handleUpload} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <form id="uploadForm" noValidate onSubmit={handleUpload} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-start">
             <div>
               <label className="block mb-1.5 text-xs font-medium text-slate-600">
-                دانش‌آموز (اختیاری)
+                دانش‌آموز <span className="text-red-500">*</span>
               </label>
               <select
+                aria-label="انتخاب دانش‌آموز"
+                aria-invalid={Boolean(errors.studentId)}
                 value={studentId}
-                onChange={(e) => setStudentId(e.target.value)}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setStudentId(e.target.value);
+                  if (errors.studentId) setErrors((prev) => ({ ...prev, studentId: undefined }));
+                }}
+                className={getFieldClass(Boolean(errors.studentId))}
               >
-                <option value="">عمومی / همه دانش‌آموزان</option>
+                <option value="">انتخاب دانش‌آموز...</option>
                 {students.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name} - پایه {s.grade} {s.field}
                   </option>
                 ))}
               </select>
+              <FieldError message={errors.studentId} />
             </div>
             <div>
-              <label className="block mb-1.5 text-xs font-medium text-slate-600">تاریخ آزمون</label>
+              <label className="block mb-1.5 text-xs font-medium text-slate-600">
+                تاریخ آزمون <span className="text-red-500">*</span>
+              </label>
               <input
                 type="date"
+                aria-invalid={Boolean(errors.examDate)}
                 value={examDate}
-                onChange={(e) => setExamDate(e.target.value)}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setExamDate(e.target.value);
+                  if (errors.examDate) setErrors((prev) => ({ ...prev, examDate: undefined }));
+                }}
+                className={getFieldClass(Boolean(errors.examDate))}
               />
+              <FieldError message={errors.examDate} />
             </div>
             <div>
               <label className="block mb-1.5 text-xs font-medium text-slate-600">توضیحات</label>
@@ -132,25 +157,37 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
               />
             </div>
             <div>
-              <label className="block mb-1.5 text-xs font-medium text-slate-600">فایل</label>
+              <label className="block mb-1.5 text-xs font-medium text-slate-600">
+                فایل <span className="text-red-500">*</span>
+              </label>
               <input
                 type="file"
                 accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl text-xs bg-white file:ml-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:bg-slate-100 file:text-slate-700 file:font-semibold"
+                aria-invalid={Boolean(errors.file)}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setSelectedFile(file);
+                  if (file && errors.file) setErrors((prev) => ({ ...prev, file: undefined }));
+                }}
+                className={getFieldClass(
+                  Boolean(errors.file),
+                  'px-3 py-2 text-xs file:ml-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:bg-slate-100 file:text-slate-700 file:font-semibold'
+                )}
               />
+              <FieldError message={errors.file} />
             </div>
           </div>
 
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-            <button
+            <ActionButton
               type="submit"
-              disabled={uploading}
-              className="w-full sm:w-auto bg-[#445D84] hover:bg-[#374a6b] text-white px-6 py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              loading={uploading}
+              loadingText="در حال آپلود..."
+              icon={<Upload className="w-4 h-4" />}
+              className="w-full sm:w-auto px-6 py-2.5"
             >
-              <Upload className="w-4 h-4" />
-              <span>{uploading ? 'در حال آپلود...' : 'آپلود فایل'}</span>
-            </button>
+              <span>آپلود فایل</span>
+            </ActionButton>
             <span className="text-slate-400 text-xs">
               فرمت‌های مجاز: PDF, JPG, PNG, DOC | حداکثر حجم: ۱۰ مگابایت
             </span>
@@ -183,58 +220,64 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
                 <tr>
                   <th className="px-5 py-3.5 text-right font-semibold">نام فایل</th>
                   <th className="px-5 py-3.5 text-right font-semibold">دانش‌آموز</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">تاریخ آزمون</th>
                   <th className="px-5 py-3.5 text-right font-semibold">حجم</th>
                   <th className="px-5 py-3.5 text-right font-semibold">تاریخ آپلود</th>
                   <th className="px-5 py-3.5 text-right font-semibold">عملیات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {files.map((f) => (
-                  <tr key={f.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-5 py-4 font-semibold text-slate-800">
-                      <div className="flex items-center gap-2.5">
-                        <FileText className="w-4 h-4 text-red-500 shrink-0" />
-                        <span>{f.description || f.file_path}</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 text-slate-600">
-                      {f.student_name || <span className="text-slate-400">عمومی</span>}
-                    </td>
-                    <td className="px-5 py-4 tabular-nums text-slate-600">
-                      {formatGregorianToJalali(f.exam_date)}
-                    </td>
-                    <td className="px-5 py-4 tabular-nums text-slate-600" dir="ltr">
-                      {f.file_size ? `${Math.round(f.file_size / 1024)} KB` : '-'}
-                    </td>
-                    <td className="px-5 py-4 tabular-nums text-slate-500">
-                      {formatGregorianToJalali(f.created_at)}
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-1">
-                        <a
-                          href={API.getFileDownloadUrl(f.id)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
-                          title="دانلود"
-                          aria-label={`دانلود ${f.description}`}
-                        >
-                          <Download className="w-4 h-4" />
-                        </a>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteTarget(f)}
-                          className="p-2 rounded-lg text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
-                          title="حذف"
-                          aria-label={`حذف ${f.description}`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {files.map((f) => {
+                  const studentObj = students.find((s) => s.id === Number(f.student_id));
+                  const fileSize = f.size ?? f.file_size;
+                  const uploadedDate = f.uploaded_at || f.created_at || f.exam_date;
+                  const fileTitle = f.description || f.original_name || f.file_path || `فایل #${f.id}`;
+
+                  return (
+                    <tr key={f.id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="px-5 py-4 font-semibold text-slate-800">
+                        <div className="flex items-center gap-2.5">
+                          <FileText className="w-4 h-4 text-red-500 shrink-0" />
+                          <span>{fileTitle}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-4 text-slate-600">
+                        {f.student_name || studentObj?.name || (
+                          <span className="text-slate-400">#{f.student_id || 'عمومی'}</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4 tabular-nums text-slate-600" dir="ltr">
+                        {fileSize ? `${Math.round(fileSize / 1024)} KB` : '-'}
+                      </td>
+                      <td className="px-5 py-4 tabular-nums text-slate-500">
+                        {formatGregorianToJalali(uploadedDate)}
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-1">
+                          <a
+                            href={API.getFileDownloadUrl(f)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+                            title="دانلود"
+                            aria-label={`دانلود ${fileTitle}`}
+                          >
+                            <Download className="w-4 h-4" />
+                          </a>
+                          <ActionButton
+                            type="button"
+                            variant="ghost"
+                            onClick={() => setDeleteTarget(f)}
+                            className="p-2 rounded-lg text-red-600 hover:bg-red-50"
+                            title="حذف"
+                            aria-label={`حذف ${fileTitle}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </ActionButton>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

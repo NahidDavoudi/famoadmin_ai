@@ -16,8 +16,13 @@ import {
   jalaliToGregorianIso,
 } from '../lib/jalali';
 import { calculateSubjectMetrics, type SubjectDraft } from '../lib/exam-math';
+import {
+  validateExamEntryForm,
+  type SubjectRowErrors,
+} from '../lib/form-validation';
 import type { Student, SubjectResult, ToastType } from '../types';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
 
 interface ExamEntryPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -46,6 +51,8 @@ export const ExamEntryPage: React.FC<ExamEntryPageProps> = ({ showToast }) => {
   const [jDay, setJDay] = useState<number>(todayDay);
 
   const [rows, setRows] = useState<SubjectDraft[]>(() => [createEmptyRow()]);
+  const [studentError, setStudentError] = useState<string | undefined>(undefined);
+  const [rowErrors, setRowErrors] = useState<Record<string, SubjectRowErrors>>({});
   const [submitting, setSubmitting] = useState(false);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
 
@@ -94,17 +101,44 @@ export const ExamEntryPage: React.FC<ExamEntryPageProps> = ({ showToast }) => {
 
   const removeSubjectRow = (id: string) => {
     setRows((prev) => (prev.length > 1 ? prev.filter((r) => r.id !== id) : [createEmptyRow()]));
+    setRowErrors((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   };
 
   const updateRowField = (id: string, field: keyof SubjectDraft, value: string) => {
     setRows((prev) =>
       prev.map((row) => (row.id === id ? { ...row, [field]: value } : row))
     );
+    if (rowErrors[id]) {
+      setRowErrors((prev) => {
+        const current = prev[id];
+        if (!current) return prev;
+        const nextRowErr = { ...current };
+        if (field === 'subject') delete nextRowErr.subject;
+        if (field === 'total_q' || field === 'correct' || field === 'wrong') {
+          delete nextRowErr.total_q;
+          delete nextRowErr.correct;
+          delete nextRowErr.wrong;
+        }
+        const next = { ...prev };
+        if (Object.keys(nextRowErr).length === 0) {
+          delete next[id];
+        } else {
+          next[id] = nextRowErr;
+        }
+        return next;
+      });
+    }
   };
 
   const resetForm = useCallback(() => {
     setSelectedStudent(null);
     setStudentQuery('');
+    setStudentError(undefined);
+    setRowErrors({});
     const [ty, tm, td] = getTodayJalali();
     setJYear(ty);
     setJMonth(tm);
@@ -122,21 +156,32 @@ export const ExamEntryPage: React.FC<ExamEntryPageProps> = ({ showToast }) => {
         students.find((s) => s.name.trim() === studentQuery.trim()) ||
         null;
 
-      if (!resolvedStudent) {
-        showToast('لطفاً ابتدا دانش‌آموز را از لیست انتخاب کنید', 'error');
+      const validation = validateExamEntryForm({
+        hasStudent: Boolean(resolvedStudent),
+        studentQuery,
+        rows,
+      });
+
+      setStudentError(validation.studentError);
+      setRowErrors(validation.rowErrors);
+
+      if (!validation.isValid || !resolvedStudent) {
+        showToast(
+          validation.studentError || 'لطفاً فیلدهای مشخص شده در نتایج دروس را تکمیل کنید',
+          'error'
+        );
         return;
       }
 
       const validSubjects: SubjectResult[] = [];
       for (const row of rows) {
         if (!row.subject.trim() && !row.total_q) continue;
-        if (!row.subject.trim()) {
-          showToast('نام درس را وارد کنید', 'error');
-          return;
-        }
         const metrics = calculateSubjectMetrics(row.total_q, row.correct || 0, row.wrong || 0);
         if (!metrics.isValid || metrics.skipped === null || metrics.percentage === null) {
-          showToast(`درس «${row.subject}»: مجموع پاسخ‌های صحیح و غلط بیشتر از کل سوالات است`, 'error');
+          showToast(
+            `درس «${row.subject}»: مجموع پاسخ‌های صحیح و غلط بیشتر از کل سوالات است`,
+            'error'
+          );
           return;
         }
         validSubjects.push({
@@ -148,11 +193,6 @@ export const ExamEntryPage: React.FC<ExamEntryPageProps> = ({ showToast }) => {
           skipped: metrics.skipped,
           percentage: metrics.percentage,
         });
-      }
-
-      if (validSubjects.length === 0) {
-        showToast('حداقل یک درس با تعداد سوالات معتبر وارد کنید', 'error');
-        return;
       }
 
       const gregorianDate = jalaliToGregorianIso(jYear, jMonth, jDay);
@@ -213,12 +253,15 @@ export const ExamEntryPage: React.FC<ExamEntryPageProps> = ({ showToast }) => {
               className="block mb-2 font-medium text-slate-700 text-sm flex items-center gap-1.5"
             >
               <School className="w-4 h-4 text-[#445D84]" aria-hidden="true" />
-              <span>دانش‌آموز</span>
+              <span>
+                دانش‌آموز <span className="text-red-500">*</span>
+              </span>
             </label>
             <input
               id="examStudentSelect"
               type="text"
               autoComplete="off"
+              aria-invalid={Boolean(studentError)}
               placeholder="نام دانش‌آموز را تایپ یا انتخاب کنید..."
               value={studentQuery}
               onFocus={() => setShowSuggestions(true)}
@@ -226,9 +269,11 @@ export const ExamEntryPage: React.FC<ExamEntryPageProps> = ({ showToast }) => {
                 setStudentQuery(e.target.value);
                 setSelectedStudent(null);
                 setShowSuggestions(true);
+                if (studentError) setStudentError(undefined);
               }}
-              className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+              className={getFieldClass(Boolean(studentError), 'py-3')}
             />
+            <FieldError message={studentError} />
             {showSuggestions && filteredSuggestions.length > 0 && (
               <ul
                 id="studentSuggestions"
@@ -242,6 +287,7 @@ export const ExamEntryPage: React.FC<ExamEntryPageProps> = ({ showToast }) => {
                         setSelectedStudent(s);
                         setStudentQuery(s.name);
                         setShowSuggestions(false);
+                        setStudentError(undefined);
                       }}
                       className="w-full text-right px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center justify-between cursor-pointer"
                     >
@@ -325,17 +371,18 @@ export const ExamEntryPage: React.FC<ExamEntryPageProps> = ({ showToast }) => {
             </span>
             <h2 className="font-bold text-base">نتایج دروس</h2>
           </div>
-          <button
+          <ActionButton
             type="button"
+            cooldownMs={200}
             onClick={addSubjectRow}
-            className="inline-flex items-center gap-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-semibold px-3.5 py-2 rounded-xl transition-colors cursor-pointer"
+            icon={<Plus className="w-4 h-4" />}
+            className="bg-white/20 hover:bg-white/30 text-white text-xs font-semibold px-3.5 py-2"
           >
-            <Plus className="w-4 h-4" />
             <span>افزودن درس</span>
-          </button>
+          </ActionButton>
         </div>
 
-        <form id="examEntryForm" onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form id="examEntryForm" noValidate onSubmit={handleSubmit} className="p-6 space-y-4">
           <div id="subjectsContainer" className="space-y-4">
             {rows.map((row, idx) => {
               const metrics = calculateSubjectMetrics(
@@ -343,11 +390,16 @@ export const ExamEntryPage: React.FC<ExamEntryPageProps> = ({ showToast }) => {
                 row.correct || 0,
                 row.wrong || 0
               );
+              const rErr = rowErrors[row.id] || {};
 
               return (
                 <div
                   key={row.id}
-                  className="subject-row bg-slate-50/70 rounded-2xl border border-slate-200 p-4 flex items-start gap-3"
+                  className={`subject-row rounded-2xl border p-4 flex items-start gap-3 transition-colors ${
+                    Object.keys(rErr).length > 0
+                      ? 'bg-red-50/20 border-red-300'
+                      : 'bg-slate-50/70 border-slate-200'
+                  }`}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
@@ -363,16 +415,17 @@ export const ExamEntryPage: React.FC<ExamEntryPageProps> = ({ showToast }) => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1">
-                          نام درس *
+                          نام درس <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="text"
-                          required
                           placeholder="مثلاً: زیست‌شناسی"
+                          aria-invalid={Boolean(rErr.subject)}
                           value={row.subject}
                           onChange={(e) => updateRowField(row.id, 'subject', e.target.value)}
-                          className="w-full px-3.5 py-2 border-2 border-slate-200 bg-white rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+                          className={getFieldClass(Boolean(rErr.subject), 'py-2')}
                         />
+                        <FieldError message={rErr.subject} />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-500 mb-1">
@@ -391,45 +444,65 @@ export const ExamEntryPage: React.FC<ExamEntryPageProps> = ({ showToast }) => {
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1 text-center">
-                          کل سوالات
+                          کل سوالات <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="number"
                           min={1}
-                          required
                           placeholder="0"
+                          aria-invalid={Boolean(rErr.total_q)}
                           value={row.total_q}
                           onChange={(e) => updateRowField(row.id, 'total_q', e.target.value)}
-                          className="w-full px-2 py-2 border-2 border-slate-200 bg-white rounded-xl text-center text-sm font-semibold tabular-nums focus:outline-none focus:border-[#445D84]"
+                          className={getFieldClass(
+                            Boolean(rErr.total_q),
+                            'px-2 py-2 text-center font-semibold tabular-nums'
+                          )}
                         />
+                        <FieldError message={rErr.total_q} />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-emerald-700 mb-1 text-center">
-                          صحیح
+                          صحیح <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="number"
                           min={0}
-                          required
                           placeholder="0"
+                          aria-invalid={Boolean(rErr.correct)}
                           value={row.correct}
                           onChange={(e) => updateRowField(row.id, 'correct', e.target.value)}
-                          className="w-full px-2 py-2 border-2 border-emerald-200 bg-emerald-50/40 text-emerald-800 rounded-xl text-center text-sm font-semibold tabular-nums focus:outline-none focus:border-emerald-500"
+                          className={
+                            rErr.correct
+                              ? getFieldClass(
+                                  true,
+                                  'px-2 py-2 text-center font-semibold tabular-nums'
+                                )
+                              : 'w-full px-2 py-2 border-2 border-emerald-200 bg-emerald-50/40 text-emerald-800 rounded-xl text-center text-sm font-semibold tabular-nums focus:outline-none focus:border-emerald-500'
+                          }
                         />
+                        <FieldError message={rErr.correct} />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-red-600 mb-1 text-center">
-                          غلط
+                          غلط <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="number"
                           min={0}
-                          required
                           placeholder="0"
+                          aria-invalid={Boolean(rErr.wrong)}
                           value={row.wrong}
                           onChange={(e) => updateRowField(row.id, 'wrong', e.target.value)}
-                          className="w-full px-2 py-2 border-2 border-red-200 bg-red-50/40 text-red-800 rounded-xl text-center text-sm font-semibold tabular-nums focus:outline-none focus:border-red-500"
+                          className={
+                            rErr.wrong
+                              ? getFieldClass(
+                                  true,
+                                  'px-2 py-2 text-center font-semibold tabular-nums'
+                                )
+                              : 'w-full px-2 py-2 border-2 border-red-200 bg-red-50/40 text-red-800 rounded-xl text-center text-sm font-semibold tabular-nums focus:outline-none focus:border-red-500'
+                          }
                         />
+                        <FieldError message={rErr.wrong} />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-500 mb-1 text-center">
@@ -465,38 +538,43 @@ export const ExamEntryPage: React.FC<ExamEntryPageProps> = ({ showToast }) => {
                     </div>
                   </div>
 
-                  <button
+                  <ActionButton
                     type="button"
+                    variant="ghost"
+                    cooldownMs={200}
                     onClick={() => removeSubjectRow(row.id)}
                     title="حذف ردیف درس"
                     aria-label={`حذف ردیف درس ${idx + 1}`}
-                    className="w-9 h-9 rounded-xl bg-red-50 hover:bg-red-100 text-red-500 hover:text-red-700 flex items-center justify-center shrink-0 mt-6 transition-colors cursor-pointer"
+                    className="w-9 h-9 rounded-xl bg-red-50 hover:bg-red-100 text-red-500 hover:text-red-700 shrink-0 mt-6 p-0"
                   >
                     <Trash2 className="w-4 h-4" />
-                  </button>
+                  </ActionButton>
                 </div>
               );
             })}
           </div>
 
           <div className="pt-2 flex flex-col sm:flex-row gap-3">
-            <button
+            <ActionButton
               type="submit"
-              disabled={submitting}
-              className="flex-1 bg-[#445D84] hover:bg-[#374a6b] text-white px-6 py-3.5 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-3 cursor-pointer"
+              loading={submitting}
+              loadingText="در حال ثبت نتایج..."
+              icon={<Save className="w-5 h-5" />}
+              className="flex-1 px-6 py-3.5 font-bold"
             >
-              <Save className="w-5 h-5" />
-              <span>{submitting ? 'در حال ثبت...' : 'ثبت نتایج آزمون'}</span>
+              <span>ثبت نتایج آزمون</span>
               <kbd className="bg-white/20 px-2 py-0.5 rounded text-xs font-mono">Ctrl+S</kbd>
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton
               type="button"
+              variant="secondary"
+              disabled={submitting}
               onClick={() => setConfirmClearOpen(true)}
-              className="px-6 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              icon={<Trash2 className="w-4 h-4" />}
+              className="px-6 py-3.5"
             >
-              <Trash2 className="w-4 h-4" />
               <span>پاک کردن فرم</span>
-            </button>
+            </ActionButton>
           </div>
         </form>
       </div>

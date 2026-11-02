@@ -10,20 +10,32 @@ import {
   EyeOff,
 } from 'lucide-react';
 import API from '../lib/api';
-import { isValidIranianPhone } from '../lib/exam-math';
+import { validateSupporterForm, type FieldErrors } from '../lib/form-validation';
 import type { AcademicField, Supporter, ToastType } from '../types';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
 
 interface SupportersPageProps {
   showToast: (message: string, type?: ToastType) => void;
 }
 
-const FIELDS: AcademicField[] = ['ریاضی', 'تجربی', 'انسانی', 'راهنمایی'];
+const FIELDS: AcademicField[] = [
+  'ریاضی',
+  'تجربی',
+  'انسانی',
+  'زبان',
+  'هنر',
+  'عمومی',
+  'راهنمایی',
+];
+
+type SupporterFieldKey = 'name' | 'phone' | 'grade' | 'field' | 'username' | 'password';
 
 export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => {
   const [supporters, setSupporters] = useState<Supporter[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingSupporter, setEditingSupporter] = useState<Supporter | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Supporter | null>(null);
@@ -38,6 +50,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
     username: '',
     password: '',
   });
+  const [errors, setErrors] = useState<FieldErrors<SupporterFieldKey>>({});
 
   const loadSupporters = useCallback(async () => {
     setLoading(true);
@@ -59,6 +72,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
   const totalPending = supporters.reduce((sum, s) => sum + Number(s.pending_count || 0), 0);
 
   const openAdd = () => {
+    setErrors({});
     setFormState({
       name: '',
       phone: '',
@@ -73,6 +87,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
   };
 
   const openEdit = (s: Supporter) => {
+    setErrors({});
     setEditingSupporter(s);
     setFormState({
       name: s.name,
@@ -88,16 +103,16 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formState.name.trim() || !formState.field) {
-      showToast('نام و رشته پشتیبان الزامی است', 'error');
+    if (submitting) return;
+
+    const validationErrors = validateSupporterForm(formState, Boolean(editingSupporter));
+    setErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) {
+      showToast('لطفاً خطاهای فرم پشتیبان را برطرف کنید', 'error');
       return;
     }
 
-    if (!editingSupporter && formState.phone && !isValidIranianPhone(formState.phone)) {
-      showToast('شماره موبایل نامعتبر است', 'error');
-      return;
-    }
-
+    setSubmitting(true);
     try {
       if (editingSupporter) {
         await API.updateSupporter(editingSupporter.id, {
@@ -122,9 +137,12 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
         setIsAddOpen(false);
         showToast('پشتیبان جدید اضافه شد', 'success');
       }
-      loadSupporters();
+      setErrors({});
+      await loadSupporters();
     } catch (err) {
       showToast((err as Error).message || 'خطا در ذخیره اطلاعات پشتیبان', 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -133,7 +151,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
     try {
       await API.deleteSupporter(deleteTarget.id);
       setDeleteTarget(null);
-      loadSupporters();
+      await loadSupporters();
       showToast('پشتیبان حذف شد', 'success');
     } catch (err) {
       showToast((err as Error).message || 'خطا در حذف پشتیبان', 'error');
@@ -147,14 +165,14 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
           <Headset className="w-6 h-6" aria-hidden="true" />
           <span>مدیریت پشتیبان‌ها</span>
         </h1>
-        <button
+        <ActionButton
           type="button"
           onClick={openAdd}
-          className="w-full sm:w-auto bg-[#445D84] text-white px-4 py-2.5 rounded-xl hover:bg-[#5a779e] transition-colors flex items-center justify-center gap-2 text-sm font-medium cursor-pointer"
+          icon={<Plus className="w-4 h-4" />}
+          className="w-full sm:w-auto px-4 py-2.5"
         >
-          <Plus className="w-4 h-4" />
           <span>افزودن پشتیبان</span>
-        </button>
+        </ActionButton>
       </div>
 
       {/* Stat Cards */}
@@ -214,14 +232,14 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
           </div>
           <h3 className="text-lg font-bold text-slate-700 mb-2">هیچ پشتیبانی ثبت نشده</h3>
           <p className="text-sm text-slate-500 mb-6">اولین پشتیبان را به سیستم اضافه کنید.</p>
-          <button
+          <ActionButton
             type="button"
             onClick={openAdd}
-            className="inline-flex items-center gap-2 bg-[#445D84] text-white px-5 py-2.5 rounded-xl hover:bg-[#5a779e] text-sm font-semibold cursor-pointer"
+            icon={<Plus className="w-4 h-4" />}
+            className="px-5 py-2.5"
           >
-            <Plus className="w-4 h-4" />
             <span>افزودن پشتیبان</span>
-          </button>
+          </ActionButton>
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
@@ -274,24 +292,26 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-1">
-                        <button
+                        <ActionButton
                           type="button"
+                          variant="ghost"
                           onClick={() => openEdit(s)}
-                          className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+                          className="p-2 rounded-lg text-blue-600 hover:bg-blue-50"
                           title="ویرایش"
                           aria-label={`ویرایش پشتیبان ${s.name}`}
                         >
                           <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
+                        </ActionButton>
+                        <ActionButton
                           type="button"
+                          variant="ghost"
                           onClick={() => setDeleteTarget(s)}
-                          className="p-2 rounded-lg text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                          className="p-2 rounded-lg text-red-600 hover:bg-red-50"
                           title="حذف"
                           aria-label={`حذف پشتیبان ${s.name}`}
                         >
                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        </ActionButton>
                       </div>
                     </td>
                   </tr>
@@ -306,72 +326,96 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       <Modal
         isOpen={isAddOpen || Boolean(editingSupporter)}
         onClose={() => {
-          setIsAddOpen(false);
-          setEditingSupporter(null);
+          if (!submitting) {
+            setIsAddOpen(false);
+            setEditingSupporter(null);
+            setErrors({});
+          }
         }}
         title={editingSupporter ? 'ویرایش پشتیبان' : 'افزودن پشتیبان جدید'}
         subtitle="اطلاعات پشتیبان تحصیلی"
         icon={<Headset className="w-5 h-5" />}
         footer={
           <div className="flex items-center gap-3">
-            <button
+            <ActionButton
               type="submit"
               form="supporterModalForm"
-              className="flex-1 bg-[#445D84] text-white py-2.5 px-4 rounded-xl font-semibold text-sm hover:bg-[#374a6b] transition-colors cursor-pointer"
+              loading={submitting}
+              loadingText="در حال ذخیره..."
+              className="flex-1 py-2.5 px-4"
             >
               {editingSupporter ? 'ذخیره تغییرات' : 'ذخیره'}
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton
               type="button"
+              variant="secondary"
+              disabled={submitting}
               onClick={() => {
                 setIsAddOpen(false);
                 setEditingSupporter(null);
+                setErrors({});
               }}
-              className="py-2.5 px-5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-sm hover:bg-slate-200 transition-colors cursor-pointer"
+              className="py-2.5 px-5"
             >
               انصراف
-            </button>
+            </ActionButton>
           </div>
         }
       >
-        <form id="supporterModalForm" onSubmit={handleSave} className="space-y-4">
+        <form id="supporterModalForm" noValidate onSubmit={handleSave} className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">
-              نام و نام خانوادگی *
+              نام و نام خانوادگی <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
-              required
+              placeholder="مثال: سارا کریمی"
+              aria-invalid={Boolean(errors.name)}
               value={formState.name}
-              onChange={(e) => setFormState({ ...formState, name: e.target.value })}
-              className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+              onChange={(e) => {
+                setFormState({ ...formState, name: e.target.value });
+                if (errors.name) setErrors((prev) => ({ ...prev, name: undefined }));
+              }}
+              className={getFieldClass(Boolean(errors.name))}
             />
+            <FieldError message={errors.name} />
           </div>
 
           {!editingSupporter && (
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">شماره موبایل *</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                شماره موبایل <span className="text-red-500">*</span>
+              </label>
               <input
                 type="tel"
-                required
                 maxLength={11}
                 placeholder="09123456789"
                 dir="ltr"
+                aria-invalid={Boolean(errors.phone)}
                 value={formState.phone}
-                onChange={(e) => setFormState({ ...formState, phone: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm text-left focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setFormState({ ...formState, phone: e.target.value });
+                  if (errors.phone) setErrors((prev) => ({ ...prev, phone: undefined }));
+                }}
+                className={getFieldClass(Boolean(errors.phone), 'text-left')}
               />
+              <FieldError message={errors.phone} />
             </div>
           )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">پایه تحصیلی *</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                پایه تحصیلی <span className="text-red-500">*</span>
+              </label>
               <select
-                required
+                aria-invalid={Boolean(errors.grade)}
                 value={formState.grade}
-                onChange={(e) => setFormState({ ...formState, grade: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setFormState({ ...formState, grade: e.target.value });
+                  if (errors.grade) setErrors((prev) => ({ ...prev, grade: undefined }));
+                }}
+                className={getFieldClass(Boolean(errors.grade))}
               >
                 <option value="7">هفتم</option>
                 <option value="8">هشتم</option>
@@ -380,16 +424,20 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
                 <option value="11">یازدهم</option>
                 <option value="12">دوازدهم</option>
               </select>
+              <FieldError message={errors.grade} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">رشته / درس *</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                رشته / درس <span className="text-red-500">*</span>
+              </label>
               <select
-                required
+                aria-invalid={Boolean(errors.field)}
                 value={formState.field}
-                onChange={(e) =>
-                  setFormState({ ...formState, field: e.target.value as AcademicField })
-                }
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setFormState({ ...formState, field: e.target.value as AcademicField });
+                  if (errors.field) setErrors((prev) => ({ ...prev, field: undefined }));
+                }}
+                className={getFieldClass(Boolean(errors.field))}
               >
                 <option value="">انتخاب کنید</option>
                 {FIELDS.map((f) => (
@@ -398,6 +446,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
                   </option>
                 ))}
               </select>
+              <FieldError message={errors.field} />
             </div>
           </div>
 
@@ -417,31 +466,45 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
 
           {!editingSupporter && (
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">نام کاربری *</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                نام کاربری <span className="text-red-500">*</span>
+              </label>
               <input
                 type="text"
-                required
                 placeholder="برای ورود به پنل"
+                aria-invalid={Boolean(errors.username)}
                 value={formState.username}
-                onChange={(e) => setFormState({ ...formState, username: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setFormState({ ...formState, username: e.target.value });
+                  if (errors.username) setErrors((prev) => ({ ...prev, username: undefined }));
+                }}
+                className={getFieldClass(Boolean(errors.username))}
               />
+              <FieldError message={errors.username} />
             </div>
           )}
 
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">
-              {editingSupporter ? 'رمز عبور جدید (خالی = بدون تغییر)' : 'رمز عبور *'}
+              {editingSupporter ? (
+                'رمز عبور جدید (خالی = بدون تغییر)'
+              ) : (
+                <>
+                  رمز عبور <span className="text-red-500">*</span>
+                </>
+              )}
             </label>
             <div className="relative">
               <input
                 type={showPassword ? 'text' : 'password'}
-                required={!editingSupporter}
-                minLength={4}
                 placeholder="حداقل ۴ کاراکتر"
+                aria-invalid={Boolean(errors.password)}
                 value={formState.password}
-                onChange={(e) => setFormState({ ...formState, password: e.target.value })}
-                className="w-full pl-10 pr-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setFormState({ ...formState, password: e.target.value });
+                  if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
+                }}
+                className={getFieldClass(Boolean(errors.password), 'pl-10 pr-3.5')}
               />
               <button
                 type="button"
@@ -452,6 +515,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
+            <FieldError message={errors.password} />
           </div>
         </form>
       </Modal>

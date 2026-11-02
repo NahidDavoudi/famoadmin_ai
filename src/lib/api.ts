@@ -3,7 +3,6 @@ import type {
   Course,
   Instructor,
   Supporter,
-  ExamRecord,
   ExamDateSummary,
   ExamStudentSummary,
   ExamDetailsResponse,
@@ -166,12 +165,24 @@ class FamoApiClient {
     return json;
   }
 
-  // Auth
-  async getMe(): Promise<{ username: string; role: string } | null> {
+  // Auth (/api/v1/auth/*)
+  async getMe(): Promise<{
+    id: number;
+    username: string;
+    full_name?: string | null;
+    role: string;
+    student_id?: number | null;
+  } | null> {
     this.consumeUrlToken();
     const res = await this.fetch('/auth/me');
     if (!res.ok) return null;
-    const json = (await res.json()) as ApiEnvelope<{ username: string; role: string }>;
+    const json = (await res.json()) as ApiEnvelope<{
+      id: number;
+      username: string;
+      full_name?: string | null;
+      role: string;
+      student_id?: number | null;
+    }>;
     if (!json.success || !json.data) return null;
     return json.data;
   }
@@ -179,8 +190,20 @@ class FamoApiClient {
   async login(
     username: string,
     password: string
-  ): Promise<{ username: string; role: string; token?: string }> {
-    const json = await this.requestJson<{ username: string; role: string; token?: string }>(
+  ): Promise<{
+    token?: string;
+    requires_2fa?: boolean;
+    user_id?: number;
+    email_mask?: string | null;
+    user?: { id: number; username: string; role: string };
+  }> {
+    const json = await this.requestJson<{
+      token?: string;
+      requires_2fa?: boolean;
+      user_id?: number;
+      email_mask?: string | null;
+      user?: { id: number; username: string; role: string };
+    }>(
       '/auth/login',
       {
         method: 'POST',
@@ -203,7 +226,7 @@ class FamoApiClient {
     this.setToken(null);
   }
 
-  // Dashboard
+  // Dashboard (/api/v1/dashboard/stats)
   async getDashboardStats(): Promise<ApiEnvelope<DashboardStats>> {
     return this.requestJson<DashboardStats>(
       '/dashboard/stats',
@@ -212,12 +235,12 @@ class FamoApiClient {
     );
   }
 
-  // Students
+  // Students (/api/v1/students*)
   async getStudents(params: {
     search?: string;
     field?: string;
     grade?: string;
-    status?: '' | 'active' | 'inactive';
+    status?: '' | 'active' | 'inactive' | '1' | '0';
     page?: number;
     perPage?: number;
   }): Promise<ApiEnvelope<Student[]>> {
@@ -228,7 +251,11 @@ class FamoApiClient {
     if (params.search?.trim()) query.set('search', params.search.trim());
     if (params.field) query.set('field', params.field);
     if (params.grade) query.set('grade', params.grade);
-    if (params.status) query.set('status', params.status);
+    if (params.status === 'active' || params.status === '1') {
+      query.set('status', '1');
+    } else if (params.status === 'inactive' || params.status === '0') {
+      query.set('status', '0');
+    }
 
     return this.requestJson<Student[]>(
       `/students?${query.toString()}`,
@@ -261,6 +288,7 @@ class FamoApiClient {
         body: JSON.stringify({
           name: payload.name.trim(),
           phone: payload.phone.trim(),
+          nationalId: payload.nationalId.trim(),
           national_id: payload.nationalId.trim(),
           grade: Number(payload.grade),
           field: payload.field,
@@ -287,6 +315,7 @@ class FamoApiClient {
         body: JSON.stringify({
           name: payload.name.trim(),
           phone: payload.phone.trim(),
+          nationalId: payload.nationalId.trim(),
           national_id: payload.nationalId.trim(),
           grade: Number(payload.grade),
           field: payload.field,
@@ -304,52 +333,80 @@ class FamoApiClient {
     );
   }
 
-  async toggleStudentStatus(id: number): Promise<ApiEnvelope<Student>> {
-    return this.requestJson<Student>(
+  async toggleStudentStatus(id: number): Promise<ApiEnvelope<{ id: number; status: number }>> {
+    return this.requestJson<{ id: number; status: number }>(
       `/students/${id}/toggle-status`,
       { method: 'POST' },
       'خطا در تغییر وضعیت دانش‌آموز'
     );
   }
 
-  async createStudentAccount(id: number): Promise<ApiEnvelope<Student>> {
-    return this.requestJson<Student>(
+  async createStudentAccount(
+    id: number
+  ): Promise<ApiEnvelope<{ username: string; password: string }>> {
+    return this.requestJson<{ username: string; password: string }>(
       `/students/${id}/create-account`,
       { method: 'POST' },
       'خطا در ایجاد حساب کاربری'
     );
   }
 
-  async resetStudentPassword(id: number): Promise<ApiEnvelope<null>> {
-    return this.requestJson<null>(
+  async resetStudentPassword(id: number): Promise<ApiEnvelope<{ new_password: string }>> {
+    return this.requestJson<{ new_password: string }>(
       `/students/${id}/reset-password`,
       { method: 'POST' },
       'خطا در بازنشانی رمز عبور'
     );
   }
 
-  // Courses
+  // Courses (/api/v1/courses*)
   async getCourses(): Promise<ApiEnvelope<Course[]>> {
-    return this.requestJson<Course[]>('/courses', {}, 'خطا در بارگذاری دوره‌ها');
+    return this.requestJson<Course[]>('/courses?per_page=100', {}, 'خطا در بارگذاری دوره‌ها');
   }
 
   async addCourse(payload: Omit<Course, 'id'>): Promise<ApiEnvelope<Course>> {
+    const formData = new FormData();
+    formData.append('name', payload.name);
+    if (payload.icon) formData.append('icon', payload.icon);
+    if (payload.gradient_color_from) formData.append('gradient_color_from', payload.gradient_color_from);
+    if (payload.gradient_color_to) formData.append('gradient_color_to', payload.gradient_color_to);
+    if (payload.description) formData.append('description', payload.description);
+    const numericPrice = Number(String(payload.price).replace(/[^\d]/g, '')) || 0;
+    formData.append('price', String(numericPrice));
+    formData.append('display_order', String(payload.display_order || 0));
+
     return this.requestJson<Course>(
       '/courses',
       {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: formData,
       },
       'خطا در افزودن دوره'
     );
   }
 
   async updateCourse(id: number, payload: Partial<Omit<Course, 'id'>>): Promise<ApiEnvelope<Course>> {
+    const formData = new FormData();
+    if (payload.name !== undefined) formData.append('name', payload.name);
+    if (payload.icon) formData.append('icon', payload.icon);
+    if (payload.gradient_color_from) formData.append('gradient_color_from', payload.gradient_color_from);
+    if (payload.gradient_color_to) formData.append('gradient_color_to', payload.gradient_color_to);
+    if (payload.description !== undefined && payload.description !== null) {
+      formData.append('description', payload.description);
+    }
+    if (payload.price !== undefined) {
+      const numericPrice = Number(String(payload.price).replace(/[^\d]/g, '')) || 0;
+      formData.append('price', String(numericPrice));
+    }
+    if (payload.display_order !== undefined) {
+      formData.append('display_order', String(payload.display_order));
+    }
+
     return this.requestJson<Course>(
       `/courses/${id}`,
       {
         method: 'PUT',
-        body: JSON.stringify(payload),
+        body: formData,
       },
       'خطا در ویرایش دوره'
     );
@@ -359,17 +416,24 @@ class FamoApiClient {
     return this.requestJson<null>(`/courses/${id}`, { method: 'DELETE' }, 'خطا در حذف دوره');
   }
 
-  // Instructors
+  // Instructors (/api/v1/instructors*)
   async getInstructors(): Promise<ApiEnvelope<Instructor[]>> {
-    return this.requestJson<Instructor[]>('/instructors', {}, 'خطا در بارگذاری اساتید');
+    return this.requestJson<Instructor[]>('/instructors?per_page=100', {}, 'خطا در بارگذاری اساتید');
   }
 
   async addInstructor(payload: Omit<Instructor, 'id'>): Promise<ApiEnvelope<Instructor>> {
+    const formData = new FormData();
+    formData.append('name', payload.name);
+    if (payload.title) formData.append('title', payload.title);
+    if (payload.description) formData.append('description', payload.description);
+    if (payload.initial_letter) formData.append('initial_letter', payload.initial_letter);
+    formData.append('display_order', String(payload.display_order || 0));
+
     return this.requestJson<Instructor>(
       '/instructors',
       {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: formData,
       },
       'خطا در افزودن استاد'
     );
@@ -379,11 +443,22 @@ class FamoApiClient {
     id: number,
     payload: Partial<Omit<Instructor, 'id'>>
   ): Promise<ApiEnvelope<Instructor>> {
+    const formData = new FormData();
+    if (payload.name !== undefined) formData.append('name', payload.name);
+    if (payload.title !== undefined && payload.title !== null) formData.append('title', payload.title);
+    if (payload.description !== undefined && payload.description !== null) {
+      formData.append('description', payload.description);
+    }
+    if (payload.initial_letter) formData.append('initial_letter', payload.initial_letter);
+    if (payload.display_order !== undefined) {
+      formData.append('display_order', String(payload.display_order));
+    }
+
     return this.requestJson<Instructor>(
       `/instructors/${id}`,
       {
         method: 'PUT',
-        body: JSON.stringify(payload),
+        body: formData,
       },
       'خطا در ویرایش استاد'
     );
@@ -397,7 +472,7 @@ class FamoApiClient {
     );
   }
 
-  // Supporters
+  // Supporters (/api/v1/supporters*)
   async getSupporters(): Promise<ApiEnvelope<Supporter[]>> {
     return this.requestJson<Supporter[]>(
       '/supporters?per_page=100',
@@ -424,9 +499,9 @@ class FamoApiClient {
           phone: payload.phone.trim(),
           grade: Number(payload.grade),
           field: payload.field,
-          chat_id: payload.chat_id ? payload.chat_id.trim() : null,
-          username: payload.username?.trim(),
-          password: payload.password,
+          chat_id: payload.chat_id ? payload.chat_id.trim() : undefined,
+          username: payload.username?.trim() || undefined,
+          password: payload.password || undefined,
         }),
       },
       'خطا در افزودن پشتیبان'
@@ -447,7 +522,7 @@ class FamoApiClient {
       name: payload.name.trim(),
       grade: Number(payload.grade),
       field: payload.field,
-      chat_id: payload.chat_id ? payload.chat_id.trim() : null,
+      chat_id: payload.chat_id ? payload.chat_id.trim() : undefined,
     };
     if (payload.password) {
       body.password = payload.password;
@@ -470,22 +545,24 @@ class FamoApiClient {
     );
   }
 
-  // Exams
+  // Exams (/api/v1/exams*)
   async getExamDates(monthFilter?: string): Promise<ApiEnvelope<{ dates: ExamDateSummary[] }>> {
-    const query = new URLSearchParams();
+    const query = new URLSearchParams({ per_page: '100' });
     if (monthFilter) query.set('month', monthFilter);
-    const qs = query.toString();
     const res = await this.requestJson<{ dates: ExamDateSummary[] } | ExamDateSummary[]>(
-      `/exams/dates${qs ? `?${qs}` : ''}`,
+      `/exams/dates?${query.toString()}`,
       {},
       'خطا در بارگذاری آزمون‌ها'
     );
-    const dates = Array.isArray(res.data) ? res.data : res.data?.dates || [];
+    let dates = Array.isArray(res.data) ? res.data : res.data?.dates || [];
+    if (monthFilter) {
+      dates = dates.filter((d) => d.exam_date?.startsWith(monthFilter));
+    }
     return { ...res, data: { dates } };
   }
 
   async getExamStudents(examDate: string): Promise<ApiEnvelope<{ students: ExamStudentSummary[] }>> {
-    const query = new URLSearchParams({ date: examDate });
+    const query = new URLSearchParams({ exam_date: examDate, per_page: '100' });
     const res = await this.requestJson<{ students: ExamStudentSummary[] } | ExamStudentSummary[]>(
       `/exams/students?${query.toString()}`,
       {},
@@ -500,7 +577,7 @@ class FamoApiClient {
     studentId: number
   ): Promise<ApiEnvelope<ExamDetailsResponse>> {
     const query = new URLSearchParams({
-      date: examDate,
+      exam_date: examDate,
       student_id: String(studentId),
     });
     return this.requestJson<ExamDetailsResponse>(
@@ -514,8 +591,8 @@ class FamoApiClient {
     student_id: number;
     exam_date: string;
     subjects: SubjectResult[];
-  }): Promise<ApiEnvelope<ExamRecord>> {
-    return this.requestJson<ExamRecord>(
+  }): Promise<ApiEnvelope<{ inserted: number }>> {
+    return this.requestJson<{ inserted: number }>(
       '/exams',
       {
         method: 'POST',
@@ -525,25 +602,19 @@ class FamoApiClient {
     );
   }
 
-  // Files
+  // Files (/api/v1/files*)
   async getFiles(): Promise<ApiEnvelope<ExamFile[]>> {
-    return this.requestJson<ExamFile[]>('/files', {}, 'خطا در بارگذاری فایل‌ها');
+    return this.requestJson<ExamFile[]>('/files?per_page=100', {}, 'خطا در بارگذاری فایل‌ها');
   }
 
   async uploadFile(payload: {
     file: File;
-    student_id: number | null;
-    exam_date: string;
+    student_id: number;
     description: string;
   }): Promise<ApiEnvelope<ExamFile>> {
     const formData = new FormData();
     formData.append('file', payload.file);
-    if (payload.student_id) {
-      formData.append('student_id', String(payload.student_id));
-    }
-    if (payload.exam_date) {
-      formData.append('exam_date', payload.exam_date);
-    }
+    formData.append('student_id', String(payload.student_id));
     if (payload.description.trim()) {
       formData.append('description', payload.description.trim());
     }
@@ -558,15 +629,18 @@ class FamoApiClient {
     );
   }
 
-  getFileDownloadUrl(id: number): string {
-    return `${this.base}/files/${id}/download`;
+  getFileDownloadUrl(file: ExamFile): string {
+    if (file.path && file.path.startsWith('http')) {
+      return file.path;
+    }
+    return `${this.base}/files/${file.id}/download`;
   }
 
   async deleteFile(id: number): Promise<ApiEnvelope<null>> {
     return this.requestJson<null>(`/files/${id}`, { method: 'DELETE' }, 'خطا در حذف فایل');
   }
 
-  // Blog
+  // Blog (/api/v1/blog/posts*)
   async getBlogPosts(): Promise<ApiEnvelope<{ posts: BlogPost[] }>> {
     const res = await this.requestJson<{ posts: BlogPost[] } | BlogPost[]>(
       '/blog/posts?per_page=100',
@@ -583,12 +657,25 @@ class FamoApiClient {
       {},
       'خطا در دریافت اطلاعات پست'
     );
-    const post = 'post' in (res.data || {}) ? (res.data as { post: BlogPost }).post : (res.data as BlogPost);
+    const post =
+      res.data && typeof res.data === 'object' && 'post' in res.data
+        ? (res.data as { post: BlogPost }).post
+        : (res.data as BlogPost);
     return { ...res, data: { post } };
   }
 
   async saveBlogPost(
-    payload: Omit<BlogPost, 'id' | 'views' | 'published_at'>,
+    payload: {
+      title: string;
+      slug: string;
+      category?: string;
+      category_id?: number;
+      cover_image?: string | null;
+      excerpt?: string;
+      content: string;
+      meta_description?: string;
+      published: boolean;
+    },
     id?: number | null
   ): Promise<ApiEnvelope<BlogPost>> {
     const endpoint = id ? `/blog/posts/${id}` : '/blog/posts';
@@ -597,7 +684,10 @@ class FamoApiClient {
       endpoint,
       {
         method,
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          is_published: payload.published ? 1 : 0,
+        }),
       },
       'خطا در ذخیره پست وبلاگ'
     );
@@ -607,7 +697,7 @@ class FamoApiClient {
     return this.requestJson<null>(`/blog/posts/${id}`, { method: 'DELETE' }, 'خطا در حذف پست وبلاگ');
   }
 
-  // Reports
+  // Reports (/api/v1/reports*)
   async getReportsStats(
     dateFrom?: string,
     dateTo?: string

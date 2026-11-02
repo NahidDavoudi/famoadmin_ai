@@ -27,7 +27,10 @@ export default function App() {
 
   const showToast = useCallback((message: string, type: ToastType = 'success') => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    setToasts((prev) => [...prev.slice(-3), { id, message, type }]);
+    setToasts((prev) => {
+      const filtered = prev.filter((t) => t.message !== message);
+      return [...filtered.slice(-2), { id, message, type }];
+    });
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4500);

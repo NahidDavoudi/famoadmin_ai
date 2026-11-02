@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { BookOpen, Plus, Pencil, Trash2 } from 'lucide-react';
 import API from '../lib/api';
+import { validateCourseForm, type FieldErrors } from '../lib/form-validation';
 import type { Course, ToastType } from '../types';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
 
 interface CoursesPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -12,6 +14,7 @@ interface CoursesPageProps {
 export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Course | null>(null);
@@ -24,6 +27,7 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
     price: '',
     display_order: '0',
   });
+  const [errors, setErrors] = useState<FieldErrors<'name' | 'display_order'>>({});
 
   const loadCourses = useCallback(async () => {
     setLoading(true);
@@ -42,6 +46,7 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
   }, [loadCourses]);
 
   const openAdd = () => {
+    setErrors({});
     setFormState({
       name: '',
       gradient_color_from: '#445D84',
@@ -54,24 +59,30 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
   };
 
   const openEdit = (course: Course) => {
+    setErrors({});
     setEditingCourse(course);
     setFormState({
       name: course.name,
       gradient_color_from: course.gradient_color_from || '#445D84',
       gradient_color_to: course.gradient_color_to || '#E2D9C6',
       description: course.description || '',
-      price: course.price || '',
+      price: String(course.price ?? ''),
       display_order: String(course.display_order || 0),
     });
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formState.name.trim()) {
-      showToast('نام دوره الزامی است', 'error');
+    if (submitting) return;
+
+    const validationErrors = validateCourseForm(formState);
+    setErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) {
+      showToast('لطفاً فیلدهای الزامی دوره را تکمیل کنید', 'error');
       return;
     }
 
+    setSubmitting(true);
     try {
       if (editingCourse) {
         await API.updateCourse(editingCourse.id, {
@@ -97,9 +108,12 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
         setIsAddOpen(false);
         showToast('دوره جدید اضافه شد', 'success');
       }
-      loadCourses();
+      setErrors({});
+      await loadCourses();
     } catch (err) {
       showToast((err as Error).message || 'خطا در ذخیره دوره', 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -108,7 +122,7 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
     try {
       await API.deleteCourse(deleteTarget.id);
       setDeleteTarget(null);
-      loadCourses();
+      await loadCourses();
       showToast('دوره حذف شد', 'success');
     } catch (err) {
       showToast((err as Error).message || 'خطا در حذف دوره', 'error');
@@ -122,14 +136,14 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
           <BookOpen className="w-6 h-6" aria-hidden="true" />
           <span>مدیریت دوره‌ها</span>
         </h1>
-        <button
+        <ActionButton
           type="button"
           onClick={openAdd}
-          className="w-full sm:w-auto bg-[#445D84] text-white px-4 py-2.5 rounded-xl hover:bg-[#5a779e] transition-colors flex items-center justify-center gap-2 text-sm font-medium cursor-pointer"
+          icon={<Plus className="w-4 h-4" aria-hidden="true" />}
+          className="w-full sm:w-auto px-4 py-2.5"
         >
-          <Plus className="w-4 h-4" aria-hidden="true" />
           <span>افزودن دوره</span>
-        </button>
+        </ActionButton>
       </div>
 
       {loading ? (
@@ -147,14 +161,14 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
           <p className="text-sm text-slate-500 mb-6">
             هنوز دوره‌ای در سیستم ثبت نشده است. اولین دوره را اضافه کنید.
           </p>
-          <button
+          <ActionButton
             type="button"
             onClick={openAdd}
-            className="inline-flex items-center gap-2 bg-[#445D84] text-white px-5 py-2.5 rounded-xl hover:bg-[#5a779e] text-sm font-semibold cursor-pointer"
+            icon={<Plus className="w-4 h-4" />}
+            className="px-5 py-2.5"
           >
-            <Plus className="w-4 h-4" />
             <span>افزودن دوره</span>
-          </button>
+          </ActionButton>
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
@@ -194,24 +208,26 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-1">
-                        <button
+                        <ActionButton
                           type="button"
+                          variant="ghost"
                           onClick={() => openEdit(c)}
-                          className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+                          className="p-2 rounded-lg text-blue-600 hover:bg-blue-50"
                           title="ویرایش"
                           aria-label={`ویرایش دوره ${c.name}`}
                         >
                           <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
+                        </ActionButton>
+                        <ActionButton
                           type="button"
+                          variant="ghost"
                           onClick={() => setDeleteTarget(c)}
-                          className="p-2 rounded-lg text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                          className="p-2 rounded-lg text-red-600 hover:bg-red-50"
                           title="حذف"
                           aria-label={`حذف دوره ${c.name}`}
                         >
                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        </ActionButton>
                       </div>
                     </td>
                   </tr>
@@ -226,44 +242,59 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
       <Modal
         isOpen={isAddOpen || Boolean(editingCourse)}
         onClose={() => {
-          setIsAddOpen(false);
-          setEditingCourse(null);
+          if (!submitting) {
+            setIsAddOpen(false);
+            setEditingCourse(null);
+            setErrors({});
+          }
         }}
         title={editingCourse ? 'ویرایش دوره' : 'افزودن دوره جدید'}
         subtitle="اطلاعات دوره آموزشی"
         icon={<BookOpen className="w-5 h-5" />}
         footer={
           <div className="flex items-center gap-3">
-            <button
+            <ActionButton
               type="submit"
               form="courseModalForm"
-              className="flex-1 bg-[#445D84] text-white py-2.5 px-4 rounded-xl font-semibold text-sm hover:bg-[#374a6b] transition-colors cursor-pointer"
+              loading={submitting}
+              loadingText="در حال ذخیره..."
+              className="flex-1 py-2.5 px-4"
             >
               {editingCourse ? 'ذخیره تغییرات' : 'ذخیره'}
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton
               type="button"
+              variant="secondary"
+              disabled={submitting}
               onClick={() => {
                 setIsAddOpen(false);
                 setEditingCourse(null);
+                setErrors({});
               }}
-              className="py-2.5 px-5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-sm hover:bg-slate-200 transition-colors cursor-pointer"
+              className="py-2.5 px-5"
             >
               انصراف
-            </button>
+            </ActionButton>
           </div>
         }
       >
-        <form id="courseModalForm" onSubmit={handleSave} className="space-y-4">
+        <form id="courseModalForm" noValidate onSubmit={handleSave} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">نام دوره *</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              نام دوره <span className="text-red-500">*</span>
+            </label>
             <input
               type="text"
-              required
+              placeholder="مثال: دوره جامع کنکور تجربی"
+              aria-invalid={Boolean(errors.name)}
               value={formState.name}
-              onChange={(e) => setFormState({ ...formState, name: e.target.value })}
-              className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+              onChange={(e) => {
+                setFormState({ ...formState, name: e.target.value });
+                if (errors.name) setErrors((prev) => ({ ...prev, name: undefined }));
+              }}
+              className={getFieldClass(Boolean(errors.name))}
             />
+            <FieldError message={errors.name} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -312,10 +343,16 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
               <input
                 type="number"
                 min={0}
+                aria-invalid={Boolean(errors.display_order)}
                 value={formState.display_order}
-                onChange={(e) => setFormState({ ...formState, display_order: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm text-center focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setFormState({ ...formState, display_order: e.target.value });
+                  if (errors.display_order)
+                    setErrors((prev) => ({ ...prev, display_order: undefined }));
+                }}
+                className={getFieldClass(Boolean(errors.display_order), 'text-center')}
               />
+              <FieldError message={errors.display_order} />
             </div>
           </div>
         </form>

@@ -20,8 +20,14 @@ import {
 } from 'lucide-react';
 import API from '../lib/api';
 import { formatGregorianToJalali } from '../lib/jalali';
+import {
+  stripHtmlToText,
+  validateBlogPostForm,
+  type FieldErrors,
+} from '../lib/form-validation';
 import type { BlogPost, ToastType } from '../types';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
 
 interface BlogPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -35,9 +41,12 @@ const CATEGORIES = [
   'داستان موفقیت',
 ];
 
+type BlogFieldKey = 'title' | 'slug' | 'category' | 'content' | 'cover_image';
+
 export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [isEditingView, setIsEditingView] = useState(false);
   const [editingPostId, setEditingPostId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<BlogPost | null>(null);
@@ -52,6 +61,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
     meta_description: '',
     is_published: true,
   });
+  const [errors, setErrors] = useState<FieldErrors<BlogFieldKey>>({});
 
   const editorRef = useRef<HTMLDivElement | null>(null);
 
@@ -72,6 +82,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
   }, [loadPosts]);
 
   const openEditor = async (post?: BlogPost) => {
+    setErrors({});
     if (post) {
       try {
         const res = await API.getBlogPost(post.id);
@@ -79,13 +90,13 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
         setEditingPostId(fullPost.id);
         setFormState({
           title: fullPost.title,
-          slug: fullPost.slug,
-          category: fullPost.category,
+          slug: fullPost.slug || '',
+          category: fullPost.category || '',
           cover_image: fullPost.cover_image || '',
           excerpt: fullPost.excerpt || '',
           content: fullPost.content || '',
           meta_description: fullPost.meta_description || '',
-          is_published: Boolean(fullPost.is_published),
+          is_published: Boolean(fullPost.published ?? fullPost.is_published),
         });
         setIsEditingView(true);
         setTimeout(() => {
@@ -125,43 +136,58 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
     } else {
       document.execCommand(command, false, undefined);
     }
+    const html = editorRef.current?.innerHTML || '';
     setFormState((prev) => ({
       ...prev,
-      content: editorRef.current?.innerHTML || '',
+      content: html,
     }));
+    if (errors.content && stripHtmlToText(html)) {
+      setErrors((prev) => ({ ...prev, content: undefined }));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
+
     const currentHtml = editorRef.current?.innerHTML.trim() || formState.content.trim();
-    if (!formState.title.trim() || !formState.slug.trim() || !formState.category) {
-      showToast('عنوان، اسلاگ و دسته‌بندی الزامی هستند', 'error');
-      return;
-    }
-    if (!currentHtml) {
-      showToast('محتوای پست الزامی است', 'error');
+    const validationErrors = validateBlogPostForm({
+      title: formState.title,
+      slug: formState.slug,
+      category: formState.category,
+      content: currentHtml,
+      cover_image: formState.cover_image,
+    });
+    setErrors(validationErrors);
+
+    if (Object.keys(validationErrors).length > 0) {
+      showToast('لطفاً فیلدهای الزامی مقاله را تکمیل کنید', 'error');
       return;
     }
 
+    setSubmitting(true);
     try {
       await API.saveBlogPost(
         {
           title: formState.title.trim(),
           slug: formState.slug.trim(),
-          category: formState.category,
+          category: formState.category || undefined,
           cover_image: formState.cover_image.trim() || null,
           excerpt: formState.excerpt.trim(),
           content: currentHtml,
           meta_description: formState.meta_description.trim(),
-          is_published: formState.is_published ? 1 : 0,
+          published: formState.is_published,
         },
         editingPostId
       );
       setIsEditingView(false);
-      loadPosts();
+      setErrors({});
+      await loadPosts();
       showToast(editingPostId ? 'پست به‌روزرسانی شد' : 'پست جدید منتشر شد', 'success');
     } catch (err) {
       showToast((err as Error).message || 'خطا در ذخیره پست', 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -170,7 +196,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
     try {
       await API.deleteBlogPost(deleteTarget.id);
       setDeleteTarget(null);
-      loadPosts();
+      await loadPosts();
       showToast('پست وبلاگ حذف شد', 'success');
     } catch (err) {
       showToast((err as Error).message || 'خطا در حذف پست وبلاگ', 'error');
@@ -185,18 +211,24 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
             <Newspaper className="w-6 h-6" aria-hidden="true" />
             <span>{editingPostId ? 'ویرایش پست وبلاگ' : 'افزودن پست جدید'}</span>
           </h1>
-          <button
+          <ActionButton
             type="button"
-            onClick={() => setIsEditingView(false)}
-            className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-colors flex items-center gap-2 text-sm font-medium cursor-pointer"
+            variant="secondary"
+            disabled={submitting}
+            onClick={() => {
+              setIsEditingView(false);
+              setErrors({});
+            }}
+            icon={<ArrowRight className="w-4 h-4" />}
+            className="px-4 py-2.5"
           >
-            <ArrowRight className="w-4 h-4" />
             <span>بازگشت به لیست</span>
-          </button>
+          </ActionButton>
         </div>
 
         <form
           id="blogPostForm"
+          noValidate
           onSubmit={handleSubmit}
           className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-5"
         >
@@ -207,11 +239,16 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
               </label>
               <input
                 type="text"
-                required
+                placeholder="عنوان مقاله آموزشی..."
+                aria-invalid={Boolean(errors.title)}
                 value={formState.title}
-                onChange={(e) => setFormState({ ...formState, title: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setFormState({ ...formState, title: e.target.value });
+                  if (errors.title) setErrors((prev) => ({ ...prev, title: undefined }));
+                }}
+                className={getFieldClass(Boolean(errors.title))}
               />
+              <FieldError message={errors.title} />
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">
@@ -219,13 +256,17 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
               </label>
               <input
                 type="text"
-                required
                 placeholder="my-blog-post"
                 dir="ltr"
+                aria-invalid={Boolean(errors.slug)}
                 value={formState.slug}
-                onChange={(e) => setFormState({ ...formState, slug: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm text-left focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setFormState({ ...formState, slug: e.target.value });
+                  if (errors.slug) setErrors((prev) => ({ ...prev, slug: undefined }));
+                }}
+                className={getFieldClass(Boolean(errors.slug), 'text-left')}
               />
+              <FieldError message={errors.slug} />
             </div>
           </div>
 
@@ -235,10 +276,13 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
                 دسته‌بندی <span className="text-red-500">*</span>
               </label>
               <select
-                required
+                aria-invalid={Boolean(errors.category)}
                 value={formState.category}
-                onChange={(e) => setFormState({ ...formState, category: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setFormState({ ...formState, category: e.target.value });
+                  if (errors.category) setErrors((prev) => ({ ...prev, category: undefined }));
+                }}
+                className={getFieldClass(Boolean(errors.category))}
               >
                 <option value="">انتخاب کنید</option>
                 {CATEGORIES.map((cat) => (
@@ -247,6 +291,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
                   </option>
                 ))}
               </select>
+              <FieldError message={errors.category} />
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">
@@ -256,10 +301,16 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
                 type="url"
                 dir="ltr"
                 placeholder="https://example.com/cover.jpg"
+                aria-invalid={Boolean(errors.cover_image)}
                 value={formState.cover_image}
-                onChange={(e) => setFormState({ ...formState, cover_image: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm text-left focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setFormState({ ...formState, cover_image: e.target.value });
+                  if (errors.cover_image)
+                    setErrors((prev) => ({ ...prev, cover_image: undefined }));
+                }}
+                className={getFieldClass(Boolean(errors.cover_image), 'text-left')}
               />
+              <FieldError message={errors.cover_image} />
             </div>
           </div>
 
@@ -278,7 +329,13 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
             <label className="block text-xs font-medium text-slate-600 mb-1">
               محتوای کامل <span className="text-red-500">*</span>
             </label>
-            <div className="border-2 border-slate-200 rounded-xl overflow-hidden focus-within:border-[#445D84]">
+            <div
+              className={`border-2 rounded-xl overflow-hidden transition-colors ${
+                errors.content
+                  ? 'border-red-500 bg-red-50/30 ring-2 ring-red-500/10 input-error-shake'
+                  : 'border-slate-200 focus-within:border-[#445D84]'
+              }`}
+            >
               <div
                 className="flex flex-wrap items-center gap-1 p-2 bg-slate-50 border-b border-slate-200"
                 role="toolbar"
@@ -374,16 +431,22 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
                 dir="rtl"
                 role="textbox"
                 aria-multiline="true"
+                aria-invalid={Boolean(errors.content)}
                 data-placeholder="متن کامل پست را اینجا بنویسید..."
-                onInput={(e) =>
+                onInput={(e) => {
+                  const html = (e.target as HTMLDivElement).innerHTML;
                   setFormState((prev) => ({
                     ...prev,
-                    content: (e.target as HTMLDivElement).innerHTML,
-                  }))
-                }
-                className="rte-content min-h-[260px] p-4 text-sm leading-relaxed focus:outline-none"
+                    content: html,
+                  }));
+                  if (errors.content && stripHtmlToText(html)) {
+                    setErrors((prev) => ({ ...prev, content: undefined }));
+                  }
+                }}
+                className="rte-content min-h-[260px] p-4 text-sm leading-relaxed focus:outline-none bg-white"
               />
             </div>
+            <FieldError message={errors.content} />
           </div>
 
           <div>
@@ -413,21 +476,28 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
           </div>
 
           <div className="flex items-center gap-3 pt-2">
-            <button
+            <ActionButton
               type="submit"
-              className="bg-[#445D84] hover:bg-[#374a6b] text-white px-6 py-2.5 rounded-xl font-semibold text-sm flex items-center gap-2 transition-colors cursor-pointer"
+              loading={submitting}
+              loadingText="در حال ذخیره پست..."
+              icon={<Save className="w-4 h-4" />}
+              className="px-6 py-2.5"
             >
-              <Save className="w-4 h-4" />
               <span>ذخیره پست</span>
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton
               type="button"
-              onClick={() => setIsEditingView(false)}
-              className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-2.5 rounded-xl font-semibold text-sm flex items-center gap-2 transition-colors cursor-pointer"
+              variant="secondary"
+              disabled={submitting}
+              onClick={() => {
+                setIsEditingView(false);
+                setErrors({});
+              }}
+              icon={<X className="w-4 h-4" />}
+              className="px-5 py-2.5"
             >
-              <X className="w-4 h-4" />
               <span>انصراف</span>
-            </button>
+            </ActionButton>
           </div>
         </form>
       </div>
@@ -441,14 +511,14 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
           <Newspaper className="w-6 h-6" aria-hidden="true" />
           <span>مدیریت وبلاگ</span>
         </h1>
-        <button
+        <ActionButton
           type="button"
           onClick={() => openEditor()}
-          className="w-full sm:w-auto bg-[#445D84] text-white px-4 py-2.5 rounded-xl hover:bg-[#5a779e] transition-colors flex items-center justify-center gap-2 text-sm font-medium cursor-pointer"
+          icon={<Plus className="w-4 h-4" />}
+          className="w-full sm:w-auto px-4 py-2.5"
         >
-          <Plus className="w-4 h-4" />
           <span>افزودن پست</span>
-        </button>
+        </ActionButton>
       </div>
 
       {loading ? (
@@ -464,14 +534,14 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
           </div>
           <h3 className="text-lg font-bold text-slate-700 mb-2">هیچ پست وبلاگی ثبت نشده</h3>
           <p className="text-sm text-slate-500 mb-6">اولین مقاله آموزشی را در وبلاگ منتشر کنید.</p>
-          <button
+          <ActionButton
             type="button"
             onClick={() => openEditor()}
-            className="inline-flex items-center gap-2 bg-[#445D84] text-white px-5 py-2.5 rounded-xl hover:bg-[#5a779e] text-sm font-semibold cursor-pointer"
+            icon={<Plus className="w-4 h-4" />}
+            className="px-5 py-2.5"
           >
-            <Plus className="w-4 h-4" />
             <span>افزودن پست</span>
-          </button>
+          </ActionButton>
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
@@ -510,10 +580,10 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
                     <td className="px-5 py-4">
                       <span
                         className={`text-xs font-semibold ${
-                          p.is_published ? 'text-emerald-700' : 'text-slate-500'
+                          (p.published ?? p.is_published) ? 'text-emerald-700' : 'text-slate-500'
                         }`}
                       >
-                        {p.is_published ? 'منتشر شده' : 'پیش‌نویس'}
+                        {(p.published ?? p.is_published) ? 'منتشر شده' : 'پیش‌نویس'}
                       </span>
                     </td>
                     <td className="px-5 py-4 text-center tabular-nums font-medium text-slate-600">
@@ -524,24 +594,26 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-1">
-                        <button
+                        <ActionButton
                           type="button"
+                          variant="ghost"
                           onClick={() => openEditor(p)}
-                          className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+                          className="p-2 rounded-lg text-blue-600 hover:bg-blue-50"
                           title="ویرایش"
                           aria-label={`ویرایش پست ${p.title}`}
                         >
                           <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
+                        </ActionButton>
+                        <ActionButton
                           type="button"
+                          variant="ghost"
                           onClick={() => setDeleteTarget(p)}
-                          className="p-2 rounded-lg text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                          className="p-2 rounded-lg text-red-600 hover:bg-red-50"
                           title="حذف"
                           aria-label={`حذف پست ${p.title}`}
                         >
                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        </ActionButton>
                       </div>
                     </td>
                   </tr>

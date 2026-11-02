@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   BarChart3,
   Users,
@@ -11,6 +11,7 @@ import {
   Newspaper,
   LineChart,
   LogOut,
+  Loader2,
   Menu,
   Keyboard,
 } from 'lucide-react';
@@ -24,7 +25,7 @@ interface SidebarProps {
   onToggleMobile: () => void;
   onCloseMobile: () => void;
   onOpenShortcuts: () => void;
-  onLogout: () => void;
+  onLogout: () => void | Promise<void>;
 }
 
 const NAV_ITEMS: { id: PageId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -50,7 +51,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenShortcuts,
   onLogout,
 }) => {
+  const [loggingOut, setLoggingOut] = useState(false);
   const activeNavId = currentPage === 'blog-editor' ? 'blog' : currentPage;
+
+  const handleLogoutClick = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await onLogout();
+    } finally {
+      setLoggingOut(false);
+    }
+  };
 
   return (
     <>
@@ -156,11 +168,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             id="logoutBtn"
             type="button"
-            onClick={onLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-red-300 hover:bg-red-500/20 hover:text-white transition-colors cursor-pointer"
+            disabled={loggingOut}
+            aria-busy={loggingOut}
+            onClick={handleLogoutClick}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-red-300 hover:bg-red-500/20 hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <LogOut className="w-5 h-5 shrink-0" aria-hidden="true" />
-            <span>خروج از حساب</span>
+            {loggingOut ? (
+              <Loader2 className="w-5 h-5 shrink-0 animate-spin" aria-hidden="true" />
+            ) : (
+              <LogOut className="w-5 h-5 shrink-0" aria-hidden="true" />
+            )}
+            <span>{loggingOut ? 'در حال خروج...' : 'خروج از حساب'}</span>
           </button>
         </div>
       </aside>

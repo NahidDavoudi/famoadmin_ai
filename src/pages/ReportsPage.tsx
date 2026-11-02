@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { BarChart3, Clock3, Check, Search } from 'lucide-react';
 import API from '../lib/api';
+import { validateReportDateFilter, type FieldErrors } from '../lib/form-validation';
 import type { ReportDayStat, ToastType } from '../types';
 import { DailyReportsAreaChart } from '../components/Charts';
+import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
 
 interface ReportsPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -11,11 +13,13 @@ interface ReportsPageProps {
 export const ReportsPage: React.FC<ReportsPageProps> = ({ showToast }) => {
   const [reports, setReports] = useState<ReportDayStat[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filtering, setFiltering] = useState(false);
   const [dateFrom, setDateFrom] = useState(() => {
     const today = new Date().toISOString().split('T')[0];
     return `${today.slice(0, 8)}01`;
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
+  const [errors, setErrors] = useState<FieldErrors<'dateFrom' | 'dateTo'>>({});
 
   const loadReports = useCallback(async () => {
     setLoading(true);
@@ -33,6 +37,25 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ showToast }) => {
     loadReports();
   }, [loadReports]);
 
+  const handleFilterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (filtering) return;
+
+    const validationErrors = validateReportDateFilter({ dateFrom, dateTo });
+    setErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) {
+      showToast('لطفاً بازه تاریخ را به درستی وارد کنید', 'error');
+      return;
+    }
+
+    setFiltering(true);
+    try {
+      await loadReports();
+    } finally {
+      setFiltering(false);
+    }
+  };
+
   const totalReplied = reports.reduce((sum, r) => sum + Number(r.replied || 0), 0);
   const totalPending = reports.reduce((sum, r) => sum + Number(r.pending || 0), 0);
   const totalAll = totalReplied + totalPending;
@@ -44,35 +67,54 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ showToast }) => {
       </div>
 
       {/* Filter Bar */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs">
-        <div className="flex flex-col sm:flex-row flex-wrap gap-3 items-stretch sm:items-center">
-          <input
-            id="reportDateFrom"
-            type="date"
-            aria-label="از تاریخ"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className="flex-1 min-w-0 px-4 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
-          />
-          <span className="text-slate-500 text-center text-sm">تا</span>
-          <input
-            id="reportDateTo"
-            type="date"
-            aria-label="تا تاریخ"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className="flex-1 min-w-0 px-4 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
-          />
-          <button
-            type="button"
-            onClick={loadReports}
-            className="bg-[#445D84] text-white px-6 py-2.5 rounded-xl hover:bg-[#5a779e] transition-colors font-medium text-sm flex items-center justify-center gap-2 cursor-pointer"
+      <form
+        noValidate
+        onSubmit={handleFilterSubmit}
+        className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs"
+      >
+        <div className="flex flex-col sm:flex-row flex-wrap gap-3 items-stretch sm:items-start">
+          <div className="flex-1 min-w-0">
+            <input
+              id="reportDateFrom"
+              type="date"
+              aria-label="از تاریخ"
+              aria-invalid={Boolean(errors.dateFrom)}
+              value={dateFrom}
+              onChange={(e) => {
+                setDateFrom(e.target.value);
+                if (errors.dateFrom) setErrors((prev) => ({ ...prev, dateFrom: undefined }));
+              }}
+              className={getFieldClass(Boolean(errors.dateFrom))}
+            />
+            <FieldError message={errors.dateFrom} />
+          </div>
+          <span className="text-slate-500 text-center text-sm sm:pt-2.5">تا</span>
+          <div className="flex-1 min-w-0">
+            <input
+              id="reportDateTo"
+              type="date"
+              aria-label="تا تاریخ"
+              aria-invalid={Boolean(errors.dateTo)}
+              value={dateTo}
+              onChange={(e) => {
+                setDateTo(e.target.value);
+                if (errors.dateTo) setErrors((prev) => ({ ...prev, dateTo: undefined }));
+              }}
+              className={getFieldClass(Boolean(errors.dateTo))}
+            />
+            <FieldError message={errors.dateTo} />
+          </div>
+          <ActionButton
+            type="submit"
+            loading={filtering}
+            loadingText="در حال فیلتر..."
+            icon={<Search className="w-4 h-4" />}
+            className="px-6 py-2.5"
           >
-            <Search className="w-4 h-4" />
             <span>فیلتر</span>
-          </button>
+          </ActionButton>
         </div>
-      </div>
+      </form>
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

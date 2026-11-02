@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Modal } from './Modal';
+import { ActionButton } from './FormControls';
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -9,7 +10,8 @@ interface ConfirmModalProps {
   confirmText?: string;
   cancelText?: string;
   variant?: 'danger' | 'primary';
-  onConfirm: () => void;
+  loading?: boolean;
+  onConfirm: () => unknown | Promise<unknown>;
   onCancel: () => void;
 }
 
@@ -20,37 +22,54 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   confirmText = 'تأیید',
   cancelText = 'انصراف',
   variant = 'primary',
+  loading = false,
   onConfirm,
   onCancel,
 }) => {
+  const [submitting, setSubmitting] = useState(false);
+  const isBusy = loading || submitting;
+
+  const handleConfirm = async () => {
+    if (isBusy) return;
+    setSubmitting(true);
+    try {
+      await onConfirm();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onCancel}
+      onClose={() => {
+        if (!isBusy) onCancel();
+      }}
       title={title}
       size="sm"
       icon={<AlertTriangle className="w-5 h-5" />}
       iconColorClass={variant === 'danger' ? 'bg-red-600 text-white' : 'bg-[#445D84] text-white'}
       footer={
         <div className="flex items-center gap-3">
-          <button
+          <ActionButton
             type="button"
-            onClick={onConfirm}
-            className={`flex-1 py-2.5 px-4 rounded-xl font-semibold text-sm text-white transition-colors cursor-pointer ${
-              variant === 'danger'
-                ? 'bg-red-600 hover:bg-red-700'
-                : 'bg-[#445D84] hover:bg-[#374a6b]'
-            }`}
+            variant={variant === 'danger' ? 'danger' : 'primary'}
+            loading={isBusy}
+            loadingText="در حال انجام..."
+            onClick={handleConfirm}
+            className="flex-1 py-2.5 px-4"
           >
             {confirmText}
-          </button>
-          <button
+          </ActionButton>
+          <ActionButton
             type="button"
+            variant="secondary"
+            disabled={isBusy}
             onClick={onCancel}
-            className="flex-1 py-2.5 px-4 rounded-xl font-semibold text-sm bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
+            className="flex-1 py-2.5 px-4"
           >
             {cancelText}
-          </button>
+          </ActionButton>
         </div>
       }
     >

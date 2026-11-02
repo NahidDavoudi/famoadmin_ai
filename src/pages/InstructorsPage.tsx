@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { School, Plus, Pencil, Trash2 } from 'lucide-react';
 import API from '../lib/api';
+import { validateInstructorForm, type FieldErrors } from '../lib/form-validation';
 import type { Instructor, ToastType } from '../types';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
 
 interface InstructorsPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -12,6 +14,7 @@ interface InstructorsPageProps {
 export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) => {
   const [instructors, setInstructors] = useState<Instructor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingInstructor, setEditingInstructor] = useState<Instructor | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Instructor | null>(null);
@@ -23,6 +26,7 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
     initial_letter: '',
     display_order: '0',
   });
+  const [errors, setErrors] = useState<FieldErrors<'name' | 'title' | 'display_order'>>({});
 
   const loadInstructors = useCallback(async () => {
     setLoading(true);
@@ -41,6 +45,7 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
   }, [loadInstructors]);
 
   const openAdd = () => {
+    setErrors({});
     setFormState({
       name: '',
       title: '',
@@ -52,6 +57,7 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
   };
 
   const openEdit = (inst: Instructor) => {
+    setErrors({});
     setEditingInstructor(inst);
     setFormState({
       name: inst.name,
@@ -64,14 +70,19 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formState.name.trim() || !formState.title.trim()) {
-      showToast('نام و عنوان استاد الزامی است', 'error');
+    if (submitting) return;
+
+    const validationErrors = validateInstructorForm(formState);
+    setErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) {
+      showToast('لطفاً فیلدهای الزامی استاد را تکمیل کنید', 'error');
       return;
     }
 
     const initial =
       formState.initial_letter.trim() || formState.name.trim().charAt(0) || 'ا';
 
+    setSubmitting(true);
     try {
       if (editingInstructor) {
         await API.updateInstructor(editingInstructor.id, {
@@ -94,9 +105,12 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
         setIsAddOpen(false);
         showToast('استاد جدید اضافه شد', 'success');
       }
-      loadInstructors();
+      setErrors({});
+      await loadInstructors();
     } catch (err) {
       showToast((err as Error).message || 'خطا در ذخیره اطلاعات استاد', 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -105,7 +119,7 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
     try {
       await API.deleteInstructor(deleteTarget.id);
       setDeleteTarget(null);
-      loadInstructors();
+      await loadInstructors();
       showToast('استاد حذف شد', 'success');
     } catch (err) {
       showToast((err as Error).message || 'خطا در حذف استاد', 'error');
@@ -119,14 +133,14 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
           <School className="w-6 h-6" aria-hidden="true" />
           <span>مدیریت اساتید</span>
         </h1>
-        <button
+        <ActionButton
           type="button"
           onClick={openAdd}
-          className="w-full sm:w-auto bg-[#445D84] text-white px-4 py-2.5 rounded-xl hover:bg-[#5a779e] transition-colors flex items-center justify-center gap-2 text-sm font-medium cursor-pointer"
+          icon={<Plus className="w-4 h-4" aria-hidden="true" />}
+          className="w-full sm:w-auto px-4 py-2.5"
         >
-          <Plus className="w-4 h-4" aria-hidden="true" />
           <span>افزودن استاد</span>
-        </button>
+        </ActionButton>
       </div>
 
       {loading ? (
@@ -144,14 +158,14 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
           <p className="text-sm text-slate-500 mb-6">
             هنوز استادی در سیستم ثبت نشده است. اولین استاد را اضافه کنید.
           </p>
-          <button
+          <ActionButton
             type="button"
             onClick={openAdd}
-            className="inline-flex items-center gap-2 bg-[#445D84] text-white px-5 py-2.5 rounded-xl hover:bg-[#5a779e] text-sm font-semibold cursor-pointer"
+            icon={<Plus className="w-4 h-4" />}
+            className="px-5 py-2.5"
           >
-            <Plus className="w-4 h-4" />
             <span>افزودن استاد</span>
-          </button>
+          </ActionButton>
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
@@ -181,24 +195,26 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-1">
-                        <button
+                        <ActionButton
                           type="button"
+                          variant="ghost"
                           onClick={() => openEdit(i)}
-                          className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+                          className="p-2 rounded-lg text-blue-600 hover:bg-blue-50"
                           title="ویرایش"
                           aria-label={`ویرایش استاد ${i.name}`}
                         >
                           <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
+                        </ActionButton>
+                        <ActionButton
                           type="button"
+                          variant="ghost"
                           onClick={() => setDeleteTarget(i)}
-                          className="p-2 rounded-lg text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                          className="p-2 rounded-lg text-red-600 hover:bg-red-50"
                           title="حذف"
                           aria-label={`حذف استاد ${i.name}`}
                         >
                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        </ActionButton>
                       </div>
                     </td>
                   </tr>
@@ -212,57 +228,76 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
       <Modal
         isOpen={isAddOpen || Boolean(editingInstructor)}
         onClose={() => {
-          setIsAddOpen(false);
-          setEditingInstructor(null);
+          if (!submitting) {
+            setIsAddOpen(false);
+            setEditingInstructor(null);
+            setErrors({});
+          }
         }}
         title={editingInstructor ? 'ویرایش استاد' : 'افزودن استاد جدید'}
         subtitle="اطلاعات مدرس یا مشاور"
         icon={<School className="w-5 h-5" />}
         footer={
           <div className="flex items-center gap-3">
-            <button
+            <ActionButton
               type="submit"
               form="instructorModalForm"
-              className="flex-1 bg-[#445D84] text-white py-2.5 px-4 rounded-xl font-semibold text-sm hover:bg-[#374a6b] transition-colors cursor-pointer"
+              loading={submitting}
+              loadingText="در حال ذخیره..."
+              className="flex-1 py-2.5 px-4"
             >
               {editingInstructor ? 'ذخیره تغییرات' : 'ذخیره'}
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton
               type="button"
+              variant="secondary"
+              disabled={submitting}
               onClick={() => {
                 setIsAddOpen(false);
                 setEditingInstructor(null);
+                setErrors({});
               }}
-              className="py-2.5 px-5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-sm hover:bg-slate-200 transition-colors cursor-pointer"
+              className="py-2.5 px-5"
             >
               انصراف
-            </button>
+            </ActionButton>
           </div>
         }
       >
-        <form id="instructorModalForm" onSubmit={handleSave} className="space-y-4">
+        <form id="instructorModalForm" noValidate onSubmit={handleSave} className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">
-              نام و نام خانوادگی *
+              نام و نام خانوادگی <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
-              required
+              placeholder="مثال: دکتر علی محمدی"
+              aria-invalid={Boolean(errors.name)}
               value={formState.name}
-              onChange={(e) => setFormState({ ...formState, name: e.target.value })}
-              className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+              onChange={(e) => {
+                setFormState({ ...formState, name: e.target.value });
+                if (errors.name) setErrors((prev) => ({ ...prev, name: undefined }));
+              }}
+              className={getFieldClass(Boolean(errors.name))}
             />
+            <FieldError message={errors.name} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">عنوان / سمت *</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              عنوان / سمت <span className="text-red-500">*</span>
+            </label>
             <input
               type="text"
-              required
               placeholder="مشاور تخصصی تحصیلی"
+              aria-invalid={Boolean(errors.title)}
               value={formState.title}
-              onChange={(e) => setFormState({ ...formState, title: e.target.value })}
-              className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+              onChange={(e) => {
+                setFormState({ ...formState, title: e.target.value });
+                if (errors.title) setErrors((prev) => ({ ...prev, title: undefined }));
+              }}
+              className={getFieldClass(Boolean(errors.title))}
             />
+            <FieldError message={errors.title} />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">توضیحات</label>
@@ -290,10 +325,16 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
               <input
                 type="number"
                 min={0}
+                aria-invalid={Boolean(errors.display_order)}
                 value={formState.display_order}
-                onChange={(e) => setFormState({ ...formState, display_order: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm text-center focus:outline-none focus:border-[#445D84]"
+                onChange={(e) => {
+                  setFormState({ ...formState, display_order: e.target.value });
+                  if (errors.display_order)
+                    setErrors((prev) => ({ ...prev, display_order: undefined }));
+                }}
+                className={getFieldClass(Boolean(errors.display_order), 'text-center')}
               />
+              <FieldError message={errors.display_order} />
             </div>
           </div>
         </form>
