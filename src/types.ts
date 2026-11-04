@@ -542,7 +542,7 @@ export interface AppointmentRecord {
   supporter_name?: string | null;
   appointment_date: string;
   start_time: string;
-  end_time: string;
+  end_time?: string | null;
   type?: string | null;
   status: AppointmentStatus;
   description?: string | null;
@@ -555,7 +555,7 @@ export interface UpsertAppointmentRequest {
   student_id: number;
   appointment_date: string;
   start_time: string;
-  end_time: string;
+  end_time?: string | null;
   type?: string | null;
   description?: string | null;
   status?: AppointmentStatus;
@@ -590,12 +590,21 @@ export interface UpdateParentContactRequest {
   is_primary?: boolean;
 }
 
+export type RemedialAttendanceState = 'none' | 'in_class' | 'left_class';
+
+export interface RemedialStudentAttendance {
+  status: RemedialAttendanceState;
+  entered_at?: string;
+  exited_at?: string;
+}
+
 export interface RemedialClassColumn {
   id: number;
   field: AcademicField;
   class_name: string;
   teacher_name?: string;
   attendees: number[]; // student_ids
+  student_states?: Record<number, RemedialStudentAttendance>;
 }
 
 export interface WeeklySessionInfo {

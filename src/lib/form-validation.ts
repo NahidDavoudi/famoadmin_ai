@@ -339,16 +339,14 @@ export function validateReportDateFilter(input: {
 export interface AppointmentFormInput {
   appointment_date: string;
   start_time: string;
-  end_time: string;
 }
 
 export function validateAppointmentForm(
   input: AppointmentFormInput
-): FieldErrors<'appointment_date' | 'start_time' | 'end_time'> {
-  const errors: FieldErrors<'appointment_date' | 'start_time' | 'end_time'> = {};
+): FieldErrors<'appointment_date' | 'start_time'> {
+  const errors: FieldErrors<'appointment_date' | 'start_time'> = {};
   const dateStr = safeTrim(input.appointment_date);
   const startStr = safeTrim(input.start_time).slice(0, 5);
-  const endStr = safeTrim(input.end_time).slice(0, 5);
 
   if (!dateStr) {
     errors.appointment_date = 'انتخاب تاریخ نوبت الزامی است';
@@ -360,14 +358,6 @@ export function validateAppointmentForm(
     errors.start_time = 'وارد کردن ساعت شروع الزامی است';
   } else if (!timeRegex.test(startStr)) {
     errors.start_time = 'فرمت ساعت شروع معتبر نیست (مثال: 10:30)';
-  }
-
-  if (!endStr) {
-    errors.end_time = 'وارد کردن ساعت پایان الزامی است';
-  } else if (!timeRegex.test(endStr)) {
-    errors.end_time = 'فرمت ساعت پایان معتبر نیست (مثال: 11:00)';
-  } else if (startStr && timeRegex.test(startStr) && endStr <= startStr) {
-    errors.end_time = 'ساعت پایان باید بعد از ساعت شروع باشد';
   }
 
   return errors;

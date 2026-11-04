@@ -1153,19 +1153,24 @@ class FamoApiClient {
     const startTime = safeTrim(payload.start_time).slice(0, 5);
     const endTime = safeTrim(payload.end_time).slice(0, 5);
 
+    const body: Record<string, unknown> = {
+      student_id: Number(payload.student_id),
+      appointment_date: safeTrim(payload.appointment_date),
+      start_time: startTime,
+      type: safeTrim(payload.type) || 'weekly_session',
+      description: safeTrim(payload.description) || undefined,
+      status: payload.status || 'scheduled',
+    };
+
+    if (endTime) {
+      body.end_time = endTime;
+    }
+
     return this.requestJson<AppointmentRecord>(
       endpoint,
       {
         method,
-        body: JSON.stringify({
-          student_id: Number(payload.student_id),
-          appointment_date: safeTrim(payload.appointment_date),
-          start_time: startTime,
-          end_time: endTime,
-          type: safeTrim(payload.type) || 'weekly_session',
-          description: safeTrim(payload.description) || undefined,
-          status: payload.status || 'scheduled',
-        }),
+        body: JSON.stringify(body),
       },
       'خطا در ذخیره نوبت'
     );

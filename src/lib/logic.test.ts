@@ -196,23 +196,19 @@ test('Regression: numeric chat_id, phone, and national_id never throw .trim is n
   const invalidAppt = validateAppointmentForm({
     appointment_date: '',
     start_time: '25:99',
-    end_time: '',
   });
   assert.ok(invalidAppt.appointment_date);
   assert.ok(invalidAppt.start_time);
-  assert.ok(invalidAppt.end_time);
 
-  const invertedTimeAppt = validateAppointmentForm({
+  const emptyTimeAppt = validateAppointmentForm({
     appointment_date: '2026-02-22',
-    start_time: '12:00',
-    end_time: '10:30',
+    start_time: '',
   });
-  assert.ok(invertedTimeAppt.end_time);
+  assert.ok(emptyTimeAppt.start_time);
 
   const validAppt = validateAppointmentForm({
     appointment_date: '2026-02-22',
     start_time: '10:30',
-    end_time: '11:30',
   });
   assert.equal(Object.keys(validAppt).length, 0);
 

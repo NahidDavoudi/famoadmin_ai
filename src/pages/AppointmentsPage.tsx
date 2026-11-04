@@ -15,10 +15,10 @@ import {
   Filter,
   Users,
   Phone,
-  Sparkles,
   CheckSquare,
   Square,
   ChevronLeft,
+  ChevronRight,
   BookOpen,
   UserCheck,
   AlertCircle,
@@ -29,6 +29,9 @@ import {
   Layers,
   UserPlus,
   Star,
+  LogIn,
+  LogOut,
+  RotateCcw,
 } from 'lucide-react';
 import type {
   AcademicField,
@@ -41,7 +44,9 @@ import type {
   AppointmentStatus,
   ParentContactRecord,
   ParentRelationship,
+  RemedialAttendanceState,
   RemedialClassColumn,
+  RemedialStudentAttendance,
   WeeklySessionInfo,
   ToastType,
 } from '../types';
@@ -68,467 +73,6 @@ interface AppointmentsPageProps {
   showToast: (message: string, type?: ToastType) => void;
 }
 
-const INITIAL_WEEKS: WeeklySessionInfo[] = [
-  {
-    id: 1,
-    title: 'هفته جاری - جلسه ۱۸ مشاوره و آزمون',
-    week_date: '2025-05-03',
-    start_date_jalali: '1404/02/13',
-    end_date_jalali: '1404/02/19',
-  },
-  {
-    id: 2,
-    title: 'هفته گذشته - جلسه ۱۷ مشاوره و آزمون',
-    week_date: '2025-04-26',
-    start_date_jalali: '1404/02/06',
-    end_date_jalali: '1404/02/12',
-  },
-  {
-    id: 3,
-    title: 'دو هفته پیش - جلسه ۱۶ مشاوره و آزمون',
-    week_date: '2025-04-19',
-    start_date_jalali: '1404/01/30',
-    end_date_jalali: '1404/02/05',
-  },
-];
-
-const INITIAL_PREVIEW_ITEMS: AppointmentSmsPreviewItem[] = [
-  {
-    student_id: 201,
-    student_name: 'آرین محمدی',
-    grade: 12,
-    field: 'تجربی',
-    status: 'already_sent',
-    recipient_type: 'parent',
-    parent_name: 'حسین محمدی (پدر)',
-    mobile_mask: '0912***4567',
-    mobile: '09123454567',
-    has_valid_phone: true,
-    appointment_id: 101,
-    appointment_date: '2025-05-03',
-    appointment_jalali: '1404/02/13',
-    weekday: 'شنبه',
-    day_and_date_fa: 'شنبه 1404/02/13',
-    start_time: '09:30',
-    end_time: '10:30',
-    time_fa: '09:30',
-    appointment_at: '2025-05-03 09:30:00',
-    active_appointments_count: 1,
-    multiple_appointments: false,
-    last_log_status: 'sent',
-    last_appointment_at: '2025-05-03 09:30:00',
-    last_error: null,
-    last_sent_at: '1404/02/11 - 18:20',
-    attempts: 1,
-    supporter_name: 'مهندس رضایی',
-    appointment_status: 'confirmed',
-    arrival_time: '09:20',
-    exam_start_time: '09:35',
-    exam_end_time: '11:00',
-    description: 'بررسی کارنامه آزمون جامع زیست',
-  },
-  {
-    student_id: 202,
-    student_name: 'سارا احمدی',
-    grade: 12,
-    field: 'تجربی',
-    status: 'will_send',
-    recipient_type: 'parent',
-    parent_name: 'مریم احمدی (مادر)',
-    mobile_mask: '0912***8910',
-    mobile: '09128768910',
-    has_valid_phone: true,
-    appointment_id: 102,
-    appointment_date: '2025-05-04',
-    appointment_jalali: '1404/02/14',
-    weekday: 'یکشنبه',
-    day_and_date_fa: 'یکشنبه 1404/02/14',
-    start_time: '11:00',
-    end_time: '12:00',
-    time_fa: '11:00',
-    appointment_at: '2025-05-04 11:00:00',
-    active_appointments_count: 1,
-    multiple_appointments: false,
-    last_log_status: null,
-    last_appointment_at: null,
-    last_error: null,
-    last_sent_at: null,
-    attempts: 0,
-    supporter_name: 'مهندس رضایی',
-    appointment_status: 'scheduled',
-    arrival_time: '10:50',
-    exam_start_time: '11:05',
-    exam_end_time: '12:30',
-    description: 'تحلیل آزمون شیمی و برنامه‌ریزی هفتگی',
-  },
-  {
-    student_id: 203,
-    student_name: 'کیانوش کریمی',
-    grade: 11,
-    field: 'ریاضی',
-    status: 'changed_since_sent',
-    recipient_type: 'parent',
-    parent_name: 'رضا کریمی (پدر)',
-    mobile_mask: '0935***3344',
-    mobile: '09351123344',
-    has_valid_phone: true,
-    appointment_id: 103,
-    appointment_date: '2025-05-05',
-    appointment_jalali: '1404/02/15',
-    weekday: 'دوشنبه',
-    day_and_date_fa: 'دوشنبه 1404/02/15',
-    start_time: '14:30',
-    end_time: '15:30',
-    time_fa: '14:30',
-    appointment_at: '2025-05-05 14:30:00',
-    active_appointments_count: 2,
-    multiple_appointments: true,
-    last_log_status: 'sent',
-    last_appointment_at: '2025-05-05 13:00:00',
-    last_error: null,
-    last_sent_at: '1404/02/10 - 14:10',
-    attempts: 1,
-    supporter_name: 'دکتر علوی',
-    appointment_status: 'confirmed',
-    arrival_time: null,
-    exam_start_time: null,
-    exam_end_time: null,
-    description: 'ساعت جلسه از ۱۳:۰۰ به ۱۴:۳۰ تغییر یافت',
-  },
-  {
-    student_id: 204,
-    student_name: 'نگین صادقی',
-    grade: 12,
-    field: 'انسانی',
-    status: 'failed',
-    recipient_type: 'parent',
-    parent_name: 'محسن صادقی (پدر)',
-    mobile_mask: '0919***7788',
-    mobile: '09194457788',
-    has_valid_phone: true,
-    appointment_id: 104,
-    appointment_date: '2025-05-06',
-    appointment_jalali: '1404/02/16',
-    weekday: 'سه‌شنبه',
-    day_and_date_fa: 'سه‌شنبه 1404/02/16',
-    start_time: '16:00',
-    end_time: '17:00',
-    time_fa: '16:00',
-    appointment_at: '2025-05-06 16:00:00',
-    active_appointments_count: 1,
-    multiple_appointments: false,
-    last_log_status: 'failed',
-    last_appointment_at: '2025-05-06 16:00:00',
-    last_error: 'خطای مخابراتی: خط گیرنده مسدود به پیامک تبلیغاتی است',
-    last_sent_at: '1404/02/11 - 18:22',
-    attempts: 2,
-    supporter_name: 'خانم شریفی',
-    appointment_status: 'pending',
-    arrival_time: null,
-    exam_start_time: null,
-    exam_end_time: null,
-    description: 'جلسه مشاوره جمع‌بندی دروس تخصصی انسانی',
-  },
-  {
-    student_id: 205,
-    student_name: 'امیرحسین مرادی',
-    grade: 10,
-    field: 'ریاضی',
-    status: 'no_phone',
-    recipient_type: 'parent',
-    parent_name: null,
-    mobile_mask: null,
-    mobile: null,
-    has_valid_phone: false,
-    appointment_id: 105,
-    appointment_date: '2025-05-07',
-    appointment_jalali: '1404/02/17',
-    weekday: 'چهارشنبه',
-    day_and_date_fa: 'چهارشنبه 1404/02/17',
-    start_time: '10:00',
-    end_time: '11:00',
-    time_fa: '10:00',
-    appointment_at: '2025-05-07 10:00:00',
-    active_appointments_count: 1,
-    multiple_appointments: false,
-    last_log_status: 'skipped_no_phone',
-    last_appointment_at: null,
-    last_error: 'شماره تماس ولی برای این دانش‌آموز ثبت نشده است',
-    last_sent_at: null,
-    attempts: 0,
-    supporter_name: 'دکتر علوی',
-    appointment_status: 'scheduled',
-    arrival_time: null,
-    exam_start_time: null,
-    exam_end_time: null,
-    description: 'نیاز به ثبت شماره ولی جهت ارسال پیامک یادآوری',
-  },
-  {
-    student_id: 206,
-    student_name: 'هلیا کاظمی',
-    grade: 11,
-    field: 'تجربی',
-    status: 'no_appointment',
-    recipient_type: 'parent',
-    parent_name: 'بهرام کاظمی (پدر)',
-    mobile_mask: '0936***1920',
-    mobile: '09365551920',
-    has_valid_phone: true,
-    appointment_id: null,
-    appointment_date: null,
-    appointment_jalali: null,
-    weekday: null,
-    day_and_date_fa: null,
-    start_time: null,
-    end_time: null,
-    time_fa: null,
-    appointment_at: null,
-    active_appointments_count: 0,
-    multiple_appointments: false,
-    last_log_status: null,
-    last_appointment_at: null,
-    last_error: null,
-    last_sent_at: null,
-    attempts: 0,
-    supporter_name: 'مهندس رضایی',
-    appointment_status: undefined,
-    arrival_time: null,
-    exam_start_time: null,
-    exam_end_time: null,
-    description: null,
-  },
-  {
-    student_id: 207,
-    student_name: 'پارسا نیک‌پی',
-    grade: 12,
-    field: 'ریاضی',
-    status: 'will_send',
-    recipient_type: 'parent',
-    parent_name: 'فرهاد نیک‌پی (پدر)',
-    mobile_mask: '0912***3400',
-    mobile: '09129983400',
-    has_valid_phone: true,
-    appointment_id: 106,
-    appointment_date: '2025-05-08',
-    appointment_jalali: '1404/02/18',
-    weekday: 'پنج‌شنبه',
-    day_and_date_fa: 'پنج‌شنبه 1404/02/18',
-    start_time: '10:00',
-    end_time: '11:30',
-    time_fa: '10:00',
-    appointment_at: '2025-05-08 10:00:00',
-    active_appointments_count: 1,
-    multiple_appointments: false,
-    last_log_status: null,
-    last_appointment_at: null,
-    last_error: null,
-    last_sent_at: null,
-    attempts: 0,
-    supporter_name: 'دکتر علوی',
-    appointment_status: 'confirmed',
-    arrival_time: '09:50',
-    exam_start_time: '10:00',
-    exam_end_time: '11:30',
-    description: 'آزمون جامع حسابان و گسسته',
-  },
-];
-
-const INITIAL_SMS_LOGS: AppointmentSmsLogItem[] = [
-  {
-    id: 501,
-    student_id: 201,
-    student_name: 'آرین محمدی',
-    field: 'تجربی',
-    appointment_id: 101,
-    week_start: '2025-05-03',
-    recipient_type: 'parent',
-    mobile_mask: '0912***4567',
-    mobile: '09123454567',
-    appointment_at: '2025-05-03 09:30:00',
-    appointment_jalali: '1404/02/13 ساعت 09:30',
-    status: 'sent',
-    provider_message_id: 'KVN-9823411',
-    last_error: null,
-    attempts: 1,
-    sent_at: '1404/02/11 - 18:20',
-    sent_by: 1,
-    sent_by_name: 'مدیر سیستم',
-    operation_id: 'op-weekly-14040213-01',
-  },
-  {
-    id: 502,
-    student_id: 204,
-    student_name: 'نگین صادقی',
-    field: 'انسانی',
-    appointment_id: 104,
-    week_start: '2025-05-03',
-    recipient_type: 'parent',
-    mobile_mask: '0919***7788',
-    mobile: '09194457788',
-    appointment_at: '2025-05-06 16:00:00',
-    appointment_jalali: '1404/02/16 ساعت 16:00',
-    status: 'failed',
-    provider_message_id: null,
-    last_error: 'خطای مخابراتی: خط گیرنده مسدود به پیامک تبلیغاتی است',
-    attempts: 2,
-    sent_at: '1404/02/11 - 18:22',
-    sent_by: 1,
-    sent_by_name: 'مدیر سیستم',
-    operation_id: 'op-weekly-14040213-01',
-  },
-  {
-    id: 503,
-    student_id: 203,
-    student_name: 'کیانوش کریمی',
-    field: 'ریاضی',
-    appointment_id: 103,
-    week_start: '2025-05-03',
-    recipient_type: 'parent',
-    mobile_mask: '0935***3344',
-    mobile: '09351123344',
-    appointment_at: '2025-05-05 13:00:00',
-    appointment_jalali: '1404/02/15 ساعت 13:00',
-    status: 'sent',
-    provider_message_id: 'KVN-9821004',
-    last_error: null,
-    attempts: 1,
-    sent_at: '1404/02/10 - 14:10',
-    sent_by: 1,
-    sent_by_name: 'مدیر سیستم',
-    operation_id: 'op-weekly-14040213-00',
-  },
-  {
-    id: 504,
-    student_id: 205,
-    student_name: 'امیرحسین مرادی',
-    field: 'ریاضی',
-    appointment_id: 105,
-    week_start: '2025-05-03',
-    recipient_type: 'parent',
-    mobile_mask: null,
-    mobile: null,
-    appointment_at: '2025-05-07 10:00:00',
-    appointment_jalali: '1404/02/17 ساعت 10:00',
-    status: 'skipped_no_phone',
-    provider_message_id: null,
-    last_error: 'شماره تماس ولی ثبت نشده است',
-    attempts: 1,
-    sent_at: '1404/02/11 - 18:22',
-    sent_by: 1,
-    sent_by_name: 'مدیر سیستم',
-    operation_id: 'op-weekly-14040213-01',
-  },
-];
-
-const INITIAL_PARENT_CONTACTS: Record<number, ParentContactRecord[]> = {
-  201: [
-    {
-      id: 1,
-      student_id: 201,
-      parent_name: 'حسین محمدی',
-      relationship: 'father',
-      phone: '09123454567',
-      is_primary: true,
-    },
-  ],
-  202: [
-    {
-      id: 2,
-      student_id: 202,
-      parent_name: 'مریم احمدی',
-      relationship: 'mother',
-      phone: '09128768910',
-      is_primary: true,
-    },
-  ],
-  203: [
-    {
-      id: 3,
-      student_id: 203,
-      parent_name: 'رضا کریمی',
-      relationship: 'father',
-      phone: '09351123344',
-      is_primary: true,
-    },
-  ],
-  204: [
-    {
-      id: 4,
-      student_id: 204,
-      parent_name: 'محسن صادقی',
-      relationship: 'father',
-      phone: '09194457788',
-      is_primary: true,
-    },
-  ],
-  205: [],
-  206: [
-    {
-      id: 5,
-      student_id: 206,
-      parent_name: 'بهرام کاظمی',
-      relationship: 'father',
-      phone: '09365551920',
-      is_primary: true,
-    },
-  ],
-  207: [
-    {
-      id: 6,
-      student_id: 207,
-      parent_name: 'فرهاد نیک‌پی',
-      relationship: 'father',
-      phone: '09129983400',
-      is_primary: true,
-    },
-  ],
-};
-
-const INITIAL_REMEDIAL_CLASSES: RemedialClassColumn[] = [
-  {
-    id: 1,
-    field: 'تجربی',
-    class_name: 'رفع اشکال زیست‌شناسی (ژنتیک)',
-    teacher_name: 'دکتر فرهمند',
-    attendees: [201, 202],
-  },
-  {
-    id: 2,
-    field: 'تجربی',
-    class_name: 'کارگاه تست شیمی آلی',
-    teacher_name: 'مهندس کاظمی',
-    attendees: [201, 206],
-  },
-  {
-    id: 3,
-    field: 'تجربی',
-    class_name: 'فیزیک الکتریسیته ساکن',
-    teacher_name: 'استاد بهرامی',
-    attendees: [202],
-  },
-  {
-    id: 4,
-    field: 'ریاضی',
-    class_name: 'رفع اشکال حسابان و مثلثات',
-    teacher_name: 'دکتر علوی',
-    attendees: [203, 207],
-  },
-  {
-    id: 5,
-    field: 'ریاضی',
-    class_name: 'هندسه تحلیلی و گسسته',
-    teacher_name: 'مهندس نادری',
-    attendees: [205, 207],
-  },
-  {
-    id: 6,
-    field: 'انسانی',
-    class_name: 'کارگاه عربی و علوم و فنون',
-    teacher_name: 'استاد جلالی',
-    attendees: [204],
-  },
-];
-
 type PreviewChipFilter =
   | 'all'
   | AppointmentSmsPreviewStatus
@@ -543,20 +87,57 @@ const RELATIONSHIP_LABELS: Record<ParentRelationship, string> = {
   other: 'سایر بستگان',
 };
 
-export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast }) => {
-  // Navigation & Week Selection
-  const [activeTab, setActiveTab] = useState<MainTab>('appointments');
-  const [weeks, setWeeks] = useState<WeeklySessionInfo[]>(INITIAL_WEEKS);
-  const [selectedWeekId, setSelectedWeekId] = useState<number>(INITIAL_WEEKS[0].id);
+function addDaysIso(isoDate: string, days: number): string {
+  const parts = isoDate.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return getTodayGregorianIso();
+  const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
 
-  // Data State
-  const [items, setItems] = useState<AppointmentSmsPreviewItem[]>(INITIAL_PREVIEW_ITEMS);
-  const [smsLogs, setSmsLogs] = useState<AppointmentSmsLogItem[]>(INITIAL_SMS_LOGS);
-  const [parentContactsMap, setParentContactsMap] =
-    useState<Record<number, ParentContactRecord[]>>(INITIAL_PARENT_CONTACTS);
-  const [remedialClasses, setRemedialClasses] =
-    useState<RemedialClassColumn[]>(INITIAL_REMEDIAL_CLASSES);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+function getSaturdayOfWeek(isoDate: string): string {
+  const parts = isoDate.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return getTodayGregorianIso();
+  const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+  // JS getUTCDay(): 0 = Sun, 6 = Sat -> offset since Saturday is (day + 1) % 7
+  const diffFromSaturday = (d.getUTCDay() + 1) % 7;
+  d.setUTCDate(d.getUTCDate() - diffFromSaturday);
+  return d.toISOString().slice(0, 10);
+}
+
+function buildWeekSession(weekStartIso: string, id: number, customTitle?: string): WeeklySessionInfo {
+  const satIso = getSaturdayOfWeek(weekStartIso);
+  const friIso = addDaysIso(satIso, 6);
+  const startJalali = formatGregorianToJalali(satIso);
+  const endJalali = formatGregorianToJalali(friIso);
+  return {
+    id,
+    title: customTitle || `هفته ${toPersianDigits(startJalali)} تا ${toPersianDigits(endJalali)}`,
+    week_date: satIso,
+    start_date_jalali: startJalali,
+    end_date_jalali: endJalali,
+  };
+}
+
+export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast }) => {
+  const initialSatIso = useMemo(() => getSaturdayOfWeek(getTodayGregorianIso()), []);
+
+  // Navigation & Week Selection (computed dynamically from current date, zero fake data)
+  const [activeTab, setActiveTab] = useState<MainTab>('appointments');
+  const [weeks, setWeeks] = useState<WeeklySessionInfo[]>(() => [
+    buildWeekSession(initialSatIso, 1, 'هفته جاری'),
+  ]);
+  const [selectedWeekId, setSelectedWeekId] = useState<number>(1);
+
+  // Backend Data State (starts empty, populated strictly from API)
+  const [items, setItems] = useState<AppointmentSmsPreviewItem[]>([]);
+  const [serverSummary, setServerSummary] = useState<AppointmentSmsPreviewSummary | null>(null);
+  const [smsLogs, setSmsLogs] = useState<AppointmentSmsLogItem[]>([]);
+  const [parentContactsMap, setParentContactsMap] = useState<
+    Record<number, ParentContactRecord[]>
+  >({});
+  const [remedialClasses, setRemedialClasses] = useState<RemedialClassColumn[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorState, setErrorState] = useState<string | null>(null);
 
   // Filters & Search
@@ -589,12 +170,11 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
   });
   const [isSendingSms, setIsSendingSms] = useState<boolean>(false);
 
-  // Edit / Create Appointment Modal State
+  // Edit / Create Appointment Modal State (no end_time)
   const [editingItem, setEditingItem] = useState<AppointmentSmsPreviewItem | null>(null);
   const [appointmentForm, setAppointmentForm] = useState({
     appointment_date: '',
     start_time: '',
-    end_time: '',
     arrival_time: '',
     exam_start_time: '',
     exam_end_time: '',
@@ -602,7 +182,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     description: '',
   });
   const [appointmentErrors, setAppointmentErrors] = useState<
-    FieldErrors<'appointment_date' | 'start_time' | 'end_time'>
+    FieldErrors<'appointment_date' | 'start_time'>
   >({});
   const [isSavingAppointment, setIsSavingAppointment] = useState<boolean>(false);
 
@@ -612,6 +192,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
   // Parent Contacts Modal State (/api/v1/students/{studentId}/parent-contacts)
   const [contactModalStudent, setContactModalStudent] =
     useState<AppointmentSmsPreviewItem | null>(null);
+  const [isLoadingContacts, setIsLoadingContacts] = useState<boolean>(false);
   const [contactForm, setContactForm] = useState<{
     parent_name: string;
     relationship: ParentRelationship;
@@ -630,8 +211,9 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
   const [isNewWeekModalOpen, setIsNewWeekModalOpen] = useState<boolean>(false);
   const [newWeekForm, setNewWeekForm] = useState({
     title: '',
-    start_date_jalali: '1404/02/20',
-    end_date_jalali: '1404/02/26',
+    week_date: initialSatIso,
+    start_date_jalali: formatGregorianToJalali(initialSatIso),
+    end_date_jalali: formatGregorianToJalali(addDaysIso(initialSatIso, 6)),
   });
   const [newWeekErrors, setNewWeekErrors] = useState<
     FieldErrors<'title' | 'start_date_jalali' | 'end_date_jalali'>
@@ -639,6 +221,9 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
 
   // Remedial Matrix State
   const [remedialFieldTab, setRemedialFieldTab] = useState<AcademicField>('تجربی');
+  const [remedialStatusFilter, setRemedialStatusFilter] = useState<
+    'all' | RemedialAttendanceState
+  >('all');
   const [isAddClassModalOpen, setIsAddClassModalOpen] = useState<boolean>(false);
   const [newClassForm, setNewClassForm] = useState({
     class_name: '',
@@ -651,38 +236,109 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     [weeks, selectedWeekId]
   );
 
-  // Fetch preview & logs from API with graceful fallback
-  const fetchWeekData = useCallback(async (weekDate: string, showRefreshToast = false) => {
-    setIsLoading(true);
-    setErrorState(null);
-    try {
-      const [previewRes, logRes] = await Promise.allSettled([
-        API.getAppointmentsSmsPreview(weekDate),
-        API.getAppointmentsSmsLog({ week_date: weekDate, per_page: 50 }),
-      ]);
+  // Fetch preview & logs strictly from backend API
+  const fetchWeekData = useCallback(
+    async (weekDate: string, showRefreshToast = false) => {
+      setIsLoading(true);
+      setErrorState(null);
+      try {
+        const [previewRes, logRes] = await Promise.allSettled([
+          API.getAppointmentsSmsPreview(weekDate),
+          API.getAppointmentsSmsLog({ week_date: weekDate, per_page: 50 }),
+        ]);
 
-      if (previewRes.status === 'fulfilled' && previewRes.value.data?.items?.length) {
-        setItems(previewRes.value.data.items);
+        if (previewRes.status === 'fulfilled') {
+          const data = previewRes.value.data;
+          setItems(data?.items || []);
+          setServerSummary(data?.summary || null);
+
+          if (data?.week_start) {
+            const startJalali =
+              data.week_start_jalali || formatGregorianToJalali(data.week_start);
+            const endJalali =
+              data.week_end_jalali ||
+              formatGregorianToJalali(data.week_end || addDaysIso(data.week_start, 6));
+            setWeeks((prev) =>
+              prev.map((w) =>
+                w.week_date === weekDate
+                  ? {
+                      ...w,
+                      start_date_jalali: startJalali,
+                      end_date_jalali: endJalali,
+                    }
+                  : w
+              )
+            );
+          }
+        } else {
+          setItems([]);
+          setServerSummary(null);
+          const errMsg =
+            (previewRes.reason as Error)?.message ||
+            'خطا در دریافت لیست نوبت‌های هفتگی از سرور';
+          setErrorState(errMsg);
+          showToast(errMsg, 'error');
+        }
+
+        if (logRes.status === 'fulfilled') {
+          setSmsLogs(logRes.value.data?.items || []);
+        } else {
+          setSmsLogs([]);
+        }
+
+        if (showRefreshToast && previewRes.status === 'fulfilled') {
+          showToast('اطلاعات نوبت‌ها و وضعیت پیامک‌ها از سرور بروزرسانی شد', 'info');
+        }
+      } catch (err) {
+        const errMsg =
+          (err as Error)?.message || 'خطا در برقراری ارتباط با سرور';
+        setItems([]);
+        setServerSummary(null);
+        setSmsLogs([]);
+        setErrorState(errMsg);
+        showToast(errMsg, 'error');
+      } finally {
+        setIsLoading(false);
       }
-      if (logRes.status === 'fulfilled' && logRes.value.data?.items?.length) {
-        setSmsLogs(logRes.value.data.items);
-      }
-      if (showRefreshToast) {
-        showToast('لیست نوبت‌ها و وضعیت پیامک‌های هفته بروزرسانی شد', 'info');
-      }
-    } catch {
-      // Keep local normalized state if remote endpoint is unreachable in preview
-    } finally {
-      setIsLoading(false);
-    }
-  }, [showToast]);
+    },
+    [showToast]
+  );
 
   useEffect(() => {
     fetchWeekData(currentWeek.week_date, false);
   }, [currentWeek.week_date, fetchWeekData]);
 
+  // Navigate to previous / next week dynamically
+  const handleShiftWeek = (deltaDays: number) => {
+    const targetSat = getSaturdayOfWeek(addDaysIso(currentWeek.week_date, deltaDays));
+    const existing = weeks.find((w) => w.week_date === targetSat);
+    if (existing) {
+      setSelectedWeekId(existing.id);
+      return;
+    }
+    const newId = Date.now();
+    const created = buildWeekSession(targetSat, newId);
+    setWeeks((prev) => [created, ...prev]);
+    setSelectedWeekId(newId);
+  };
+
   // Summary counts matching AppointmentSmsPreviewSummary
   const summary: AppointmentSmsPreviewSummary & { total: number } = useMemo(() => {
+    if (serverSummary && items.length === 0) {
+      const totalVal = serverSummary.total ?? serverSummary.total_students ?? 0;
+      return {
+        total: totalVal,
+        total_students: totalVal,
+        will_send: serverSummary.will_send ?? 0,
+        already_sent: serverSummary.already_sent ?? 0,
+        changed_since_sent: serverSummary.changed_since_sent ?? 0,
+        failed: serverSummary.failed ?? 0,
+        no_phone: serverSummary.no_phone ?? 0,
+        no_appointment: serverSummary.no_appointment ?? 0,
+        multiple_appointments: serverSummary.multiple_appointments ?? 0,
+      };
+    }
+
     const total = items.length;
     const will_send = items.filter((i) => i.status === 'will_send').length;
     const already_sent = items.filter((i) => i.status === 'already_sent').length;
@@ -703,7 +359,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
       no_appointment,
       multiple_appointments,
     };
-  }, [items]);
+  }, [items, serverSummary]);
 
   // Filtered Table Items
   const filteredItems = useMemo(() => {
@@ -772,16 +428,14 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
       const d = new Date(item.appointment_date);
       const dayIdx = (d.getDay() + 1) % 7;
       const dayName = JALALI_WEEKDAYS[dayIdx] || '';
-      return `${dayName} ${jalali}`;
+      return `${dayName} ${toPersianDigits(jalali)}`;
     }
     return '—';
   };
 
-  const formatTimeRange = (item: AppointmentSmsPreviewItem) => {
+  const formatAppointmentStartTime = (item: AppointmentSmsPreviewItem) => {
     const start = (item.time_fa || item.start_time || '').slice(0, 5);
-    const end = (item.end_time || '').slice(0, 5);
     if (!start) return '—';
-    if (end) return `${toPersianDigits(start)} تا ${toPersianDigits(end)}`;
     return toPersianDigits(start);
   };
 
@@ -843,89 +497,35 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     const operationId = `op-${currentWeek.week_date.replace(/-/g, '')}-${Date.now()}`;
 
     try {
-      await API.sendAppointmentsSms({
+      const res = await API.sendAppointmentsSms({
         week_date: currentWeek.week_date,
         mode,
         student_ids: subsetIds,
         operation_id: operationId,
       });
-    } catch {
-      // Fall back to optimistic state update if preview backend is offline
-    }
 
-    const nowJalali = `${formatGregorianToJalali(getTodayGregorianIso())} - ${toPersianDigits(
-      new Date().toTimeString().slice(0, 5)
-    )}`;
+      const sentCount = res.data?.summary?.sent ?? 0;
+      const failedCount = res.data?.summary?.failed ?? 0;
+      setSelectedStudentIds([]);
+      setSmsConfirmModal((prev) => ({ ...prev, isOpen: false }));
+      await fetchWeekData(currentWeek.week_date, false);
 
-    const targetedIds = new Set<number>();
-    items.forEach((item) => {
-      if (useSelectedOnly) {
-        if (
-          selectedStudentIds.includes(item.student_id) &&
-          item.appointment_id !== null &&
-          item.status !== 'no_phone'
-        ) {
-          targetedIds.add(item.student_id);
-        }
-      } else if (mode === 'unsent' && item.status === 'will_send') {
-        targetedIds.add(item.student_id);
-      } else if (mode === 'failed' && item.status === 'failed') {
-        targetedIds.add(item.student_id);
-      } else if (mode === 'changed' && item.status === 'changed_since_sent') {
-        targetedIds.add(item.student_id);
+      if (failedCount > 0 && sentCount === 0) {
+        showToast(
+          `ارسال پیامک برای ${toPersianDigits(failedCount)} نفر با خطا مواجه شد`,
+          'error'
+        );
+      } else {
+        showToast(
+          `پیامک یادآوری نوبت برای ${toPersianDigits(sentCount)} ولی ارسال شد`,
+          'success'
+        );
       }
-    });
-
-    const newLogs: AppointmentSmsLogItem[] = [];
-    setItems((prev) =>
-      prev.map((item) => {
-        if (!targetedIds.has(item.student_id)) return item;
-        const apptAt =
-          item.appointment_at ||
-          `${item.appointment_date || currentWeek.week_date} ${item.start_time || '10:00'}:00`;
-        newLogs.push({
-          id: Date.now() + item.student_id,
-          student_id: item.student_id,
-          student_name: item.student_name,
-          field: item.field,
-          appointment_id: item.appointment_id,
-          week_start: currentWeek.week_date,
-          recipient_type: 'parent',
-          mobile_mask: item.mobile_mask || item.mobile,
-          mobile: item.mobile || item.mobile_mask,
-          appointment_at: apptAt,
-          appointment_jalali: `${formatAppointmentDisplayDate(item)} ساعت ${
-            item.start_time || '10:00'
-          }`,
-          status: 'sent',
-          provider_message_id: `KVN-${Math.floor(1000000 + Math.random() * 9000000)}`,
-          last_error: null,
-          attempts: (item.attempts || 0) + 1,
-          sent_at: nowJalali,
-          sent_by: 1,
-          sent_by_name: 'مدیر سیستم',
-          operation_id: operationId,
-        });
-        return {
-          ...item,
-          status: 'already_sent' as AppointmentSmsPreviewStatus,
-          last_log_status: 'sent' as AppointmentSmsLogStatus,
-          last_appointment_at: apptAt,
-          last_sent_at: nowJalali,
-          last_error: null,
-          attempts: (item.attempts || 0) + 1,
-        };
-      })
-    );
-
-    setSmsLogs((prev) => [...newLogs, ...prev]);
-    setSelectedStudentIds([]);
-    setIsSendingSms(false);
-    setSmsConfirmModal((prev) => ({ ...prev, isOpen: false }));
-    showToast(
-      `پیامک یادآوری نوبت با موفقیت برای ${toPersianDigits(newLogs.length)} ولی ارسال شد`,
-      'success'
-    );
+    } catch (err) {
+      showToast((err as Error)?.message || 'خطا در ارسال پیامک نوبت‌ها', 'error');
+    } finally {
+      setIsSendingSms(false);
+    }
   };
 
   // Single row SMS send
@@ -955,68 +555,20 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         student_ids: [item.student_id],
         operation_id: operationId,
       });
-    } catch {
-      // Fallback to local state update
+      await fetchWeekData(currentWeek.week_date, false);
+      showToast(`پیامک نوبت برای ولی «${item.student_name}» ارسال شد`, 'success');
+    } catch (err) {
+      showToast((err as Error)?.message || 'خطا در ارسال پیامک به ولی دانش‌آموز', 'error');
     }
-
-    const nowJalali = `${formatGregorianToJalali(getTodayGregorianIso())} - ${toPersianDigits(
-      new Date().toTimeString().slice(0, 5)
-    )}`;
-    const apptAt = `${item.appointment_date} ${item.start_time}:00`;
-
-    setItems((prev) =>
-      prev.map((row) =>
-        row.student_id === item.student_id
-          ? {
-              ...row,
-              status: 'already_sent',
-              last_log_status: 'sent',
-              last_appointment_at: apptAt,
-              last_sent_at: nowJalali,
-              last_error: null,
-              attempts: (row.attempts || 0) + 1,
-            }
-          : row
-      )
-    );
-
-    setSmsLogs((prev) => [
-      {
-        id: Date.now(),
-        student_id: item.student_id,
-        student_name: item.student_name,
-        field: item.field,
-        appointment_id: item.appointment_id,
-        week_start: currentWeek.week_date,
-        recipient_type: 'parent',
-        mobile_mask: item.mobile_mask || item.mobile,
-        mobile: item.mobile || item.mobile_mask,
-        appointment_at: apptAt,
-        appointment_jalali: `${formatAppointmentDisplayDate(item)} ساعت ${item.start_time}`,
-        status: 'sent',
-        provider_message_id: `KVN-${Math.floor(1000000 + Math.random() * 9000000)}`,
-        last_error: null,
-        attempts: (item.attempts || 0) + 1,
-        sent_at: nowJalali,
-        sent_by: 1,
-        sent_by_name: 'مدیر سیستم',
-        operation_id: operationId,
-      },
-      ...prev,
-    ]);
-
-    showToast(`پیامک نوبت برای ولی «${item.student_name}» ارسال شد`, 'success');
   };
 
-  // Edit / Create Appointment Modal
+  // Edit / Create Appointment Modal (no end_time)
   const openEditAppointment = (item: AppointmentSmsPreviewItem) => {
     setEditingItem(item);
     const defaultStart = (item.start_time || '10:00').slice(0, 5);
-    const defaultEnd = (item.end_time || '11:00').slice(0, 5);
     setAppointmentForm({
       appointment_date: item.appointment_date || currentWeek.week_date,
       start_time: defaultStart,
-      end_time: defaultEnd,
       arrival_time: item.arrival_time || '',
       exam_start_time: item.exam_start_time || '',
       exam_end_time: item.exam_end_time || '',
@@ -1033,7 +585,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     const errors = validateAppointmentForm({
       appointment_date: appointmentForm.appointment_date,
       start_time: appointmentForm.start_time,
-      end_time: appointmentForm.end_time,
     });
     setAppointmentErrors(errors);
     if (hasErrors(errors)) return;
@@ -1044,63 +595,19 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         id: editingItem.appointment_id,
         student_id: editingItem.student_id,
         appointment_date: appointmentForm.appointment_date,
-        start_time: appointmentForm.start_time,
-        end_time: appointmentForm.end_time,
+        start_time: appointmentForm.start_time.trim().slice(0, 5),
         status: appointmentForm.appointment_status,
-        description: appointmentForm.description,
+        description: appointmentForm.description.trim() || null,
       });
-    } catch {
-      // Fallback to local state update
+
+      setEditingItem(null);
+      await fetchWeekData(currentWeek.week_date, false);
+      showToast(`نوبت «${editingItem.student_name}» با موفقیت در سرور ذخیره شد`, 'success');
+    } catch (err) {
+      showToast((err as Error)?.message || 'خطا در ذخیره نوبت در سرور', 'error');
+    } finally {
+      setIsSavingAppointment(false);
     }
-
-    const startTrimmed = appointmentForm.start_time.trim().slice(0, 5);
-    const endTrimmed = appointmentForm.end_time.trim().slice(0, 5);
-    const newApptAt = `${appointmentForm.appointment_date} ${startTrimmed}:00`;
-    const jalaliDate = formatGregorianToJalali(appointmentForm.appointment_date);
-    const dObj = new Date(appointmentForm.appointment_date);
-    const weekdayName = JALALI_WEEKDAYS[(dObj.getDay() + 1) % 7] || 'شنبه';
-
-    setItems((prev) =>
-      prev.map((row) => {
-        if (row.student_id !== editingItem.student_id) return row;
-
-        const hasPhone = Boolean(row.mobile || row.mobile_mask);
-        const prevSentSnap = row.last_appointment_at || row.last_sent_appointment_at;
-
-        let nextStatus: AppointmentSmsPreviewStatus = 'will_send';
-        if (!hasPhone) {
-          nextStatus = 'no_phone';
-        } else if (row.last_log_status === 'sent' && prevSentSnap) {
-          nextStatus = prevSentSnap !== newApptAt ? 'changed_since_sent' : 'already_sent';
-        } else if (row.last_log_status === 'failed') {
-          nextStatus = 'failed';
-        }
-
-        return {
-          ...row,
-          appointment_id: row.appointment_id || Date.now(),
-          appointment_date: appointmentForm.appointment_date,
-          appointment_jalali: jalaliDate,
-          weekday: weekdayName,
-          day_and_date_fa: `${weekdayName} ${jalaliDate}`,
-          start_time: startTrimmed,
-          end_time: endTrimmed,
-          time_fa: startTrimmed,
-          appointment_at: newApptAt,
-          active_appointments_count: Math.max(1, row.active_appointments_count || 1),
-          status: nextStatus,
-          appointment_status: appointmentForm.appointment_status,
-          arrival_time: appointmentForm.arrival_time.trim() || null,
-          exam_start_time: appointmentForm.exam_start_time.trim() || null,
-          exam_end_time: appointmentForm.exam_end_time.trim() || null,
-          description: appointmentForm.description.trim() || null,
-        };
-      })
-    );
-
-    setIsSavingAppointment(false);
-    setEditingItem(null);
-    showToast(`نوبت «${editingItem.student_name}» با موفقیت ذخیره شد`, 'success');
   };
 
   // Change Appointment Status (PUT /api/v1/appointments/{id}/status)
@@ -1111,59 +618,28 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     if (!item.appointment_id) return;
     try {
       await API.updateAppointmentStatus(item.appointment_id, newStatus);
-    } catch {
-      // Fallback to local state update
+      await fetchWeekData(currentWeek.week_date, false);
+      showToast(`وضعیت نوبت «${item.student_name}» بروزرسانی شد`, 'info');
+    } catch (err) {
+      showToast((err as Error)?.message || 'خطا در تغییر وضعیت نوبت', 'error');
     }
-    setItems((prev) =>
-      prev.map((row) =>
-        row.student_id === item.student_id
-          ? {
-              ...row,
-              appointment_status: newStatus,
-            }
-          : row
-      )
-    );
-    showToast(`وضعیت حضور «${item.student_name}» بروزرسانی شد`, 'info');
   };
 
   // Cancel / Delete Appointment (DELETE /api/v1/appointments/{id})
   const handleConfirmCancelAppointment = async () => {
-    if (!cancelingItem) return;
-    if (cancelingItem.appointment_id) {
-      try {
-        await API.deleteAppointment(cancelingItem.appointment_id);
-      } catch {
-        // Fallback to local state update
-      }
+    if (!cancelingItem || !cancelingItem.appointment_id) {
+      setCancelingItem(null);
+      return;
     }
-    setItems((prev) =>
-      prev.map((row) =>
-        row.student_id === cancelingItem.student_id
-          ? {
-              ...row,
-              appointment_id: null,
-              appointment_date: null,
-              appointment_jalali: null,
-              weekday: null,
-              day_and_date_fa: null,
-              start_time: null,
-              end_time: null,
-              time_fa: null,
-              appointment_at: null,
-              active_appointments_count: 0,
-              multiple_appointments: false,
-              status: 'no_appointment',
-              appointment_status: 'cancelled',
-              arrival_time: null,
-              exam_start_time: null,
-              exam_end_time: null,
-            }
-          : row
-      )
-    );
-    showToast(`نوبت «${cancelingItem.student_name}» لغو شد`, 'info');
-    setCancelingItem(null);
+    try {
+      await API.deleteAppointment(cancelingItem.appointment_id);
+      const studentName = cancelingItem.student_name;
+      setCancelingItem(null);
+      await fetchWeekData(currentWeek.week_date, false);
+      showToast(`نوبت «${studentName}» لغو و حذف شد`, 'info');
+    } catch (err) {
+      showToast((err as Error)?.message || 'خطا در لغو نوبت', 'error');
+    }
   };
 
   // Parent Contacts Modal (/api/v1/students/{studentId}/parent-contacts)
@@ -1176,17 +652,18 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
       is_primary: true,
     });
     setContactErrors({});
+    setIsLoadingContacts(true);
 
     try {
       const res = await API.getParentContacts(item.student_id);
-      if (res.data && res.data.length > 0) {
-        setParentContactsMap((prev) => ({
-          ...prev,
-          [item.student_id]: res.data,
-        }));
-      }
-    } catch {
-      // Keep existing contacts in parentContactsMap
+      setParentContactsMap((prev) => ({
+        ...prev,
+        [item.student_id]: res.data || [],
+      }));
+    } catch (err) {
+      showToast((err as Error)?.message || 'خطا در دریافت شماره‌های والدین از سرور', 'error');
+    } finally {
+      setIsLoadingContacts(false);
     }
   };
 
@@ -1203,75 +680,38 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
 
     setIsSavingContact(true);
     const studentId = contactModalStudent.student_id;
-    let createdRecord: ParentContactRecord = {
-      id: Date.now(),
-      student_id: studentId,
-      parent_name: contactForm.parent_name.trim(),
-      relationship: contactForm.relationship,
-      phone: contactForm.phone.trim(),
-      is_primary: contactForm.is_primary,
-    };
 
     try {
-      const res = await API.createParentContact(studentId, {
+      await API.createParentContact(studentId, {
         parent_name: contactForm.parent_name.trim(),
         relationship: contactForm.relationship,
         phone: contactForm.phone.trim(),
         is_primary: contactForm.is_primary,
       });
-      if (res.data && res.data.id) {
-        createdRecord = res.data;
-      }
-    } catch {
-      // Fallback to local state
-    }
 
-    setParentContactsMap((prev) => {
-      const existing = prev[studentId] || [];
-      const updated = contactForm.is_primary
-        ? existing.map((c) => ({ ...c, is_primary: false }))
-        : existing;
-      return {
+      const updatedContactsRes = await API.getParentContacts(studentId);
+      setParentContactsMap((prev) => ({
         ...prev,
-        [studentId]: [createdRecord, ...updated],
-      };
-    });
+        [studentId]: updatedContactsRes.data || [],
+      }));
 
-    // Update student row in preview if primary or previously had no_phone
-    const maskedPhone = `${createdRecord.phone.slice(0, 4)}***${createdRecord.phone.slice(-4)}`;
-    const parentDisplay = `${createdRecord.parent_name} (${
-      RELATIONSHIP_LABELS[createdRecord.relationship]
-    })`;
+      setContactForm({
+        parent_name: '',
+        relationship: 'father',
+        phone: '',
+        is_primary: false,
+      });
 
-    setItems((prev) =>
-      prev.map((row) => {
-        if (row.student_id !== studentId) return row;
-        const nextStatus: AppointmentSmsPreviewStatus =
-          row.status === 'no_phone'
-            ? row.appointment_id
-              ? 'will_send'
-              : 'no_appointment'
-            : row.status;
-        return {
-          ...row,
-          parent_name: parentDisplay,
-          mobile_mask: maskedPhone,
-          mobile: createdRecord.phone,
-          has_valid_phone: true,
-          status: nextStatus,
-          last_error: nextStatus === 'will_send' ? null : row.last_error,
-        };
-      })
-    );
-
-    setContactForm({
-      parent_name: '',
-      relationship: 'father',
-      phone: '',
-      is_primary: false,
-    });
-    setIsSavingContact(false);
-    showToast(`شماره تماس ولی برای «${contactModalStudent.student_name}» ثبت شد`, 'success');
+      await fetchWeekData(currentWeek.week_date, false);
+      showToast(
+        `شماره تماس ولی برای «${contactModalStudent.student_name}» در سرور ثبت شد`,
+        'success'
+      );
+    } catch (err) {
+      showToast((err as Error)?.message || 'خطا در ثبت شماره تماس ولی', 'error');
+    } finally {
+      setIsSavingContact(false);
+    }
   };
 
   const handleDeleteParentContact = async (contactId: number) => {
@@ -1280,74 +720,16 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
 
     try {
       await API.deleteParentContact(studentId, contactId);
-    } catch {
-      // Fallback to local state
+      const updatedContactsRes = await API.getParentContacts(studentId);
+      setParentContactsMap((prev) => ({
+        ...prev,
+        [studentId]: updatedContactsRes.data || [],
+      }));
+      await fetchWeekData(currentWeek.week_date, false);
+      showToast('شماره تماس ولی حذف شد', 'info');
+    } catch (err) {
+      showToast((err as Error)?.message || 'خطا در حذف شماره تماس ولی', 'error');
     }
-
-    const remaining = (parentContactsMap[studentId] || []).filter((c) => c.id !== contactId);
-    setParentContactsMap((prev) => ({
-      ...prev,
-      [studentId]: remaining,
-    }));
-
-    const primary = remaining.find((c) => Boolean(c.is_primary)) || remaining[0];
-    setItems((prev) =>
-      prev.map((row) => {
-        if (row.student_id !== studentId) return row;
-        if (!primary) {
-          return {
-            ...row,
-            parent_name: null,
-            mobile_mask: null,
-            mobile: null,
-            has_valid_phone: false,
-            status: row.appointment_id ? 'no_phone' : 'no_appointment',
-          };
-        }
-        return {
-          ...row,
-          parent_name: `${primary.parent_name} (${RELATIONSHIP_LABELS[primary.relationship]})`,
-          mobile_mask: `${primary.phone.slice(0, 4)}***${primary.phone.slice(-4)}`,
-          mobile: primary.phone,
-          has_valid_phone: true,
-        };
-      })
-    );
-
-    showToast('شماره تماس ولی حذف شد', 'info');
-  };
-
-  // Quick extend 1 week & create week session (from dashboard.php)
-  const handleQuickExtendOneWeek = () => {
-    const newId = Date.now();
-    const newWeek: WeeklySessionInfo = {
-      id: newId,
-      title: `هفته تمدیدشده - جلسه ${toPersianDigits(weeks.length + 16)} مشاوره و آزمون`,
-      week_date: getTodayGregorianIso(),
-      start_date_jalali: '1404/02/20',
-      end_date_jalali: '1404/02/26',
-    };
-    setWeeks((prev) => [newWeek, ...prev]);
-    setSelectedWeekId(newId);
-    setItems((prev) =>
-      prev.map((row) => ({
-        ...row,
-        status: row.appointment_id
-          ? row.mobile || row.mobile_mask
-            ? 'will_send'
-            : 'no_phone'
-          : 'no_appointment',
-        last_log_status: null,
-        last_appointment_at: null,
-        last_sent_at: null,
-        last_error: null,
-        attempts: 0,
-        arrival_time: null,
-        exam_start_time: null,
-        exam_end_time: null,
-      }))
-    );
-    showToast('تمدید یک‌هفته‌ای نوبت‌ها با موفقیت انجام شد و وضعیت پیامک‌ها ریست شد', 'success');
   };
 
   const handleCreateNewWeek = (e: React.FormEvent) => {
@@ -1356,35 +738,116 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     setNewWeekErrors(errors);
     if (hasErrors(errors)) return;
 
+    const satIso = getSaturdayOfWeek(newWeekForm.week_date || getTodayGregorianIso());
     const newId = Date.now();
     const created: WeeklySessionInfo = {
       id: newId,
       title: newWeekForm.title.trim(),
-      week_date: getTodayGregorianIso(),
+      week_date: satIso,
       start_date_jalali: newWeekForm.start_date_jalali.trim(),
       end_date_jalali: newWeekForm.end_date_jalali.trim(),
     };
     setWeeks((prev) => [created, ...prev]);
     setSelectedWeekId(newId);
     setIsNewWeekModalOpen(false);
-    setNewWeekForm({ title: '', start_date_jalali: '', end_date_jalali: '' });
-    showToast(`«${created.title}» با موفقیت ایجاد شد`, 'success');
+    showToast(`«${created.title}» انتخاب شد`, 'success');
   };
 
-  // Remedial Matrix Handlers
-  const toggleRemedialAttendee = (classId: number, studentId: number) => {
+  // Remedial Matrix Handlers (3-state: 'none' -> 'in_class' -> 'left_class')
+  const getStudentClassAttendance = useCallback(
+    (col: RemedialClassColumn, studentId: number): RemedialStudentAttendance => {
+      if (col.student_states && col.student_states[studentId]) {
+        return col.student_states[studentId];
+      }
+      if (col.attendees.includes(studentId)) {
+        return { status: 'in_class' };
+      }
+      return { status: 'none' };
+    },
+    []
+  );
+
+  const getCurrentTimeHm = () => {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+  };
+
+  const updateRemedialAttendance = (
+    classId: number,
+    studentId: number,
+    nextStatus: RemedialAttendanceState
+  ) => {
+    const nowHm = getCurrentTimeHm();
+    const targetClass = remedialClasses.find((c) => c.id === classId);
+    const targetStudent = items.find((s) => s.student_id === studentId);
+
     setRemedialClasses((prev) =>
       prev.map((col) => {
         if (col.id !== classId) return col;
-        const exists = col.attendees.includes(studentId);
+        const prevStates = { ...(col.student_states || {}) };
+        const current = getStudentClassAttendance(col, studentId);
+
+        if (nextStatus === 'none') {
+          delete prevStates[studentId];
+          return {
+            ...col,
+            attendees: col.attendees.filter((id) => id !== studentId),
+            student_states: prevStates,
+          };
+        }
+
+        if (nextStatus === 'in_class') {
+          prevStates[studentId] = {
+            status: 'in_class',
+            entered_at: current.entered_at || nowHm,
+          };
+          const attendees = col.attendees.includes(studentId)
+            ? col.attendees
+            : [...col.attendees, studentId];
+          return {
+            ...col,
+            attendees,
+            student_states: prevStates,
+          };
+        }
+
+        // nextStatus === 'left_class'
+        prevStates[studentId] = {
+          status: 'left_class',
+          entered_at: current.entered_at || nowHm,
+          exited_at: nowHm,
+        };
+        const attendees = col.attendees.includes(studentId)
+          ? col.attendees
+          : [...col.attendees, studentId];
         return {
           ...col,
-          attendees: exists
-            ? col.attendees.filter((id) => id !== studentId)
-            : [...col.attendees, studentId],
+          attendees,
+          student_states: prevStates,
         };
       })
     );
+
+    if (targetStudent && targetClass) {
+      if (nextStatus === 'in_class') {
+        showToast(
+          `ورود «${targetStudent.student_name}» به کلاس «${targetClass.class_name}» ثبت شد (${toPersianDigits(nowHm)})`,
+          'success'
+        );
+      } else if (nextStatus === 'left_class') {
+        showToast(
+          `خروج «${targetStudent.student_name}» از کلاس «${targetClass.class_name}» ثبت شد (${toPersianDigits(nowHm)})`,
+          'info'
+        );
+      } else {
+        showToast(
+          `وضعیت حضور «${targetStudent.student_name}» در «${targetClass.class_name}» بازنشانی شد`,
+          'warning'
+        );
+      }
+    }
   };
 
   const handleAddRemedialClass = (e: React.FormEvent) => {
@@ -1399,6 +862,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
       class_name: newClassForm.class_name.trim(),
       teacher_name: newClassForm.teacher_name.trim() || undefined,
       attendees: [],
+      student_states: {},
     };
     setRemedialClasses((prev) => [...prev, newCol]);
     setNewClassForm({ class_name: '', teacher_name: '' });
@@ -1470,10 +934,62 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     [remedialClasses, remedialFieldTab]
   );
 
-  const currentFieldStudents = useMemo(
+  const allFieldStudents = useMemo(
     () => items.filter((s) => s.field === remedialFieldTab),
     [items, remedialFieldTab]
   );
+
+  const remedialFieldStats = useMemo(() => {
+    let inClassStudentsCount = 0;
+    let leftClassStudentsCount = 0;
+    let notEnteredStudentsCount = 0;
+    let totalInClassSessions = 0;
+    let totalLeftClassSessions = 0;
+
+    for (const st of allFieldStudents) {
+      const states = currentFieldRemedialClasses.map(
+        (col) => getStudentClassAttendance(col, st.student_id).status
+      );
+      const hasInClass = states.includes('in_class');
+      const hasLeftClass = states.includes('left_class');
+      if (hasInClass) inClassStudentsCount += 1;
+      if (hasLeftClass) leftClassStudentsCount += 1;
+      if (!hasInClass && !hasLeftClass) notEnteredStudentsCount += 1;
+
+      totalInClassSessions += states.filter((s) => s === 'in_class').length;
+      totalLeftClassSessions += states.filter((s) => s === 'left_class').length;
+    }
+
+    return {
+      totalStudents: allFieldStudents.length,
+      inClassStudentsCount,
+      leftClassStudentsCount,
+      notEnteredStudentsCount,
+      totalInClassSessions,
+      totalLeftClassSessions,
+    };
+  }, [allFieldStudents, currentFieldRemedialClasses, getStudentClassAttendance]);
+
+  const currentFieldStudents = useMemo(() => {
+    if (remedialStatusFilter === 'all') return allFieldStudents;
+    return allFieldStudents.filter((st) => {
+      const states = currentFieldRemedialClasses.map(
+        (col) => getStudentClassAttendance(col, st.student_id).status
+      );
+      if (remedialStatusFilter === 'in_class') {
+        return states.includes('in_class');
+      }
+      if (remedialStatusFilter === 'left_class') {
+        return states.includes('left_class');
+      }
+      return states.every((s) => s === 'none');
+    });
+  }, [
+    allFieldStudents,
+    remedialStatusFilter,
+    currentFieldRemedialClasses,
+    getStudentClassAttendance,
+  ]);
 
   return (
     <div className="space-y-6">
@@ -1501,12 +1017,22 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
           </div>
 
           {/* Week Selector & Quick Actions */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div className="relative min-w-[250px]">
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionButton
+              variant="secondary"
+              size="sm"
+              onClick={() => handleShiftWeek(-7)}
+              icon={<ChevronRight className="w-4 h-4" />}
+              title="هفته قبل"
+            >
+              هفته قبل
+            </ActionButton>
+
+            <div className="relative min-w-[230px]">
               <select
                 value={selectedWeekId}
                 onChange={(e) => setSelectedWeekId(Number(e.target.value))}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50/70 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#445D84]/25 focus:border-[#445D84]"
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#445D84]/25 focus:border-[#445D84]"
               >
                 {weeks.map((w) => (
                   <option key={w.id} value={w.id}>
@@ -1518,24 +1044,31 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
 
             <ActionButton
               variant="secondary"
-              size="md"
-              onClick={handleQuickExtendOneWeek}
-              icon={<Sparkles className="w-4 h-4 text-amber-500" />}
-              title="کپی نوبت‌های هفته قبل برای هفته جدید"
+              size="sm"
+              onClick={() => handleShiftWeek(7)}
+              icon={<ChevronLeft className="w-4 h-4" />}
+              title="هفته بعد"
             >
-              تمدید سریع یک‌هفته
+              هفته بعد
             </ActionButton>
 
             <ActionButton
               variant="secondary"
               size="md"
               onClick={() => {
+                const nextSat = addDaysIso(currentWeek.week_date, 7);
+                setNewWeekForm({
+                  title: '',
+                  week_date: nextSat,
+                  start_date_jalali: formatGregorianToJalali(nextSat),
+                  end_date_jalali: formatGregorianToJalali(addDaysIso(nextSat, 6)),
+                });
                 setNewWeekErrors({});
                 setIsNewWeekModalOpen(true);
               }}
               icon={<Plus className="w-4 h-4" />}
             >
-              هفته جدید
+              انتخاب هفته دلخواه
             </ActionButton>
 
             <ActionButton
@@ -1586,7 +1119,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
               onClick={() => fetchWeekData(currentWeek.week_date, true)}
               icon={<RefreshCw className="w-4 h-4" />}
             >
-              بروزرسانی پیش‌نمایش
+              بروزرسانی از سرور
             </ActionButton>
           </div>
         </div>
@@ -1777,13 +1310,22 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                   <AlertCircle className="w-4 h-4 shrink-0" />
                   <span>{errorState}</span>
                 </div>
-                <ActionButton
-                  variant="danger"
-                  size="sm"
-                  onClick={() => setErrorState(null)}
-                >
-                  بستن
-                </ActionButton>
+                <div className="flex items-center gap-2">
+                  <ActionButton
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => fetchWeekData(currentWeek.week_date, true)}
+                  >
+                    تلاش مجدد
+                  </ActionButton>
+                  <ActionButton
+                    variant="danger"
+                    size="sm"
+                    onClick={() => setErrorState(null)}
+                  >
+                    بستن
+                  </ActionButton>
+                </div>
               </div>
             )}
 
@@ -1791,7 +1333,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
             {isLoading ? (
               <div className="py-16 flex flex-col items-center justify-center gap-3 text-slate-500">
                 <RefreshCw className="w-8 h-8 animate-spin text-[#445D84]" />
-                <p className="text-sm font-bold">در حال دریافت پیش‌نمایش نوبت‌ها و وضعیت پیامک...</p>
+                <p className="text-sm font-bold">در حال دریافت پیش‌نمایش نوبت‌ها و وضعیت پیامک از سرور...</p>
               </div>
             ) : filteredItems.length === 0 ? (
               <div className="py-14 text-center space-y-3">
@@ -1799,22 +1341,28 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                   <Users className="w-6 h-6" />
                 </div>
                 <p className="text-sm font-bold text-slate-700">
-                  هیچ دانش‌آموزی با فیلترهای انتخابی یافت نشد
+                  {items.length === 0
+                    ? 'هیچ رکوردی برای این هفته در سرور ثبت نشده است'
+                    : 'هیچ دانش‌آموزی با فیلترهای انتخابی یافت نشد'}
                 </p>
                 <p className="text-xs text-slate-500">
-                  فیلترهای بالا را تغییر دهید یا عبارت جستجو را پاک کنید.
+                  {items.length === 0
+                    ? 'می‌توانید هفته دیگری را انتخاب کنید یا دکمه بروزرسانی از سرور را بزنید.'
+                    : 'فیلترهای بالا را تغییر دهید یا عبارت جستجو را پاک کنید.'}
                 </p>
-                <ActionButton
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setChipFilter('all');
-                    setFieldFilter('all');
-                    setSearchQuery('');
-                  }}
-                >
-                  نمایش همه ردیف‌ها
-                </ActionButton>
+                {items.length > 0 && (
+                  <ActionButton
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setChipFilter('all');
+                      setFieldFilter('all');
+                      setSearchQuery('');
+                    }}
+                  >
+                    نمایش همه ردیف‌ها
+                  </ActionButton>
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto rounded-xl border border-slate-200/80">
@@ -1947,7 +1495,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                             )}
                           </td>
 
-                          {/* Appointment Date & Start/End Time */}
+                          {/* Appointment Date & Start Time */}
                           <td className="py-3.5 px-3">
                             {item.appointment_date && item.start_time ? (
                               <div className="space-y-1">
@@ -1958,7 +1506,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold">
                                     <Clock className="w-3 h-3 text-slate-500" />
-                                    ساعت {formatTimeRange(item)}
+                                    ساعت {formatAppointmentStartTime(item)}
                                   </span>
                                   {item.multiple_appointments && (
                                     <span
@@ -2108,16 +1656,16 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
           </div>
         </>
       ) : (
-        /* Remedial Classes Matrix View (inspired by remedial.php) */
+        /* Remedial Classes Matrix View (with 3-state attendance lifecycle) */
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-5 space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
             <div>
               <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
                 <BookOpen className="w-5 h-5 text-[#445D84]" />
-                ماتریس حضور در کلاس‌های رفع اشکال هفتگی
+                ماتریس حضور و خروج در کلاس‌های رفع اشکال هفتگی
               </h3>
               <p className="text-xs text-slate-500 mt-1">
-                کلاس‌های رفع اشکال هر رشته را تعریف کنید و دانش‌آموزان شرکت‌کننده را با تیک مشخص نمایید.
+                برای هر کلاس ۳ وضعیت تفکیک شده است: «ثبت ورود به کلاس»، «حاضر در کلاس (مشغول)» و «خارج شده از کلاس (پایان حضور)» همراه با ثبت خودکار ساعت ورود و خروج.
               </p>
             </div>
 
@@ -2127,7 +1675,10 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                   <button
                     key={f}
                     type="button"
-                    onClick={() => setRemedialFieldTab(f)}
+                    onClick={() => {
+                      setRemedialFieldTab(f);
+                      setRemedialStatusFilter('all');
+                    }}
                     className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       remedialFieldTab === f
                         ? 'bg-[#445D84] text-white shadow-sm'
@@ -2153,6 +1704,113 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
             </div>
           </div>
 
+          {/* 3-State Filter Chips & Lifecycle Legend */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-slate-50/80 rounded-xl p-3.5 border border-slate-200/70">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setRemedialStatusFilter('all')}
+                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                  remedialStatusFilter === 'all'
+                    ? 'bg-[#445D84] text-white border-[#445D84] shadow-2xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <span>همه دانش‌آموزان ({remedialFieldTab})</span>
+                <span
+                  className={`px-1.5 py-0.5 rounded-md text-[10px] ${
+                    remedialStatusFilter === 'all'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {toPersianDigits(remedialFieldStats.totalStudents)}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRemedialStatusFilter('in_class')}
+                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                  remedialStatusFilter === 'in_class'
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                    : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50/60'
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>هم‌اکنون داخل کلاس (حاضر)</span>
+                <span
+                  className={`px-1.5 py-0.5 rounded-md text-[10px] ${
+                    remedialStatusFilter === 'in_class'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-emerald-50 text-emerald-700'
+                  }`}
+                >
+                  {toPersianDigits(remedialFieldStats.inClassStudentsCount)} نفر
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRemedialStatusFilter('left_class')}
+                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                  remedialStatusFilter === 'left_class'
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                    : 'bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50/60'
+                }`}
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>خارج شده از کلاس (پایان حضور)</span>
+                <span
+                  className={`px-1.5 py-0.5 rounded-md text-[10px] ${
+                    remedialStatusFilter === 'left_class'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-indigo-50 text-indigo-700'
+                  }`}
+                >
+                  {toPersianDigits(remedialFieldStats.leftClassStudentsCount)} نفر
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRemedialStatusFilter('none')}
+                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                  remedialStatusFilter === 'none'
+                    ? 'bg-slate-700 text-white border-slate-700 shadow-2xs'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <span>وارد نشده به کلاس</span>
+                <span
+                  className={`px-1.5 py-0.5 rounded-md text-[10px] ${
+                    remedialStatusFilter === 'none'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {toPersianDigits(remedialFieldStats.notEnteredStudentsCount)} نفر
+                </span>
+              </button>
+            </div>
+
+            {/* Visual 3-Step Guide */}
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+              <span className="font-bold text-slate-700">چرخه وضعیت:</span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-200/70 text-slate-600 font-medium">
+                ۱. ثبت ورود
+              </span>
+              <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">
+                ۲. حاضر در کلاس
+              </span>
+              <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold">
+                ۳. خارج شده از کلاس
+              </span>
+            </div>
+          </div>
+
           {currentFieldRemedialClasses.length === 0 ? (
             <div className="py-12 text-center space-y-3">
               <p className="text-sm font-bold text-slate-700">
@@ -2167,90 +1825,257 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                 ایجاد اولین کلاس رفع اشکال
               </ActionButton>
             </div>
+          ) : currentFieldStudents.length === 0 ? (
+            <div className="py-10 text-center space-y-2.5">
+              <p className="text-sm font-bold text-slate-700">
+                دانش‌آموزی با این وضعیت در رشته {remedialFieldTab} یافت نشد
+              </p>
+              {remedialStatusFilter !== 'all' && (
+                <ActionButton
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setRemedialStatusFilter('all')}
+                >
+                  نمایش همه دانش‌آموزان رشته {remedialFieldTab}
+                </ActionButton>
+              )}
+            </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-slate-200/80">
               <table className="w-full text-right border-collapse">
                 <thead>
                   <tr className="bg-[#344868] text-white text-xs">
-                    <th className="py-3.5 px-4 font-bold min-w-[200px]">
+                    <th className="py-3.5 px-4 font-bold min-w-[190px]">
                       نام دانش‌آموز ({remedialFieldTab})
                     </th>
-                    <th className="py-3.5 px-3 font-bold">نوبت هفتگی</th>
-                    {currentFieldRemedialClasses.map((col) => (
-                      <th key={col.id} className="py-3.5 px-4 font-bold text-center min-w-[170px]">
-                        <div className="flex flex-col items-center gap-1">
-                          <span>{col.class_name}</span>
-                          {col.teacher_name && (
-                            <span className="text-[10px] font-normal text-white/75">
-                              {col.teacher_name}
-                            </span>
-                          )}
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="px-2 py-0.5 rounded-full bg-white/15 text-[10px]">
-                              {toPersianDigits(col.attendees.length)} نفر
-                            </span>
+                    <th className="py-3.5 px-3 font-bold min-w-[155px]">
+                      نوبت و ساعت حضور
+                    </th>
+                    {currentFieldRemedialClasses.map((col) => {
+                      const inClassCount = allFieldStudents.filter(
+                        (s) =>
+                          getStudentClassAttendance(col, s.student_id).status === 'in_class'
+                      ).length;
+                      const leftClassCount = allFieldStudents.filter(
+                        (s) =>
+                          getStudentClassAttendance(col, s.student_id).status === 'left_class'
+                      ).length;
+                      return (
+                        <th
+                          key={col.id}
+                          className="py-3.5 px-4 font-bold text-center min-w-[210px] border-r border-white/10"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate">{col.class_name}</span>
                             <button
                               type="button"
                               onClick={() => handleDeleteRemedialClass(col.id)}
-                              className="text-rose-200 hover:text-white cursor-pointer"
-                              title="حذف این کلاس"
+                              className="text-white/60 hover:text-rose-300 transition-colors cursor-pointer shrink-0"
+                              title="حذف ستون کلاس"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
-                        </div>
-                      </th>
-                    ))}
+                          {col.teacher_name && (
+                            <div className="text-[10px] text-white/75 font-normal mt-0.5 text-right">
+                              {col.teacher_name}
+                            </div>
+                          )}
+                          <div className="mt-2 flex items-center justify-center gap-1.5 flex-wrap">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/25 text-emerald-100 text-[10px] font-bold">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-300" />
+                              حاضر: {toPersianDigits(inClassCount)}
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-400/25 text-indigo-100 text-[10px] font-bold">
+                              خارج‌شده: {toPersianDigits(leftClassCount)}
+                            </span>
+                          </div>
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
-                  {currentFieldStudents.map((student) => (
-                    <tr key={student.student_id} className="hover:bg-slate-50/80">
-                      <td className="py-3 px-4">
-                        <div className="font-bold text-slate-800">{student.student_name}</div>
-                        <div className="text-[11px] text-slate-400">
-                          پایه {toPersianDigits(student.grade || 12)}
-                        </div>
-                      </td>
-                      <td className="py-3 px-3">
-                        {student.appointment_date && student.start_time ? (
-                          <span className="text-slate-700 font-medium">
-                            {formatAppointmentDisplayDate(student)} -{' '}
-                            {toPersianDigits(student.start_time.slice(0, 5))}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">بدون نوبت</span>
-                        )}
-                      </td>
-                      {currentFieldRemedialClasses.map((col) => {
-                        const isAttending = col.attendees.includes(student.student_id);
-                        return (
-                          <td key={col.id} className="py-3 px-4 text-center">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                toggleRemedialAttendee(col.id, student.student_id)
-                              }
-                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                                isAttending
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs'
-                                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200/70'
-                              }`}
-                            >
-                              {isAttending ? (
-                                <>
-                                  <UserCheck className="w-3.5 h-3.5" />
-                                  حاضر در کلاس
-                                </>
-                              ) : (
-                                'ثبت حضور'
+                  {currentFieldStudents.map((student) => {
+                    const studentStates = currentFieldRemedialClasses.map((c) =>
+                      getStudentClassAttendance(c, student.student_id)
+                    );
+                    const studentInCount = studentStates.filter(
+                      (s) => s.status === 'in_class'
+                    ).length;
+                    const studentLeftCount = studentStates.filter(
+                      (s) => s.status === 'left_class'
+                    ).length;
+
+                    return (
+                      <tr key={student.student_id} className="hover:bg-slate-50/80">
+                        <td className="py-3.5 px-4">
+                          <div className="font-bold text-slate-800">
+                            {student.student_name}
+                          </div>
+                          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                            <span className="text-[11px] text-slate-400">
+                              پایه {toPersianDigits(student.grade || 12)}
+                            </span>
+                            {studentInCount > 0 && (
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
+                                {toPersianDigits(studentInCount)} کلاس در حال حضور
+                              </span>
+                            )}
+                            {studentLeftCount > 0 && (
+                              <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold">
+                                {toPersianDigits(studentLeftCount)} کلاس خارج شده
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-3 text-slate-600">
+                          {student.appointment_date ? (
+                            <div className="space-y-0.5">
+                              <div className="font-bold text-slate-700">
+                                {formatAppointmentDisplayDate(student)}
+                              </div>
+                              <div className="text-[11px] text-slate-500">
+                                ساعت نوبت: {formatAppointmentStartTime(student)}
+                              </div>
+                              {student.arrival_time && (
+                                <div className="text-[10px] text-emerald-700 font-medium">
+                                  ورود به آموزشگاه: {toPersianDigits(student.arrival_time)}
+                                </div>
                               )}
-                            </button>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">بدون نوبت</span>
+                          )}
+                        </td>
+                        {currentFieldRemedialClasses.map((col) => {
+                          const att = getStudentClassAttendance(col, student.student_id);
+                          return (
+                            <td
+                              key={col.id}
+                              className="py-3 px-3 text-center border-r border-slate-100 align-middle"
+                            >
+                              {att.status === 'none' && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    updateRemedialAttendance(
+                                      col.id,
+                                      student.student_id,
+                                      'in_class'
+                                    )
+                                  }
+                                  className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/70 text-slate-600 hover:border-emerald-400 hover:bg-emerald-50/60 hover:text-emerald-700 font-bold text-xs transition-all cursor-pointer w-full max-w-[185px]"
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                  <span>ثبت ورود به کلاس</span>
+                                </button>
+                              )}
+
+                              {att.status === 'in_class' && (
+                                <div className="inline-flex flex-col items-stretch gap-1.5 p-2 rounded-xl bg-emerald-50/90 border border-emerald-200 shadow-2xs w-full max-w-[195px]">
+                                  <div className="flex items-center justify-between gap-1 px-1">
+                                    <span className="inline-flex items-center gap-1.5 text-emerald-800 font-black text-[11px]">
+                                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                                      حاضر در کلاس
+                                    </span>
+                                    {att.entered_at && (
+                                      <span className="text-[10px] font-bold text-emerald-700 bg-white/80 px-1.5 py-0.5 rounded-md border border-emerald-200/60">
+                                        ورود {toPersianDigits(att.entered_at)}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateRemedialAttendance(
+                                          col.id,
+                                          student.student_id,
+                                          'left_class'
+                                        )
+                                      }
+                                      className="flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold transition-colors cursor-pointer shadow-2xs"
+                                      title="وقتی دانش‌آموز از کلاس خارج شد کلیک کنید تا ساعت خروج ثبت شود"
+                                    >
+                                      <LogOut className="w-3 h-3" />
+                                      ثبت خروج از کلاس
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateRemedialAttendance(
+                                          col.id,
+                                          student.student_id,
+                                          'none'
+                                        )
+                                      }
+                                      className="p-1.5 rounded-lg bg-white/80 hover:bg-rose-50 text-slate-400 hover:text-rose-600 border border-emerald-200/70 transition-colors cursor-pointer"
+                                      title="لغو ورود / بازنشانی وضعیت"
+                                    >
+                                      <RotateCcw className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
+                              {att.status === 'left_class' && (
+                                <div className="inline-flex flex-col items-stretch gap-1.5 p-2 rounded-xl bg-indigo-50/80 border border-indigo-200 shadow-2xs w-full max-w-[195px]">
+                                  <div className="flex items-center justify-between gap-1 px-1">
+                                    <span className="inline-flex items-center gap-1 text-indigo-800 font-black text-[11px]">
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                      خارج شده از کلاس
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateRemedialAttendance(
+                                          col.id,
+                                          student.student_id,
+                                          'none'
+                                        )
+                                      }
+                                      className="p-1 rounded-md hover:bg-rose-100 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                                      title="پاک کردن وضعیت حضور"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </div>
+
+                                  <div className="flex items-center justify-center gap-1.5 bg-white/90 px-2 py-1 rounded-lg border border-indigo-100 text-[10px] font-bold text-indigo-900">
+                                    <span>
+                                      ورود: {toPersianDigits(att.entered_at || '—')}
+                                    </span>
+                                    <span className="text-indigo-300">•</span>
+                                    <span className="text-indigo-700">
+                                      خروج: {toPersianDigits(att.exited_at || '—')}
+                                    </span>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateRemedialAttendance(
+                                        col.id,
+                                        student.student_id,
+                                        'in_class'
+                                      )
+                                    }
+                                    className="inline-flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-white hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border border-indigo-200/80 text-[10px] font-bold transition-colors cursor-pointer"
+                                    title="برگرداندن وضعیت به حاضر در کلاس"
+                                  >
+                                    <UserCheck className="w-3 h-3" />
+                                    برگشت به کلاس
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2258,14 +2083,14 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         </div>
       )}
 
-      {/* Edit / Create Appointment Modal */}
+      {/* Edit / Create Appointment Modal (without end_time) */}
       <Modal
         isOpen={Boolean(editingItem)}
         onClose={() => setEditingItem(null)}
         title={
           editingItem
             ? `تنظیم نوبت و ساعات حضور: ${editingItem.student_name}`
-            : 'ویرایش نوبت'
+            : 'ثبت / ویرایش نوبت'
         }
       >
         <form noValidate onSubmit={handleSaveAppointment} className="space-y-4">
@@ -2286,7 +2111,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
                 تاریخ نوبت (میلادی / انتخابگر) *
@@ -2310,7 +2135,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
               />
               {appointmentForm.appointment_date && (
                 <p className="text-[11px] text-[#445D84] font-medium mt-1">
-                  معادل شمسی: {formatGregorianToJalali(appointmentForm.appointment_date)}
+                  معادل شمسی: {toPersianDigits(formatGregorianToJalali(appointmentForm.appointment_date))}
                 </p>
               )}
               <FieldError message={appointmentErrors.appointment_date} />
@@ -2318,7 +2143,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
 
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                ساعت شروع جلسه (HH:MM) *
+                ساعت شروع نوبت (HH:MM) *
               </label>
               <input
                 type="time"
@@ -2332,24 +2157,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                 className={getFieldClass(Boolean(appointmentErrors.start_time))}
               />
               <FieldError message={appointmentErrors.start_time} />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                ساعت پایان جلسه (HH:MM) *
-              </label>
-              <input
-                type="time"
-                value={appointmentForm.end_time}
-                onChange={(e) => {
-                  setAppointmentForm((prev) => ({ ...prev, end_time: e.target.value }));
-                  if (appointmentErrors.end_time) {
-                    setAppointmentErrors((prev) => ({ ...prev, end_time: undefined }));
-                  }
-                }}
-                className={getFieldClass(Boolean(appointmentErrors.end_time))}
-              />
-              <FieldError message={appointmentErrors.end_time} />
             </div>
           </div>
 
@@ -2490,8 +2297,13 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
             <h4 className="text-xs font-bold text-slate-700">
               شماره‌های ثبت‌شده برای والدین
             </h4>
-            {contactModalStudent &&
-            (parentContactsMap[contactModalStudent.student_id] || []).length > 0 ? (
+            {isLoadingContacts ? (
+              <div className="p-5 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin text-[#445D84]" />
+                <span>در حال دریافت شماره‌های والدین از سرور...</span>
+              </div>
+            ) : contactModalStudent &&
+              (parentContactsMap[contactModalStudent.student_id] || []).length > 0 ? (
               <div className="space-y-2">
                 {(parentContactsMap[contactModalStudent.student_id] || []).map((c) => (
                   <div
@@ -2526,7 +2338,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
               </div>
             ) : (
               <div className="p-4 rounded-xl border border-dashed border-orange-200 bg-orange-50/50 text-orange-700 text-xs text-center">
-                هیچ شماره تماسی برای والدین این دانش‌آموز ثبت نشده است.
+                هیچ شماره تماسی برای والدین این دانش‌آموز در سرور ثبت نشده است.
               </div>
             )}
           </div>
@@ -2639,11 +2451,11 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         </div>
       </Modal>
 
-      {/* New Week Session Modal */}
+      {/* Select / Add Week Session Modal */}
       <Modal
         isOpen={isNewWeekModalOpen}
         onClose={() => setIsNewWeekModalOpen(false)}
-        title="معرفی هفته / جلسه جدید مشاوره"
+        title="انتخاب یا معرفی هفته مشاوره"
       >
         <form noValidate onSubmit={handleCreateNewWeek} className="space-y-4">
           <div>
@@ -2659,10 +2471,32 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                   setNewWeekErrors((prev) => ({ ...prev, title: undefined }));
                 }
               }}
-              placeholder="مثال: هفته اول خرداد - جلسه ۱۹ مشاوره"
+              placeholder="مثال: هفته اول خرداد - جلسه مشاوره"
               className={getFieldClass(Boolean(newWeekErrors.title))}
             />
             <FieldError message={newWeekErrors.title} />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              انتخاب تاریخ در هفته مورد نظر (میلادی)
+            </label>
+            <input
+              type="date"
+              value={newWeekForm.week_date}
+              onChange={(e) => {
+                const picked = e.target.value;
+                const sat = getSaturdayOfWeek(picked);
+                const fri = addDaysIso(sat, 6);
+                setNewWeekForm((prev) => ({
+                  ...prev,
+                  week_date: sat,
+                  start_date_jalali: formatGregorianToJalali(sat),
+                  end_date_jalali: formatGregorianToJalali(fri),
+                }));
+              }}
+              className={getFieldClass(false)}
+            />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2728,7 +2562,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
               انصراف
             </ActionButton>
             <ActionButton type="submit" variant="primary">
-              ایجاد هفته جدید
+              مشاهده و بارگذاری هفته
             </ActionButton>
           </div>
         </form>
@@ -2897,7 +2731,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {filteredLogs.length === 0 ? (
                 <div className="py-16 text-center text-slate-400 text-xs font-bold">
-                  هیچ رکوردی در تاریخچه پیامک یافت نشد
+                  هیچ رکوردی در تاریخچه پیامک این هفته یافت نشد
                 </div>
               ) : (
                 filteredLogs.map((log) => (
