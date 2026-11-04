@@ -131,3 +131,27 @@ export function jalaliToGregorianIso(jy: number, jm: number, jd: number): string
   const [gy, gm, gd] = toGregorian(jy, jm, jd);
   return `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}`;
 }
+
+export const JALALI_WEEKDAYS = [
+  'شنبه',
+  'یکشنبه',
+  'دوشنبه',
+  'سه‌شنبه',
+  'چهارشنبه',
+  'پنج‌شنبه',
+  'جمعه',
+] as const;
+
+export function getTodayGregorianIso(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+    now.getDate()
+  ).padStart(2, '0')}`;
+}
+
+export function toPersianDigits(val: string | number | null | undefined): string {
+  if (val === null || val === undefined) return '';
+  const persian = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+  return String(val).replace(/\d/g, (d) => persian[Number(d)] || d);
+}
+

@@ -8,6 +8,7 @@ import {
   Pencil,
   Upload,
   Headset,
+  CalendarClock,
   Newspaper,
   LineChart,
   LogOut,
@@ -31,6 +32,7 @@ interface SidebarProps {
 const NAV_ITEMS: { id: PageId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'overview', label: 'داشبورد', icon: BarChart3 },
   { id: 'students', label: 'دانش‌آموزان', icon: Users },
+  { id: 'appointments', label: 'نوبت‌دهی هفتگی', icon: CalendarClock },
   { id: 'courses', label: 'دوره‌ها', icon: BookOpen },
   { id: 'instructors', label: 'اساتید', icon: School },
   { id: 'exams', label: 'نتایج آزمون', icon: ClipboardList },

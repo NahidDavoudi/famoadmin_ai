@@ -14,6 +14,21 @@ import type {
   DashboardStats,
   AcademicField,
   SubjectResult,
+  AppointmentSmsPreviewData,
+  AppointmentSmsPreviewItem,
+  AppointmentSmsPreviewSummary,
+  PostAppointmentSmsSendRequest,
+  AppointmentSmsSendData,
+  AppointmentSmsSendResultItem,
+  GetAppointmentSmsLogQuery,
+  AppointmentSmsLogItem,
+  GetAppointmentsListQuery,
+  AppointmentRecord,
+  UpsertAppointmentRequest,
+  AppointmentStatus,
+  ParentContactRecord,
+  CreateParentContactRequest,
+  UpdateParentContactRequest,
 } from '../types';
 import { safeTrim } from './exam-math';
 
@@ -908,7 +923,353 @@ class FamoApiClient {
     const stats = Array.isArray(res.data) ? res.data : res.data?.stats || [];
     return { ...res, data: { stats } };
   }
+
+  // ============================================================================
+  // Weekly Appointments & SMS Reminders (/api/v1/appointments*)
+  // ============================================================================
+
+  /**
+   * GET /api/v1/appointments/sms/preview?week_date=YYYY-MM-DD
+   * Normalizes both PHP production backend (`items`, `summary.total`)
+   * and `dev-server.mjs` (`students`, `summary.total_students`).
+   */
+  async getAppointmentsSmsPreview(
+    weekDate: string
+  ): Promise<
+    ApiEnvelope<
+      AppointmentSmsPreviewData & {
+        items: AppointmentSmsPreviewItem[];
+        summary: AppointmentSmsPreviewSummary & { total: number };
+      }
+    >
+  > {
+    const query = new URLSearchParams({ week_date: safeTrim(weekDate) });
+    const res = await this.requestJson<
+      AppointmentSmsPreviewData | AppointmentSmsPreviewItem[]
+    >(
+      `/appointments/sms/preview?${query.toString()}`,
+      {},
+      'خطا در دریافت لیست نوبت‌های هفتگی'
+    );
+
+    const rawData = res.data;
+    const rawItems: AppointmentSmsPreviewItem[] = Array.isArray(rawData)
+      ? rawData
+      : rawData?.items || rawData?.students || [];
+
+    const normalizedItems: AppointmentSmsPreviewItem[] = rawItems.map((item) => {
+      const startTime = item.start_time ? String(item.start_time).slice(0, 5) : null;
+      const endTime = item.end_time ? String(item.end_time).slice(0, 5) : null;
+      return {
+        ...item,
+        start_time: startTime,
+        end_time: endTime,
+        mobile_mask: item.mobile_mask ?? item.mobile ?? null,
+        mobile: item.mobile ?? item.mobile_mask ?? null,
+        last_appointment_at:
+          item.last_appointment_at ?? item.last_sent_appointment_at ?? null,
+        active_appointments_count: Number(item.active_appointments_count ?? (item.appointment_id ? 1 : 0)),
+        multiple_appointments: Boolean(
+          item.multiple_appointments ?? Number(item.active_appointments_count ?? 0) > 1
+        ),
+        attempts: Number(item.attempts ?? 0),
+      };
+    });
+
+    const rawSummary = !Array.isArray(rawData) ? rawData?.summary : undefined;
+    const computedSummary: AppointmentSmsPreviewSummary & { total: number } = {
+      total:
+        rawSummary?.total ??
+        rawSummary?.total_students ??
+        normalizedItems.length,
+      total_students:
+        rawSummary?.total_students ??
+        rawSummary?.total ??
+        normalizedItems.length,
+      will_send:
+        rawSummary?.will_send ??
+        normalizedItems.filter((i) => i.status === 'will_send').length,
+      already_sent:
+        rawSummary?.already_sent ??
+        normalizedItems.filter((i) => i.status === 'already_sent').length,
+      changed_since_sent:
+        rawSummary?.changed_since_sent ??
+        normalizedItems.filter((i) => i.status === 'changed_since_sent').length,
+      failed:
+        rawSummary?.failed ??
+        normalizedItems.filter((i) => i.status === 'failed').length,
+      no_phone:
+        rawSummary?.no_phone ??
+        normalizedItems.filter((i) => i.status === 'no_phone').length,
+      no_appointment:
+        rawSummary?.no_appointment ??
+        normalizedItems.filter((i) => i.status === 'no_appointment').length,
+      multiple_appointments:
+        rawSummary?.multiple_appointments ??
+        normalizedItems.filter((i) => i.multiple_appointments).length,
+    };
+
+    const weekStart =
+      (!Array.isArray(rawData) && rawData?.week_start) || safeTrim(weekDate);
+    const weekEnd =
+      (!Array.isArray(rawData) && rawData?.week_end) || safeTrim(weekDate);
+
+    return {
+      ...res,
+      data: {
+        ...(Array.isArray(rawData) ? {} : rawData),
+        week_start: weekStart,
+        week_end: weekEnd,
+        summary: computedSummary,
+        items: normalizedItems,
+      },
+    };
+  }
+
+  /**
+   * POST /api/v1/appointments/sms/send
+   * Never sends an empty `student_ids: []` array (omits `student_ids` when empty/null).
+   */
+  async sendAppointmentsSms(
+    payload: PostAppointmentSmsSendRequest
+  ): Promise<
+    ApiEnvelope<
+      AppointmentSmsSendData & { items: AppointmentSmsSendResultItem[] }
+    >
+  > {
+    const body: Record<string, unknown> = {
+      week_date: safeTrim(payload.week_date),
+      mode: payload.mode || 'unsent',
+    };
+
+    if (Array.isArray(payload.student_ids) && payload.student_ids.length > 0) {
+      body.student_ids = payload.student_ids.map((id) => Number(id));
+    }
+
+    const opId = safeTrim(payload.operation_id);
+    if (opId) {
+      body.operation_id = opId;
+    }
+
+    const res = await this.requestJson<AppointmentSmsSendData>(
+      '/appointments/sms/send',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      'خطا در ارسال پیامک نوبت‌ها'
+    );
+
+    const rawItems = res.data?.items || res.data?.details || [];
+    return {
+      ...res,
+      data: {
+        ...res.data,
+        items: rawItems,
+      },
+    };
+  }
+
+  /**
+   * GET /api/v1/appointments/sms/log
+   * Normalizes `items` (PHP) and `logs` (`dev-server.mjs`).
+   */
+  async getAppointmentsSmsLog(
+    params?: GetAppointmentSmsLogQuery | string
+  ): Promise<ApiEnvelope<{ items: AppointmentSmsLogItem[] }>> {
+    const query = new URLSearchParams();
+    if (typeof params === 'string') {
+      if (safeTrim(params)) query.set('week_date', safeTrim(params));
+    } else if (params) {
+      if (safeTrim(params.week_date)) query.set('week_date', safeTrim(params.week_date));
+      if (params.student_id) query.set('student_id', String(params.student_id));
+      if (params.status) query.set('status', params.status);
+      if (params.page) query.set('page', String(params.page));
+      if (params.per_page) {
+        query.set('per_page', String(params.per_page));
+        query.set('perPage', String(params.per_page));
+      }
+    }
+    const qs = query.toString();
+    const res = await this.requestJson<
+      | { items?: AppointmentSmsLogItem[]; logs?: AppointmentSmsLogItem[] }
+      | AppointmentSmsLogItem[]
+    >(
+      `/appointments/sms/log${qs ? `?${qs}` : ''}`,
+      {},
+      'خطا در دریافت تاریخچه پیامک‌ها'
+    );
+
+    const rawList = Array.isArray(res.data)
+      ? res.data
+      : res.data?.items || res.data?.logs || [];
+
+    return {
+      ...res,
+      data: { items: rawList },
+    };
+  }
+
+  /**
+   * GET /api/v1/appointments
+   * Sends both `per_page` and `perPage` for PHP and dev-server compatibility.
+   */
+  async getAppointmentsList(
+    params?: GetAppointmentsListQuery
+  ): Promise<ApiEnvelope<AppointmentRecord[]>> {
+    const query = new URLSearchParams();
+    const perPageVal = params?.per_page ?? params?.perPage ?? 50;
+    query.set('page', String(params?.page || 1));
+    query.set('per_page', String(perPageVal));
+    query.set('perPage', String(perPageVal));
+    if (params?.student_id) query.set('student_id', String(params.student_id));
+    if (params?.status) query.set('status', params.status);
+    if (safeTrim(params?.from_date)) query.set('from_date', safeTrim(params?.from_date));
+    if (safeTrim(params?.to_date)) query.set('to_date', safeTrim(params?.to_date));
+
+    const res = await this.requestJson<
+      AppointmentRecord[] | { appointments?: AppointmentRecord[]; items?: AppointmentRecord[] }
+    >(
+      `/appointments?${query.toString()}`,
+      {},
+      'خطا در بارگذاری لیست نوبت‌ها'
+    );
+
+    const list = Array.isArray(res.data)
+      ? res.data
+      : res.data?.appointments || res.data?.items || [];
+
+    return { ...res, data: list };
+  }
+
+  /**
+   * POST /api/v1/appointments or PUT /api/v1/appointments/{id}
+   */
+  async upsertAppointment(
+    payload: UpsertAppointmentRequest
+  ): Promise<ApiEnvelope<AppointmentRecord>> {
+    const endpoint = payload.id ? `/appointments/${payload.id}` : '/appointments';
+    const method = payload.id ? 'PUT' : 'POST';
+    const startTime = safeTrim(payload.start_time).slice(0, 5);
+    const endTime = safeTrim(payload.end_time).slice(0, 5);
+
+    return this.requestJson<AppointmentRecord>(
+      endpoint,
+      {
+        method,
+        body: JSON.stringify({
+          student_id: Number(payload.student_id),
+          appointment_date: safeTrim(payload.appointment_date),
+          start_time: startTime,
+          end_time: endTime,
+          type: safeTrim(payload.type) || 'weekly_session',
+          description: safeTrim(payload.description) || undefined,
+          status: payload.status || 'scheduled',
+        }),
+      },
+      'خطا در ذخیره نوبت'
+    );
+  }
+
+  /**
+   * PUT /api/v1/appointments/{id}/status
+   */
+  async updateAppointmentStatus(
+    id: number,
+    status: AppointmentStatus
+  ): Promise<ApiEnvelope<AppointmentRecord>> {
+    return this.requestJson<AppointmentRecord>(
+      `/appointments/${id}/status`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+      },
+      'خطا در تغییر وضعیت نوبت'
+    );
+  }
+
+  /**
+   * DELETE /api/v1/appointments/{id}
+   */
+  async deleteAppointment(id: number): Promise<ApiEnvelope<null>> {
+    return this.requestJson<null>(
+      `/appointments/${id}`,
+      { method: 'DELETE' },
+      'خطا در لغو و حذف نوبت'
+    );
+  }
+
+  // ============================================================================
+  // Parent Contacts (/api/v1/students/{studentId}/parent-contacts*)
+  // ============================================================================
+
+  async getParentContacts(
+    studentId: number
+  ): Promise<ApiEnvelope<ParentContactRecord[]>> {
+    const res = await this.requestJson<
+      ParentContactRecord[] | { contacts?: ParentContactRecord[]; items?: ParentContactRecord[] }
+    >(
+      `/students/${studentId}/parent-contacts`,
+      {},
+      'خطا در دریافت شماره‌های والدین'
+    );
+    const list = Array.isArray(res.data)
+      ? res.data
+      : res.data?.contacts || res.data?.items || [];
+    return { ...res, data: list };
+  }
+
+  async createParentContact(
+    studentId: number,
+    payload: CreateParentContactRequest
+  ): Promise<ApiEnvelope<ParentContactRecord>> {
+    return this.requestJson<ParentContactRecord>(
+      `/students/${studentId}/parent-contacts`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          parent_name: safeTrim(payload.parent_name),
+          relationship: payload.relationship,
+          phone: safeTrim(payload.phone),
+          is_primary: Boolean(payload.is_primary ?? true),
+        }),
+      },
+      'خطا در ثبت شماره ولی'
+    );
+  }
+
+  async updateParentContact(
+    studentId: number,
+    contactId: number,
+    payload: UpdateParentContactRequest
+  ): Promise<ApiEnvelope<ParentContactRecord>> {
+    return this.requestJson<ParentContactRecord>(
+      `/students/${studentId}/parent-contacts/${contactId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          parent_name: payload.parent_name !== undefined ? safeTrim(payload.parent_name) : undefined,
+          relationship: payload.relationship,
+          phone: payload.phone !== undefined ? safeTrim(payload.phone) : undefined,
+          is_primary: payload.is_primary,
+        }),
+      },
+      'خطا در ویرایش شماره ولی'
+    );
+  }
+
+  async deleteParentContact(
+    studentId: number,
+    contactId: number
+  ): Promise<ApiEnvelope<null>> {
+    return this.requestJson<null>(
+      `/students/${studentId}/parent-contacts/${contactId}`,
+      { method: 'DELETE' },
+      'خطا در حذف شماره ولی'
+    );
+  }
 }
 
 export const API = new FamoApiClient();
 export default API;
+

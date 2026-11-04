@@ -1,7 +1,16 @@
 import React, { useRef, useState } from 'react';
 import { AlertCircle, Loader2 } from 'lucide-react';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'emerald' | 'ghost';
+export type ButtonVariant =
+  | 'primary'
+  | 'secondary'
+  | 'danger'
+  | 'emerald'
+  | 'success'
+  | 'warning'
+  | 'ghost';
+
+export type ButtonSize = 'sm' | 'md' | 'lg';
 
 export interface ActionButtonProps
   extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onClick'> {
@@ -9,6 +18,7 @@ export interface ActionButtonProps
   loadingText?: string;
   cooldownMs?: number;
   variant?: ButtonVariant;
+  size?: ButtonSize;
   icon?: React.ReactNode;
   onClick?: (e: React.MouseEvent<HTMLButtonElement>) => unknown | Promise<unknown>;
 }
@@ -18,7 +28,15 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   secondary: 'bg-slate-100 text-slate-700 hover:bg-slate-200 active:bg-slate-300',
   danger: 'bg-red-600 text-white hover:bg-red-700 active:bg-red-800',
   emerald: 'bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-800',
+  success: 'bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-800',
+  warning: 'bg-amber-500 text-white hover:bg-amber-600 active:bg-amber-700',
   ghost: 'bg-transparent hover:bg-slate-100 text-slate-700',
+};
+
+const SIZE_CLASSES: Record<ButtonSize, string> = {
+  sm: 'px-3 py-1.5 text-xs',
+  md: 'px-4 py-2.5 text-sm',
+  lg: 'px-5 py-3 text-base',
 };
 
 export const ActionButton: React.FC<ActionButtonProps> = ({
@@ -26,6 +44,7 @@ export const ActionButton: React.FC<ActionButtonProps> = ({
   loadingText,
   cooldownMs = 450,
   variant = 'primary',
+  size = 'md',
   icon,
   onClick,
   disabled,
@@ -83,7 +102,7 @@ export const ActionButton: React.FC<ActionButtonProps> = ({
       disabled={isDisabled}
       aria-busy={isBusy}
       onClick={handleClick}
-      className={`inline-flex items-center justify-center gap-2 rounded-xl font-semibold text-sm transition-all duration-150 cursor-pointer select-none disabled:opacity-55 disabled:cursor-not-allowed ${VARIANT_CLASSES[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-all duration-150 cursor-pointer select-none disabled:opacity-55 disabled:cursor-not-allowed ${SIZE_CLASSES[size]} ${VARIANT_CLASSES[variant]} ${className}`}
       {...rest}
     >
       {isBusy ? (

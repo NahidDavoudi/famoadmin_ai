@@ -8,6 +8,10 @@ import {
 
 export type FieldErrors<T extends string = string> = Partial<Record<T, string>>;
 
+export function hasErrors<T extends string>(errors: FieldErrors<T>): boolean {
+  return Object.values(errors).some((msg) => Boolean(msg));
+}
+
 export interface StudentFormInput {
   name: string;
   phone: string | number;
@@ -331,3 +335,100 @@ export function validateReportDateFilter(input: {
   }
   return errors;
 }
+
+export interface AppointmentFormInput {
+  appointment_date: string;
+  start_time: string;
+  end_time: string;
+}
+
+export function validateAppointmentForm(
+  input: AppointmentFormInput
+): FieldErrors<'appointment_date' | 'start_time' | 'end_time'> {
+  const errors: FieldErrors<'appointment_date' | 'start_time' | 'end_time'> = {};
+  const dateStr = safeTrim(input.appointment_date);
+  const startStr = safeTrim(input.start_time).slice(0, 5);
+  const endStr = safeTrim(input.end_time).slice(0, 5);
+
+  if (!dateStr) {
+    errors.appointment_date = 'انتخاب تاریخ نوبت الزامی است';
+  }
+
+  const timeRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+  if (!startStr) {
+    errors.start_time = 'وارد کردن ساعت شروع الزامی است';
+  } else if (!timeRegex.test(startStr)) {
+    errors.start_time = 'فرمت ساعت شروع معتبر نیست (مثال: 10:30)';
+  }
+
+  if (!endStr) {
+    errors.end_time = 'وارد کردن ساعت پایان الزامی است';
+  } else if (!timeRegex.test(endStr)) {
+    errors.end_time = 'فرمت ساعت پایان معتبر نیست (مثال: 11:00)';
+  } else if (startStr && timeRegex.test(startStr) && endStr <= startStr) {
+    errors.end_time = 'ساعت پایان باید بعد از ساعت شروع باشد';
+  }
+
+  return errors;
+}
+
+export interface ParentContactFormInput {
+  parent_name: string;
+  phone: string;
+}
+
+export function validateParentContactForm(
+  input: ParentContactFormInput
+): FieldErrors<'parent_name' | 'phone'> {
+  const errors: FieldErrors<'parent_name' | 'phone'> = {};
+  const nameStr = safeTrim(input.parent_name);
+  const phoneStr = safeTrim(input.phone);
+
+  if (!nameStr) {
+    errors.parent_name = 'نام ولی الزامی است';
+  } else if (nameStr.length < 2) {
+    errors.parent_name = 'نام ولی باید حداقل ۲ کاراکتر باشد';
+  }
+
+  if (!phoneStr) {
+    errors.phone = 'شماره موبایل ولی الزامی است';
+  } else if (!/^09\d{9}$/.test(phoneStr)) {
+    errors.phone = 'شماره موبایل باید ۱۱ رقم و با 09 شروع شود';
+  }
+
+  return errors;
+}
+
+export interface WeekSessionFormInput {
+  title: string;
+  start_date_jalali: string;
+  end_date_jalali: string;
+}
+
+export function validateWeekSessionForm(
+  input: WeekSessionFormInput
+): FieldErrors<'title' | 'start_date_jalali' | 'end_date_jalali'> {
+  const errors: FieldErrors<'title' | 'start_date_jalali' | 'end_date_jalali'> = {};
+  if (!safeTrim(input.title)) {
+    errors.title = 'عنوان هفته یا جلسه الزامی است';
+  }
+  if (!safeTrim(input.start_date_jalali)) {
+    errors.start_date_jalali = 'تاریخ شروع هفته الزامی است';
+  }
+  if (!safeTrim(input.end_date_jalali)) {
+    errors.end_date_jalali = 'تاریخ پایان هفته الزامی است';
+  }
+  return errors;
+}
+
+export function validateRemedialClassForm(input: {
+  class_name: string;
+}): FieldErrors<'class_name'> {
+  const errors: FieldErrors<'class_name'> = {};
+  if (!safeTrim(input.class_name)) {
+    errors.class_name = 'نام کلاس رفع اشکال الزامی است';
+  }
+  return errors;
+}
+

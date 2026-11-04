@@ -185,4 +185,60 @@ test('Regression: numeric chat_id, phone, and national_id never throw .trim is n
     field: 'ریاضی',
   });
   assert.equal(Object.keys(studentNumericErrors).length, 0);
+
+  const {
+    validateAppointmentForm,
+    validateParentContactForm,
+    validateWeekSessionForm,
+    validateRemedialClassForm,
+  } = await import('./form-validation');
+
+  const invalidAppt = validateAppointmentForm({
+    appointment_date: '',
+    start_time: '25:99',
+    end_time: '',
+  });
+  assert.ok(invalidAppt.appointment_date);
+  assert.ok(invalidAppt.start_time);
+  assert.ok(invalidAppt.end_time);
+
+  const invertedTimeAppt = validateAppointmentForm({
+    appointment_date: '2026-02-22',
+    start_time: '12:00',
+    end_time: '10:30',
+  });
+  assert.ok(invertedTimeAppt.end_time);
+
+  const validAppt = validateAppointmentForm({
+    appointment_date: '2026-02-22',
+    start_time: '10:30',
+    end_time: '11:30',
+  });
+  assert.equal(Object.keys(validAppt).length, 0);
+
+  const invalidContact = validateParentContactForm({
+    parent_name: 'ا',
+    phone: '0812345',
+  });
+  assert.ok(invalidContact.parent_name);
+  assert.ok(invalidContact.phone);
+
+  const validContact = validateParentContactForm({
+    parent_name: 'حسین محمدی',
+    phone: '09123456789',
+  });
+  assert.equal(Object.keys(validContact).length, 0);
+
+  const invalidWeek = validateWeekSessionForm({
+    title: '',
+    start_date_jalali: '',
+    end_date_jalali: '',
+  });
+  assert.ok(invalidWeek.title);
+  assert.ok(invalidWeek.start_date_jalali);
+  assert.ok(invalidWeek.end_date_jalali);
+
+  const invalidClass = validateRemedialClassForm({ class_name: '   ' });
+  assert.ok(invalidClass.class_name);
 });
+

@@ -13,6 +13,7 @@ import { ExamsPage } from './pages/ExamsPage';
 import { ExamEntryPage } from './pages/ExamEntryPage';
 import { FilesPage } from './pages/FilesPage';
 import { SupportersPage } from './pages/SupportersPage';
+import { AppointmentsPage } from './pages/AppointmentsPage';
 import { BlogPage } from './pages/BlogPage';
 import { ReportsPage } from './pages/ReportsPage';
 
@@ -118,6 +119,7 @@ export default function App() {
           {currentPage === 'students' && (
             <StudentsPage showToast={showToast} searchInputRef={studentSearchRef} />
           )}
+          {currentPage === 'appointments' && <AppointmentsPage showToast={showToast} />}
           {currentPage === 'courses' && <CoursesPage showToast={showToast} />}
           {currentPage === 'instructors' && <InstructorsPage showToast={showToast} />}
           {currentPage === 'exams' && (
