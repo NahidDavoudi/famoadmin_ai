@@ -62,12 +62,12 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
     setErrors({});
     setEditingCourse(course);
     setFormState({
-      name: course.name,
-      gradient_color_from: course.gradient_color_from || '#445D84',
-      gradient_color_to: course.gradient_color_to || '#E2D9C6',
-      description: course.description || '',
+      name: String(course.name ?? ''),
+      gradient_color_from: String(course.gradient_color_from || '#445D84'),
+      gradient_color_to: String(course.gradient_color_to || '#E2D9C6'),
+      description: String(course.description ?? ''),
       price: String(course.price ?? ''),
-      display_order: String(course.display_order || 0),
+      display_order: String(course.display_order ?? 0),
     });
   };
 
@@ -86,23 +86,23 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
     try {
       if (editingCourse) {
         await API.updateCourse(editingCourse.id, {
-          name: formState.name.trim(),
+          name: String(formState.name ?? '').trim(),
           gradient_color_from: formState.gradient_color_from,
           gradient_color_to: formState.gradient_color_to,
-          description: formState.description.trim(),
-          price: formState.price.trim(),
+          description: String(formState.description ?? '').trim(),
+          price: String(formState.price ?? '').trim(),
           display_order: Number(formState.display_order) || 0,
         });
         setEditingCourse(null);
         showToast('دوره به‌روزرسانی شد', 'success');
       } else {
         await API.addCourse({
-          name: formState.name.trim(),
+          name: String(formState.name ?? '').trim(),
           icon: 'fa-book',
           gradient_color_from: formState.gradient_color_from,
           gradient_color_to: formState.gradient_color_to,
-          description: formState.description.trim(),
-          price: formState.price.trim(),
+          description: String(formState.description ?? '').trim(),
+          price: String(formState.price ?? '').trim(),
           display_order: Number(formState.display_order) || 0,
         });
         setIsAddOpen(false);

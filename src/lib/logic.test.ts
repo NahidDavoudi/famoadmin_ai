@@ -155,3 +155,34 @@ test('API client targets https://api.famoacademy.ir/api/v1 and parses error enve
   assert.equal(extractErrorMessage('خطای مستقیم'), 'خطای مستقیم');
   assert.equal(extractErrorMessage(null, 'خطای پیش‌فرض'), 'خطای پیش‌فرض');
 });
+
+test('Regression: numeric chat_id, phone, and national_id never throw .trim is not a function', async () => {
+  const { safeTrim } = await import('./exam-math');
+  assert.equal(safeTrim(123456789), '123456789');
+  assert.equal(safeTrim(null), '');
+  assert.equal(safeTrim(undefined), '');
+  assert.equal(safeTrim('  987654321  '), '987654321');
+
+  const suppEditErrors = validateSupporterForm(
+    {
+      name: 'سارا کریمی',
+      phone: 9123456789,
+      grade: 12,
+      field: 'تجربی',
+      chat_id: 123456789,
+      username: 'sara',
+      password: '',
+    },
+    true
+  );
+  assert.equal(Object.keys(suppEditErrors).length, 0);
+
+  const studentNumericErrors = validateStudentForm({
+    name: 'امیرحسین رضایی',
+    phone: '09123456789',
+    national_id: 1020304050,
+    grade: 11,
+    field: 'ریاضی',
+  });
+  assert.equal(Object.keys(studentNumericErrors).length, 0);
+});

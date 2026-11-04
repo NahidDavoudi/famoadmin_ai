@@ -2,6 +2,7 @@ import {
   calculateSubjectMetrics,
   isValidIranianPhone,
   isValidNationalId,
+  safeTrim,
   type SubjectDraft,
 } from './exam-math';
 
@@ -9,9 +10,9 @@ export type FieldErrors<T extends string = string> = Partial<Record<T, string>>;
 
 export interface StudentFormInput {
   name: string;
-  phone: string;
-  national_id: string;
-  grade: string;
+  phone: string | number;
+  national_id: string | number;
+  grade: string | number;
   field: string;
 }
 
@@ -20,28 +21,34 @@ export function validateStudentForm(
 ): FieldErrors<'name' | 'phone' | 'national_id' | 'grade' | 'field'> {
   const errors: FieldErrors<'name' | 'phone' | 'national_id' | 'grade' | 'field'> = {};
 
-  if (!input.name.trim()) {
+  const name = safeTrim(input.name);
+  if (!name) {
     errors.name = 'نام و نام خانوادگی الزامی است';
+  } else if (name.length < 2) {
+    errors.name = 'نام و نام خانوادگی باید حداقل ۲ کاراکتر باشد';
   }
 
-  if (!input.phone.trim()) {
+  const phone = safeTrim(input.phone);
+  if (!phone) {
     errors.phone = 'شماره موبایل الزامی است';
-  } else if (!isValidIranianPhone(input.phone)) {
+  } else if (!isValidIranianPhone(phone)) {
     errors.phone = 'شماره موبایل معتبر نیست (مثال: 09123456789)';
   }
 
-  if (!input.national_id.trim()) {
+  const nationalId = safeTrim(input.national_id);
+  if (!nationalId) {
     errors.national_id = 'کد ملی الزامی است';
-  } else if (!isValidNationalId(input.national_id)) {
+  } else if (!isValidNationalId(nationalId)) {
     errors.national_id = 'کد ملی باید دقیقاً ۱۰ رقم باشد';
   }
 
-  const gradeNum = Number(input.grade);
-  if (!String(input.grade).trim() || Number.isNaN(gradeNum) || gradeNum < 7 || gradeNum > 12) {
+  const gradeStr = safeTrim(input.grade);
+  const gradeNum = Number(gradeStr);
+  if (!gradeStr || Number.isNaN(gradeNum) || gradeNum < 7 || gradeNum > 12) {
     errors.grade = 'پایه تحصیلی باید بین ۷ تا ۱۲ باشد';
   }
 
-  if (!input.field.trim()) {
+  if (!safeTrim(input.field)) {
     errors.field = 'انتخاب رشته تحصیلی الزامی است';
   }
 
@@ -50,7 +57,7 @@ export function validateStudentForm(
 
 export interface CourseFormInput {
   name: string;
-  display_order?: string;
+  display_order?: string | number;
 }
 
 export function validateCourseForm(
@@ -58,11 +65,11 @@ export function validateCourseForm(
 ): FieldErrors<'name' | 'display_order'> {
   const errors: FieldErrors<'name' | 'display_order'> = {};
 
-  if (!input.name.trim()) {
+  if (!safeTrim(input.name)) {
     errors.name = 'وارد کردن نام دوره الزامی است';
   }
 
-  if (input.display_order !== undefined && String(input.display_order).trim() === '') {
+  if (input.display_order !== undefined && safeTrim(input.display_order) === '') {
     errors.display_order = 'ترتیب نمایش الزامی است';
   } else if (Number(input.display_order) < 0) {
     errors.display_order = 'ترتیب نمایش نمی‌تواند منفی باشد';
@@ -74,7 +81,7 @@ export function validateCourseForm(
 export interface InstructorFormInput {
   name: string;
   title: string;
-  display_order?: string;
+  display_order?: string | number;
 }
 
 export function validateInstructorForm(
@@ -82,15 +89,15 @@ export function validateInstructorForm(
 ): FieldErrors<'name' | 'title' | 'display_order'> {
   const errors: FieldErrors<'name' | 'title' | 'display_order'> = {};
 
-  if (!input.name.trim()) {
+  if (!safeTrim(input.name)) {
     errors.name = 'نام و نام خانوادگی استاد الزامی است';
   }
 
-  if (!input.title.trim()) {
+  if (!safeTrim(input.title)) {
     errors.title = 'عنوان یا سمت استاد الزامی است';
   }
 
-  if (input.display_order !== undefined && String(input.display_order).trim() === '') {
+  if (input.display_order !== undefined && safeTrim(input.display_order) === '') {
     errors.display_order = 'ترتیب نمایش الزامی است';
   } else if (Number(input.display_order) < 0) {
     errors.display_order = 'ترتیب نمایش نمی‌تواند منفی باشد';
@@ -101,9 +108,10 @@ export function validateInstructorForm(
 
 export interface SupporterFormInput {
   name: string;
-  phone: string;
-  grade: string;
+  phone: string | number;
+  grade: string | number;
   field: string;
+  chat_id?: string | number | null;
   username: string;
   password: string;
 }
@@ -114,33 +122,35 @@ export function validateSupporterForm(
 ): FieldErrors<'name' | 'phone' | 'grade' | 'field' | 'username' | 'password'> {
   const errors: FieldErrors<'name' | 'phone' | 'grade' | 'field' | 'username' | 'password'> = {};
 
-  if (!input.name.trim()) {
+  if (!safeTrim(input.name)) {
     errors.name = 'نام و نام خانوادگی پشتیبان الزامی است';
   }
 
   if (!isEditing) {
-    if (!input.phone.trim()) {
+    const phone = safeTrim(input.phone);
+    if (!phone) {
       errors.phone = 'شماره موبایل الزامی است';
-    } else if (!isValidIranianPhone(input.phone)) {
+    } else if (!isValidIranianPhone(phone)) {
       errors.phone = 'فرمت شماره موبایل معتبر نیست (مثال: 09123456789)';
     }
   }
 
-  if (!String(input.grade).trim()) {
+  if (!safeTrim(input.grade)) {
     errors.grade = 'انتخاب پایه تحصیلی الزامی است';
   }
 
-  if (!input.field.trim()) {
+  if (!safeTrim(input.field)) {
     errors.field = 'انتخاب رشته یا درس الزامی است';
   }
 
-  if (!isEditing && !input.username.trim()) {
+  if (!isEditing && !safeTrim(input.username)) {
     errors.username = 'نام کاربری برای ورود به پنل الزامی است';
   }
 
-  if (!isEditing && !input.password) {
+  const pwd = String(input.password ?? '');
+  if (!isEditing && !pwd) {
     errors.password = 'وارد کردن رمز عبور الزامی است';
-  } else if (input.password && input.password.length < 4) {
+  } else if (pwd && pwd.length < 4) {
     errors.password = 'رمز عبور باید حداقل ۴ کاراکتر باشد';
   }
 
@@ -148,7 +158,7 @@ export function validateSupporterForm(
 }
 
 export interface FileUploadFormInput {
-  studentId: string;
+  studentId: string | number;
   examDate: string;
   hasFile: boolean;
 }
@@ -158,11 +168,11 @@ export function validateFileUploadForm(
 ): FieldErrors<'studentId' | 'examDate' | 'file'> {
   const errors: FieldErrors<'studentId' | 'examDate' | 'file'> = {};
 
-  if (!input.studentId.trim()) {
+  if (!safeTrim(input.studentId)) {
     errors.studentId = 'انتخاب دانش‌آموز الزامی است';
   }
 
-  if (!input.examDate.trim()) {
+  if (!safeTrim(input.examDate)) {
     errors.examDate = 'انتخاب تاریخ آزمون الزامی است';
   }
 
@@ -181,8 +191,8 @@ export interface BlogPostFormInput {
   cover_image?: string;
 }
 
-export function stripHtmlToText(html: string): string {
-  return html
+export function stripHtmlToText(html: unknown): string {
+  return String(html ?? '')
     .replace(/<[^>]*>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .trim();
@@ -193,15 +203,15 @@ export function validateBlogPostForm(
 ): FieldErrors<'title' | 'slug' | 'category' | 'content' | 'cover_image'> {
   const errors: FieldErrors<'title' | 'slug' | 'category' | 'content' | 'cover_image'> = {};
 
-  if (!input.title.trim()) {
+  if (!safeTrim(input.title)) {
     errors.title = 'عنوان پست وبلاگ الزامی است';
   }
 
-  if (!input.slug.trim()) {
+  if (!safeTrim(input.slug)) {
     errors.slug = 'اسلاگ (آدرس URL) الزامی است';
   }
 
-  if (!input.category.trim()) {
+  if (!safeTrim(input.category)) {
     errors.category = 'انتخاب دسته‌بندی الزامی است';
   }
 
@@ -209,11 +219,8 @@ export function validateBlogPostForm(
     errors.content = 'محتوای کامل پست نمی‌تواند خالی باشد';
   }
 
-  if (
-    input.cover_image &&
-    input.cover_image.trim() !== '' &&
-    !/^(https?:\/\/|\/)/i.test(input.cover_image.trim())
-  ) {
+  const coverImage = safeTrim(input.cover_image);
+  if (coverImage !== '' && !/^(https?:\/\/|\/)/i.test(coverImage)) {
     errors.cover_image = 'آدرس تصویر باید با http:// یا https:// شروع شود';
   }
 
@@ -240,7 +247,7 @@ export function validateExamEntryForm(input: {
 }): ExamEntryValidationResult {
   let studentError: string | undefined;
   if (!input.hasStudent) {
-    studentError = input.studentQuery.trim()
+    studentError = safeTrim(input.studentQuery)
       ? 'لطفاً نام دانش‌آموز را از لیست پیشنهادی انتخاب کنید'
       : 'انتخاب دانش‌آموز الزامی است';
   }
@@ -248,21 +255,21 @@ export function validateExamEntryForm(input: {
   const rowErrors: Record<string, SubjectRowErrors> = {};
   const nonBlankRows = input.rows.filter(
     (r) =>
-      r.subject.trim() !== '' ||
-      String(r.total_q).trim() !== '' ||
-      String(r.correct).trim() !== '' ||
-      String(r.wrong).trim() !== ''
+      safeTrim(r.subject) !== '' ||
+      safeTrim(r.total_q) !== '' ||
+      safeTrim(r.correct) !== '' ||
+      safeTrim(r.wrong) !== ''
   );
 
   const rowsToValidate = nonBlankRows.length > 0 ? nonBlankRows : input.rows.slice(0, 1);
 
   for (const row of rowsToValidate) {
     const rErr: SubjectRowErrors = {};
-    if (!row.subject.trim()) {
+    if (!safeTrim(row.subject)) {
       rErr.subject = 'نام درس الزامی است';
     }
 
-    const totalStr = String(row.total_q).trim();
+    const totalStr = safeTrim(row.total_q);
     const totalNum = Number(totalStr);
     if (!totalStr) {
       rErr.total_q = 'الزامی';
@@ -270,8 +277,8 @@ export function validateExamEntryForm(input: {
       rErr.total_q = 'حداقل ۱ سوال';
     }
 
-    const correctStr = String(row.correct).trim();
-    const wrongStr = String(row.wrong).trim();
+    const correctStr = safeTrim(row.correct);
+    const wrongStr = safeTrim(row.wrong);
     const correctNum = correctStr === '' ? 0 : Number(correctStr);
     const wrongNum = wrongStr === '' ? 0 : Number(wrongStr);
 
@@ -312,12 +319,14 @@ export function validateReportDateFilter(input: {
   dateTo: string;
 }): FieldErrors<'dateFrom' | 'dateTo'> {
   const errors: FieldErrors<'dateFrom' | 'dateTo'> = {};
-  if (!input.dateFrom.trim()) {
+  const from = safeTrim(input.dateFrom);
+  const to = safeTrim(input.dateTo);
+  if (!from) {
     errors.dateFrom = 'تاریخ شروع الزامی است';
   }
-  if (!input.dateTo.trim()) {
+  if (!to) {
     errors.dateTo = 'تاریخ پایان الزامی است';
-  } else if (input.dateFrom && input.dateTo < input.dateFrom) {
+  } else if (from && to < from) {
     errors.dateTo = 'تاریخ پایان نمی‌تواند قبل از تاریخ شروع باشد';
   }
   return errors;

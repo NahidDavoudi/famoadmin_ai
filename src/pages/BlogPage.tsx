@@ -89,19 +89,19 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
         const fullPost = res.data?.post || post;
         setEditingPostId(fullPost.id);
         setFormState({
-          title: fullPost.title,
-          slug: fullPost.slug || '',
-          category: fullPost.category || '',
-          cover_image: fullPost.cover_image || '',
-          excerpt: fullPost.excerpt || '',
-          content: fullPost.content || '',
-          meta_description: fullPost.meta_description || '',
+          title: String(fullPost.title ?? ''),
+          slug: String(fullPost.slug ?? ''),
+          category: String(fullPost.category ?? ''),
+          cover_image: String(fullPost.cover_image ?? ''),
+          excerpt: String(fullPost.excerpt ?? ''),
+          content: String(fullPost.content ?? ''),
+          meta_description: String(fullPost.meta_description ?? ''),
           is_published: Boolean(fullPost.published ?? fullPost.is_published),
         });
         setIsEditingView(true);
         setTimeout(() => {
           if (editorRef.current) {
-            editorRef.current.innerHTML = fullPost.content || '';
+            editorRef.current.innerHTML = String(fullPost.content ?? '');
           }
         }, 30);
       } catch (err) {
@@ -150,7 +150,8 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
     e.preventDefault();
     if (submitting) return;
 
-    const currentHtml = editorRef.current?.innerHTML.trim() || formState.content.trim();
+    const currentHtml =
+      editorRef.current?.innerHTML.trim() || String(formState.content ?? '').trim();
     const validationErrors = validateBlogPostForm({
       title: formState.title,
       slug: formState.slug,
@@ -169,13 +170,13 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
     try {
       await API.saveBlogPost(
         {
-          title: formState.title.trim(),
-          slug: formState.slug.trim(),
-          category: formState.category || undefined,
-          cover_image: formState.cover_image.trim() || null,
-          excerpt: formState.excerpt.trim(),
+          title: String(formState.title ?? '').trim(),
+          slug: String(formState.slug ?? '').trim(),
+          category: String(formState.category ?? '').trim() || undefined,
+          cover_image: String(formState.cover_image ?? '').trim() || null,
+          excerpt: String(formState.excerpt ?? '').trim(),
           content: currentHtml,
-          meta_description: formState.meta_description.trim(),
+          meta_description: String(formState.meta_description ?? '').trim(),
           published: formState.is_published,
         },
         editingPostId

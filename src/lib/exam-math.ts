@@ -60,18 +60,26 @@ export function calculateSubjectMetrics(
 }
 
 /**
+ * Safely converts any value (string, number, null, undefined) to a trimmed string.
+ */
+export function safeTrim(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+/**
  * Validates Iranian mobile phone number according to OpenAPI pattern:
  * ^(\+98|0098|98|0)?9[0-9]{9}$
  */
-export function isValidIranianPhone(phone: string): boolean {
-  return /^(\+98|0098|98|0)?9[0-9]{9}$/.test(phone.trim());
+export function isValidIranianPhone(phone: unknown): boolean {
+  return /^(\+98|0098|98|0)?9[0-9]{9}$/.test(safeTrim(phone));
 }
 
 /**
  * Normalizes an Iranian mobile number to 09XXXXXXXXX format.
  */
-export function normalizeIranianPhone(phone: string): string {
-  const trimmed = phone.trim();
+export function normalizeIranianPhone(phone: unknown): string {
+  const trimmed = safeTrim(phone);
   const match = trimmed.match(/^(?:\+98|0098|98|0)?(9[0-9]{9})$/);
   return match ? `0${match[1]}` : trimmed;
 }
@@ -79,16 +87,16 @@ export function normalizeIranianPhone(phone: string): string {
 /**
  * Basic 10-digit National ID check.
  */
-export function isValidNationalId(nationalId: string): boolean {
-  return /^\d{10}$/.test(nationalId.trim());
+export function isValidNationalId(nationalId: unknown): boolean {
+  return /^\d{10}$/.test(safeTrim(nationalId));
 }
 
 /**
  * Strict Iranian 10-digit National ID (کد ملی) Mod-11 checksum validation
  * as required by POST /api/v1/auth/register in OpenAPI 3.1.0.
  */
-export function isValidNationalIdChecksum(nationalId: string): boolean {
-  const code = nationalId.trim();
+export function isValidNationalIdChecksum(nationalId: unknown): boolean {
+  const code = safeTrim(nationalId);
   if (!/^[0-9]{10}$/.test(code)) return false;
   // Reject repeated digits like 0000000000, 1111111111, etc.
   if (/^(\d)\1{9}$/.test(code)) return false;
@@ -106,7 +114,7 @@ export function isValidNationalIdChecksum(nationalId: string): boolean {
  * Computes a valid 10-digit Iranian National ID from a 9-digit prefix.
  */
 export function computeNationalIdWithChecksum(nineDigits: string): string {
-  const prefix = nineDigits.replace(/\D/g, '').padStart(9, '0').slice(0, 9);
+  const prefix = String(nineDigits ?? '').replace(/\D/g, '').padStart(9, '0').slice(0, 9);
   let sum = 0;
   for (let i = 0; i < 9; i++) {
     sum += Number(prefix[i]) * (10 - i);
@@ -125,11 +133,11 @@ export interface StudentFilterCriteria {
 
 export function filterStudentsList(students: Student[], criteria: StudentFilterCriteria): Student[] {
   return students.filter((s) => {
-    if (criteria.search && criteria.search.trim() !== '') {
-      const q = criteria.search.trim().toLowerCase();
-      const matchName = s.name.toLowerCase().includes(q);
-      const matchPhone = (s.phone || '').includes(q);
-      const matchNationalId = (s.national_id || '').includes(q);
+    const q = safeTrim(criteria.search).toLowerCase();
+    if (q !== '') {
+      const matchName = String(s.name ?? '').toLowerCase().includes(q);
+      const matchPhone = String(s.phone ?? '').includes(q);
+      const matchNationalId = String(s.national_id ?? '').includes(q);
       if (!matchName && !matchPhone && !matchNationalId) return false;
     }
 
@@ -142,9 +150,9 @@ export function filterStudentsList(students: Student[], criteria: StudentFilterC
     }
 
     if (criteria.status === 'active' || criteria.status === '1') {
-      if (Number(s.is_active) !== 1) return false;
+      if (Number(s.status ?? s.is_active) !== 1) return false;
     } else if (criteria.status === 'inactive' || criteria.status === '0') {
-      if (Number(s.is_active) !== 0) return false;
+      if (Number(s.status ?? s.is_active) !== 0) return false;
     }
 
     return true;

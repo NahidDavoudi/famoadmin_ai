@@ -3,6 +3,8 @@ import type {
   Course,
   Instructor,
   Supporter,
+  PublicSupporter,
+  BlogCategory,
   ExamDateSummary,
   ExamStudentSummary,
   ExamDetailsResponse,
@@ -13,6 +15,7 @@ import type {
   AcademicField,
   SubjectResult,
 } from '../types';
+import { safeTrim } from './exam-math';
 
 export interface ApiErrorObject {
   code?: string;
@@ -165,6 +168,17 @@ class FamoApiClient {
     return json;
   }
 
+  // System (/api/v1/health)
+  async healthCheck(): Promise<
+    ApiEnvelope<{ status: string; version: string; timestamp: string }>
+  > {
+    return this.requestJson<{ status: string; version: string; timestamp: string }>(
+      '/health',
+      {},
+      'خطا در بررسی وضعیت سرور'
+    );
+  }
+
   // Auth (/api/v1/auth/*)
   async getMe(): Promise<{
     id: number;
@@ -195,21 +209,122 @@ class FamoApiClient {
     requires_2fa?: boolean;
     user_id?: number;
     email_mask?: string | null;
-    user?: { id: number; username: string; role: string };
+    user?: {
+      id: number;
+      username: string;
+      full_name?: string | null;
+      role: string;
+      student_id?: number | null;
+    };
   }> {
     const json = await this.requestJson<{
       token?: string;
       requires_2fa?: boolean;
       user_id?: number;
       email_mask?: string | null;
-      user?: { id: number; username: string; role: string };
+      user?: {
+        id: number;
+        username: string;
+        full_name?: string | null;
+        role: string;
+        student_id?: number | null;
+      };
     }>(
       '/auth/login',
       {
         method: 'POST',
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({
+          username: safeTrim(username),
+          password,
+        }),
       },
       'نام کاربری یا رمز عبور نادرست است'
+    );
+    if (json.data?.token) {
+      this.setToken(json.data.token);
+    }
+    return json.data;
+  }
+
+  async verify2fa(
+    userId: number,
+    code: string
+  ): Promise<{
+    token: string;
+    user: {
+      id: number;
+      username: string;
+      full_name?: string | null;
+      role: string;
+      student_id?: number | null;
+    };
+  }> {
+    const json = await this.requestJson<{
+      token: string;
+      user: {
+        id: number;
+        username: string;
+        full_name?: string | null;
+        role: string;
+        student_id?: number | null;
+      };
+    }>(
+      '/auth/verify-2fa',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          user_id: Number(userId),
+          code: safeTrim(code),
+        }),
+      },
+      'کد تایید نامعتبر یا منقضی شده است'
+    );
+    if (json.data?.token) {
+      this.setToken(json.data.token);
+    }
+    return json.data;
+  }
+
+  async registerStudent(payload: {
+    name: string;
+    phone: string;
+    nationalId: string;
+    grade: number;
+    field: AcademicField;
+    password: string;
+  }): Promise<{
+    token: string;
+    user: {
+      id: number;
+      username: string;
+      full_name?: string | null;
+      role: string;
+      student_id?: number | null;
+    };
+  }> {
+    const json = await this.requestJson<{
+      token: string;
+      user: {
+        id: number;
+        username: string;
+        full_name?: string | null;
+        role: string;
+        student_id?: number | null;
+      };
+    }>(
+      '/auth/register',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          name: safeTrim(payload.name),
+          phone: safeTrim(payload.phone),
+          nationalId: safeTrim(payload.nationalId),
+          grade: Number(payload.grade),
+          field: payload.field,
+          password: payload.password,
+        }),
+      },
+      'خطا در ثبت‌نام دانش‌آموز'
     );
     if (json.data?.token) {
       this.setToken(json.data.token);
@@ -224,6 +339,78 @@ class FamoApiClient {
       // ignore network error on logout
     }
     this.setToken(null);
+  }
+
+  // Public Catalog & Blog (/api/v1/public/*)
+  async getPublicCourses(page = 1, perPage = 20): Promise<ApiEnvelope<Course[]>> {
+    return this.requestJson<Course[]>(
+      `/public/courses?page=${page}&per_page=${perPage}`,
+      {},
+      'خطا در بارگذاری دوره‌های عمومی'
+    );
+  }
+
+  async getPublicInstructors(page = 1, perPage = 20): Promise<ApiEnvelope<Instructor[]>> {
+    return this.requestJson<Instructor[]>(
+      `/public/instructors?page=${page}&per_page=${perPage}`,
+      {},
+      'خطا در بارگذاری اساتید عمومی'
+    );
+  }
+
+  async getPublicSupporters(page = 1, perPage = 20): Promise<ApiEnvelope<PublicSupporter[]>> {
+    return this.requestJson<PublicSupporter[]>(
+      `/public/supporters?page=${page}&per_page=${perPage}`,
+      {},
+      'خطا در بارگذاری پشتیبان‌های عمومی'
+    );
+  }
+
+  async getPublicBlogCategories(): Promise<ApiEnvelope<{ categories: BlogCategory[] }>> {
+    return this.requestJson<{ categories: BlogCategory[] }>(
+      '/public/blog/categories',
+      {},
+      'خطا در بارگذاری دسته‌بندی‌های وبلاگ'
+    );
+  }
+
+  async getPublicBlogPosts(params?: {
+    search?: string;
+    page?: number;
+    perPage?: number;
+  }): Promise<ApiEnvelope<{ posts: BlogPost[] }>> {
+    const query = new URLSearchParams({
+      page: String(params?.page || 1),
+      per_page: String(params?.perPage || 12),
+    });
+    if (safeTrim(params?.search)) query.set('search', safeTrim(params?.search));
+    return this.requestJson<{ posts: BlogPost[] }>(
+      `/public/blog/posts?${query.toString()}`,
+      {},
+      'خطا در بارگذاری پست‌های عمومی وبلاگ'
+    );
+  }
+
+  async getPublicBlogPostBySlug(
+    slug: string
+  ): Promise<ApiEnvelope<{ post: BlogPost; related: BlogPost[] }>> {
+    return this.requestJson<{ post: BlogPost; related: BlogPost[] }>(
+      `/public/blog/posts/${encodeURIComponent(safeTrim(slug))}`,
+      {},
+      'مقاله مورد نظر یافت نشد'
+    );
+  }
+
+  async getPublicBlogPostsByCategory(
+    categorySlug: string,
+    page = 1,
+    perPage = 12
+  ): Promise<ApiEnvelope<{ posts: BlogPost[]; category_info: BlogCategory }>> {
+    return this.requestJson<{ posts: BlogPost[]; category_info: BlogCategory }>(
+      `/public/blog/categories/${encodeURIComponent(safeTrim(categorySlug))}/posts?page=${page}&per_page=${perPage}`,
+      {},
+      'خطا در بارگذاری مقالات دسته‌بندی'
+    );
   }
 
   // Dashboard (/api/v1/dashboard/stats)
@@ -248,7 +435,8 @@ class FamoApiClient {
       page: String(params.page || 1),
       per_page: String(params.perPage || 20),
     });
-    if (params.search?.trim()) query.set('search', params.search.trim());
+    const search = safeTrim(params.search);
+    if (search) query.set('search', search);
     if (params.field) query.set('field', params.field);
     if (params.grade) query.set('grade', params.grade);
     if (params.status === 'active' || params.status === '1') {
@@ -276,20 +464,21 @@ class FamoApiClient {
 
   async addStudent(payload: {
     name: string;
-    phone: string;
-    nationalId: string;
+    phone: string | number;
+    nationalId: string | number;
     grade: number;
     field: AcademicField;
   }): Promise<ApiEnvelope<Student>> {
+    const nationalId = safeTrim(payload.nationalId);
     return this.requestJson<Student>(
       '/students',
       {
         method: 'POST',
         body: JSON.stringify({
-          name: payload.name.trim(),
-          phone: payload.phone.trim(),
-          nationalId: payload.nationalId.trim(),
-          national_id: payload.nationalId.trim(),
+          name: safeTrim(payload.name),
+          phone: safeTrim(payload.phone),
+          nationalId,
+          national_id: nationalId,
           grade: Number(payload.grade),
           field: payload.field,
         }),
@@ -302,21 +491,22 @@ class FamoApiClient {
     id: number,
     payload: {
       name: string;
-      phone: string;
-      nationalId: string;
+      phone: string | number;
+      nationalId: string | number;
       grade: number;
       field: AcademicField;
     }
   ): Promise<ApiEnvelope<Student>> {
+    const nationalId = safeTrim(payload.nationalId);
     return this.requestJson<Student>(
       `/students/${id}`,
       {
         method: 'PUT',
         body: JSON.stringify({
-          name: payload.name.trim(),
-          phone: payload.phone.trim(),
-          nationalId: payload.nationalId.trim(),
-          national_id: payload.nationalId.trim(),
+          name: safeTrim(payload.name),
+          phone: safeTrim(payload.phone),
+          nationalId,
+          national_id: nationalId,
           grade: Number(payload.grade),
           field: payload.field,
         }),
@@ -366,12 +556,12 @@ class FamoApiClient {
 
   async addCourse(payload: Omit<Course, 'id'>): Promise<ApiEnvelope<Course>> {
     const formData = new FormData();
-    formData.append('name', payload.name);
-    if (payload.icon) formData.append('icon', payload.icon);
-    if (payload.gradient_color_from) formData.append('gradient_color_from', payload.gradient_color_from);
-    if (payload.gradient_color_to) formData.append('gradient_color_to', payload.gradient_color_to);
-    if (payload.description) formData.append('description', payload.description);
-    const numericPrice = Number(String(payload.price).replace(/[^\d]/g, '')) || 0;
+    formData.append('name', safeTrim(payload.name));
+    if (payload.icon) formData.append('icon', String(payload.icon));
+    if (payload.gradient_color_from) formData.append('gradient_color_from', String(payload.gradient_color_from));
+    if (payload.gradient_color_to) formData.append('gradient_color_to', String(payload.gradient_color_to));
+    if (payload.description) formData.append('description', String(payload.description));
+    const numericPrice = Number(String(payload.price ?? '').replace(/[^\d]/g, '')) || 0;
     formData.append('price', String(numericPrice));
     formData.append('display_order', String(payload.display_order || 0));
 
@@ -387,15 +577,15 @@ class FamoApiClient {
 
   async updateCourse(id: number, payload: Partial<Omit<Course, 'id'>>): Promise<ApiEnvelope<Course>> {
     const formData = new FormData();
-    if (payload.name !== undefined) formData.append('name', payload.name);
-    if (payload.icon) formData.append('icon', payload.icon);
-    if (payload.gradient_color_from) formData.append('gradient_color_from', payload.gradient_color_from);
-    if (payload.gradient_color_to) formData.append('gradient_color_to', payload.gradient_color_to);
+    if (payload.name !== undefined) formData.append('name', safeTrim(payload.name));
+    if (payload.icon) formData.append('icon', String(payload.icon));
+    if (payload.gradient_color_from) formData.append('gradient_color_from', String(payload.gradient_color_from));
+    if (payload.gradient_color_to) formData.append('gradient_color_to', String(payload.gradient_color_to));
     if (payload.description !== undefined && payload.description !== null) {
-      formData.append('description', payload.description);
+      formData.append('description', String(payload.description));
     }
     if (payload.price !== undefined) {
-      const numericPrice = Number(String(payload.price).replace(/[^\d]/g, '')) || 0;
+      const numericPrice = Number(String(payload.price ?? '').replace(/[^\d]/g, '')) || 0;
       formData.append('price', String(numericPrice));
     }
     if (payload.display_order !== undefined) {
@@ -423,10 +613,10 @@ class FamoApiClient {
 
   async addInstructor(payload: Omit<Instructor, 'id'>): Promise<ApiEnvelope<Instructor>> {
     const formData = new FormData();
-    formData.append('name', payload.name);
-    if (payload.title) formData.append('title', payload.title);
-    if (payload.description) formData.append('description', payload.description);
-    if (payload.initial_letter) formData.append('initial_letter', payload.initial_letter);
+    formData.append('name', safeTrim(payload.name));
+    if (payload.title) formData.append('title', String(payload.title));
+    if (payload.description) formData.append('description', String(payload.description));
+    if (payload.initial_letter) formData.append('initial_letter', String(payload.initial_letter));
     formData.append('display_order', String(payload.display_order || 0));
 
     return this.requestJson<Instructor>(
@@ -444,12 +634,12 @@ class FamoApiClient {
     payload: Partial<Omit<Instructor, 'id'>>
   ): Promise<ApiEnvelope<Instructor>> {
     const formData = new FormData();
-    if (payload.name !== undefined) formData.append('name', payload.name);
-    if (payload.title !== undefined && payload.title !== null) formData.append('title', payload.title);
+    if (payload.name !== undefined) formData.append('name', safeTrim(payload.name));
+    if (payload.title !== undefined && payload.title !== null) formData.append('title', String(payload.title));
     if (payload.description !== undefined && payload.description !== null) {
-      formData.append('description', payload.description);
+      formData.append('description', String(payload.description));
     }
-    if (payload.initial_letter) formData.append('initial_letter', payload.initial_letter);
+    if (payload.initial_letter) formData.append('initial_letter', String(payload.initial_letter));
     if (payload.display_order !== undefined) {
       formData.append('display_order', String(payload.display_order));
     }
@@ -483,24 +673,26 @@ class FamoApiClient {
 
   async addSupporter(payload: {
     name: string;
-    phone: string;
+    phone: string | number;
     grade: number;
     field: AcademicField;
-    chat_id: string | null;
+    chat_id: string | number | null;
     username?: string;
     password?: string;
   }): Promise<ApiEnvelope<Supporter>> {
+    const chatIdStr = safeTrim(payload.chat_id);
+    const usernameStr = safeTrim(payload.username);
     return this.requestJson<Supporter>(
       '/supporters',
       {
         method: 'POST',
         body: JSON.stringify({
-          name: payload.name.trim(),
-          phone: payload.phone.trim(),
+          name: safeTrim(payload.name),
+          phone: safeTrim(payload.phone),
           grade: Number(payload.grade),
           field: payload.field,
-          chat_id: payload.chat_id ? payload.chat_id.trim() : undefined,
-          username: payload.username?.trim() || undefined,
+          chat_id: chatIdStr || undefined,
+          username: usernameStr || undefined,
           password: payload.password || undefined,
         }),
       },
@@ -514,15 +706,16 @@ class FamoApiClient {
       name: string;
       grade: number;
       field: AcademicField;
-      chat_id: string | null;
+      chat_id: string | number | null;
       password?: string;
     }
   ): Promise<ApiEnvelope<Supporter>> {
+    const chatIdStr = safeTrim(payload.chat_id);
     const body: Record<string, unknown> = {
-      name: payload.name.trim(),
+      name: safeTrim(payload.name),
       grade: Number(payload.grade),
       field: payload.field,
-      chat_id: payload.chat_id ? payload.chat_id.trim() : undefined,
+      chat_id: chatIdStr || undefined,
     };
     if (payload.password) {
       body.password = payload.password;
@@ -615,8 +808,9 @@ class FamoApiClient {
     const formData = new FormData();
     formData.append('file', payload.file);
     formData.append('student_id', String(payload.student_id));
-    if (payload.description.trim()) {
-      formData.append('description', payload.description.trim());
+    const desc = safeTrim(payload.description);
+    if (desc) {
+      formData.append('description', desc);
     }
 
     return this.requestJson<ExamFile>(

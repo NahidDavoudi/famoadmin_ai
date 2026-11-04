@@ -190,11 +190,11 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     setEditingStudent(student);
     setEditErrors({});
     setEditForm({
-      name: student.name,
-      phone: student.phone,
-      national_id: student.national_id,
-      grade: String(student.grade),
-      field: student.field,
+      name: String(student.name ?? ''),
+      phone: String(student.phone ?? ''),
+      national_id: String(student.national_id ?? ''),
+      grade: String(student.grade ?? '12'),
+      field: (student.field as AcademicField) || 'تجربی',
     });
   };
 
@@ -212,9 +212,9 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     setSubmitting(true);
     try {
       await API.updateStudent(editingStudent.id, {
-        name: editForm.name.trim(),
-        phone: editForm.phone.trim(),
-        nationalId: editForm.national_id.trim(),
+        name: String(editForm.name ?? '').trim(),
+        phone: String(editForm.phone ?? '').trim(),
+        nationalId: String(editForm.national_id ?? '').trim(),
         grade: Number(editForm.grade),
         field: editForm.field as AcademicField,
       });

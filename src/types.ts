@@ -42,8 +42,19 @@ export interface Course {
   gradient_color_to?: string | null;
   background_image_url?: string | null;
   description?: string | null;
+  full_description?: string | null;
+  target_grades?: string | null;
+  format?: string | null;
+  badge_label?: string | null;
+  features?: string[];
   price: number | string;
   display_order: number;
+  created_at?: string;
+}
+
+export interface InstructorSocialLink {
+  platform: string;
+  url: string;
 }
 
 export interface Instructor {
@@ -51,23 +62,48 @@ export interface Instructor {
   name: string;
   title?: string | null;
   description?: string | null;
+  full_bio?: string | null;
   initial_letter?: string | null;
   image_url?: string | null;
+  social_links?: InstructorSocialLink[];
   display_order: number;
+  created_at?: string;
 }
 
 export interface Supporter {
   id: number;
   name: string;
-  phone?: string | null;
+  phone?: string | number | null;
   grade: number;
   field: AcademicField;
   is_active?: boolean | number;
-  chat_id: string | null;
+  chat_id: string | number | null;
   username?: string;
+  avatar?: string | null;
+  avatar_url?: string | null;
   replied_count?: number;
   pending_count?: number;
   avg_response_hours?: number | null;
+}
+
+export interface PublicSupporter {
+  id: number;
+  name: string;
+  grade: number;
+  field: AcademicField;
+  avatar?: string | null;
+  avatar_url?: string | null;
+}
+
+export interface BlogCategory {
+  id: number;
+  name: string;
+  slug: string;
+  icon?: string;
+  color?: string;
+  description?: string | null;
+  sort_order?: number;
+  post_count?: number;
 }
 
 export interface SubjectResult {

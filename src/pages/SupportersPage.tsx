@@ -90,12 +90,12 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
     setErrors({});
     setEditingSupporter(s);
     setFormState({
-      name: s.name,
-      phone: s.phone || '',
-      grade: String(s.grade),
-      field: s.field,
-      chat_id: s.chat_id || '',
-      username: s.username || '',
+      name: String(s.name ?? ''),
+      phone: String(s.phone ?? ''),
+      grade: String(s.grade ?? '12'),
+      field: (s.field as AcademicField) || '',
+      chat_id: s.chat_id !== null && s.chat_id !== undefined ? String(s.chat_id) : '',
+      username: String(s.username ?? ''),
       password: '',
     });
     setShowPassword(false);
@@ -112,26 +112,28 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       return;
     }
 
+    const trimmedChatId = String(formState.chat_id ?? '').trim();
+
     setSubmitting(true);
     try {
       if (editingSupporter) {
         await API.updateSupporter(editingSupporter.id, {
-          name: formState.name.trim(),
+          name: String(formState.name ?? '').trim(),
           grade: Number(formState.grade),
           field: formState.field as AcademicField,
-          chat_id: formState.chat_id.trim() || null,
+          chat_id: trimmedChatId || null,
           password: formState.password || undefined,
         });
         setEditingSupporter(null);
         showToast('اطلاعات پشتیبان ذخیره شد', 'success');
       } else {
         await API.addSupporter({
-          name: formState.name.trim(),
-          phone: formState.phone.trim(),
+          name: String(formState.name ?? '').trim(),
+          phone: String(formState.phone ?? '').trim(),
           grade: Number(formState.grade),
           field: formState.field as AcademicField,
-          chat_id: formState.chat_id.trim() || null,
-          username: formState.username.trim(),
+          chat_id: trimmedChatId || null,
+          username: String(formState.username ?? '').trim(),
           password: formState.password,
         });
         setIsAddOpen(false);

@@ -60,11 +60,11 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
     setErrors({});
     setEditingInstructor(inst);
     setFormState({
-      name: inst.name,
-      title: inst.title || '',
-      description: inst.description || '',
-      initial_letter: inst.initial_letter || '',
-      display_order: String(inst.display_order || 0),
+      name: String(inst.name ?? ''),
+      title: String(inst.title ?? ''),
+      description: String(inst.description ?? ''),
+      initial_letter: String(inst.initial_letter ?? ''),
+      display_order: String(inst.display_order ?? 0),
     });
   };
 
@@ -79,16 +79,17 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
       return;
     }
 
+    const nameTrimmed = String(formState.name ?? '').trim();
     const initial =
-      formState.initial_letter.trim() || formState.name.trim().charAt(0) || 'ا';
+      String(formState.initial_letter ?? '').trim() || nameTrimmed.charAt(0) || 'ا';
 
     setSubmitting(true);
     try {
       if (editingInstructor) {
         await API.updateInstructor(editingInstructor.id, {
-          name: formState.name.trim(),
-          title: formState.title.trim(),
-          description: formState.description.trim(),
+          name: nameTrimmed,
+          title: String(formState.title ?? '').trim(),
+          description: String(formState.description ?? '').trim(),
           initial_letter: initial,
           display_order: Number(formState.display_order) || 0,
         });
@@ -96,9 +97,9 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
         showToast('اطلاعات استاد به‌روزرسانی شد', 'success');
       } else {
         await API.addInstructor({
-          name: formState.name.trim(),
-          title: formState.title.trim(),
-          description: formState.description.trim(),
+          name: nameTrimmed,
+          title: String(formState.title ?? '').trim(),
+          description: String(formState.description ?? '').trim(),
           initial_letter: initial,
           display_order: Number(formState.display_order) || 0,
         });
