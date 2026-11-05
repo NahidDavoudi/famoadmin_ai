@@ -68,6 +68,27 @@ export function safeTrim(value: unknown): string {
 }
 
 /**
+ * Safely converts any value (string, number, null, undefined) to a finite number.
+ */
+export function safeNumber(value: unknown, fallback = 0): number {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : fallback;
+  }
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/**
+ * Safely formats any numeric or string value with fixed decimal digits.
+ */
+export function formatFixed(value: unknown, digits = 1): string {
+  return safeNumber(value, 0).toFixed(digits);
+}
+
+/**
  * Validates Iranian mobile phone number according to OpenAPI pattern:
  * ^(\+98|0098|98|0)?9[0-9]{9}$
  */

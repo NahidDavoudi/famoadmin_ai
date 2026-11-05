@@ -30,7 +30,7 @@ import type {
   CreateParentContactRequest,
   UpdateParentContactRequest,
 } from '../types';
-import { safeTrim } from './exam-math';
+import { safeTrim, safeNumber } from './exam-math';
 
 export interface ApiErrorObject {
   code?: string;
@@ -430,11 +430,29 @@ class FamoApiClient {
 
   // Dashboard (/api/v1/dashboard/stats)
   async getDashboardStats(): Promise<ApiEnvelope<DashboardStats>> {
-    return this.requestJson<DashboardStats>(
+    const res = await this.requestJson<DashboardStats>(
       '/dashboard/stats',
       {},
       'خطا در بارگذاری آمار داشبورد'
     );
+    const raw = res.data;
+    const avgByField = Array.isArray(raw?.avg_by_field)
+      ? raw.avg_by_field.map((item) => ({
+          ...item,
+          student_count: safeNumber(item.student_count),
+          avg_percentage: safeNumber(item.avg_percentage),
+        }))
+      : [];
+    return {
+      ...res,
+      data: {
+        students_count: safeNumber(raw?.students_count),
+        exams_this_week: safeNumber(raw?.exams_this_week),
+        students_no_exam: safeNumber(raw?.students_no_exam),
+        pending_reports: safeNumber(raw?.pending_reports),
+        avg_by_field: avgByField,
+      },
+    };
   }
 
   // Students (/api/v1/students*)
@@ -762,7 +780,14 @@ class FamoApiClient {
       {},
       'خطا در بارگذاری آزمون‌ها'
     );
-    let dates = Array.isArray(res.data) ? res.data : res.data?.dates || [];
+    const rawDates = Array.isArray(res.data) ? res.data : res.data?.dates || [];
+    let dates: ExamDateSummary[] = rawDates.map((d) => ({
+      ...d,
+      exam_date: safeTrim(d.exam_date),
+      student_count: safeNumber(d.student_count),
+      subject_count: safeNumber(d.subject_count),
+      avg_percentage: safeNumber(d.avg_percentage),
+    }));
     if (monthFilter) {
       dates = dates.filter((d) => d.exam_date?.startsWith(monthFilter));
     }
@@ -776,7 +801,15 @@ class FamoApiClient {
       {},
       'خطا در بارگذاری لیست شرکت‌کنندگان'
     );
-    const students = Array.isArray(res.data) ? res.data : res.data?.students || [];
+    const rawStudents = Array.isArray(res.data) ? res.data : res.data?.students || [];
+    const students: ExamStudentSummary[] = rawStudents.map((s) => ({
+      ...s,
+      student_id: safeNumber(s.student_id),
+      name: safeTrim(s.name),
+      grade: safeNumber(s.grade, 12),
+      subject_count: safeNumber(s.subject_count),
+      avg_percentage: safeNumber(s.avg_percentage),
+    }));
     return { ...res, data: { students } };
   }
 
@@ -788,11 +821,31 @@ class FamoApiClient {
       exam_date: examDate,
       student_id: String(studentId),
     });
-    return this.requestJson<ExamDetailsResponse>(
+    const res = await this.requestJson<ExamDetailsResponse>(
       `/exams/details?${query.toString()}`,
       {},
       'خطا در بارگذاری جزئیات کارنامه'
     );
+    const raw = res.data;
+    const rawSubjects = Array.isArray(raw?.subjects) ? raw.subjects : [];
+    const subjects: SubjectResult[] = rawSubjects.map((sub) => ({
+      ...sub,
+      subject: safeTrim(sub.subject),
+      chapter: sub.chapter ? safeTrim(sub.chapter) : null,
+      total_q: safeNumber(sub.total_q),
+      correct: safeNumber(sub.correct),
+      wrong: safeNumber(sub.wrong),
+      skipped: safeNumber(sub.skipped),
+      percentage: safeNumber(sub.percentage),
+    }));
+    return {
+      ...res,
+      data: {
+        ...raw,
+        avg_percentage: safeNumber(raw?.avg_percentage),
+        subjects,
+      },
+    };
   }
 
   async submitExamEntry(payload: {
@@ -920,7 +973,12 @@ class FamoApiClient {
       {},
       'خطا در بارگذاری آمار گزارش‌ها'
     );
-    const stats = Array.isArray(res.data) ? res.data : res.data?.stats || [];
+    const rawStats = Array.isArray(res.data) ? res.data : res.data?.stats || [];
+    const stats: ReportDayStat[] = rawStats.map((r) => ({
+      date: safeTrim(r.date),
+      replied: safeNumber(r.replied),
+      pending: safeNumber(r.pending),
+    }));
     return { ...res, data: { stats } };
   }
 

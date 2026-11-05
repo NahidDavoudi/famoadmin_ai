@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import API from '../lib/api';
 import { formatJalaliLong } from '../lib/jalali';
+import { safeNumber, formatFixed } from '../lib/exam-math';
 import type {
   ExamDateSummary,
   ExamDetailsResponse,
@@ -99,7 +100,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
       ? 'آزمون‌های برگزار شده'
       : view === 'students'
         ? `شرکت‌کنندگان آزمون ${formatJalaliLong(selectedDate)}`
-        : `نتایج ${details?.student.name || ''} - آزمون ${formatJalaliLong(selectedDate)}`;
+        : `نتایج ${details?.student?.name || ''} - آزمون ${formatJalaliLong(selectedDate)}`;
 
   return (
     <div id="page-exams" className="space-y-6">
@@ -207,10 +208,10 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                       <td className="px-5 py-4 tabular-nums">
                         <span
                           className={`font-bold ${
-                            exam.avg_percentage >= 50 ? 'text-emerald-600' : 'text-red-600'
+                            safeNumber(exam.avg_percentage) >= 50 ? 'text-emerald-600' : 'text-red-600'
                           }`}
                         >
-                          {exam.avg_percentage.toFixed(1)}%
+                          {formatFixed(exam.avg_percentage, 1)}%
                         </span>
                       </td>
                       <td className="px-5 py-4">
@@ -258,10 +259,10 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                     <td className="px-5 py-4 tabular-nums">
                       <span
                         className={`font-bold ${
-                          s.avg_percentage >= 50 ? 'text-emerald-600' : 'text-red-600'
+                          safeNumber(s.avg_percentage) >= 50 ? 'text-emerald-600' : 'text-red-600'
                         }`}
                       >
-                        {s.avg_percentage.toFixed(1)}%
+                        {formatFixed(s.avg_percentage, 1)}%
                       </span>
                     </td>
                     <td className="px-5 py-4">
@@ -291,26 +292,26 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 text-center">
                 <p className="text-slate-500 text-xs mb-1">دانش‌آموز</p>
-                <p className="font-bold text-sm text-slate-800">{details.student.name}</p>
+                <p className="font-bold text-sm text-slate-800">{details.student?.name || '-'}</p>
               </div>
               <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 text-center">
                 <p className="text-slate-500 text-xs mb-1">پایه</p>
                 <p className="font-bold text-sm text-slate-800 tabular-nums">
-                  {details.student.grade}
+                  {details.student?.grade ?? '-'}
                 </p>
               </div>
               <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 text-center">
                 <p className="text-slate-500 text-xs mb-1">رشته</p>
-                <p className="font-bold text-sm text-slate-800">{details.student.field}</p>
+                <p className="font-bold text-sm text-slate-800">{details.student?.field || '-'}</p>
               </div>
               <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 text-center">
                 <p className="text-slate-500 text-xs mb-1">میانگین کل</p>
                 <p
                   className={`font-bold text-sm tabular-nums ${
-                    details.avg_percentage >= 50 ? 'text-emerald-600' : 'text-red-600'
+                    safeNumber(details.avg_percentage) >= 50 ? 'text-emerald-600' : 'text-red-600'
                   }`}
                 >
-                  {details.avg_percentage.toFixed(1)}%
+                  {formatFixed(details.avg_percentage, 1)}%
                 </p>
               </div>
             </div>
@@ -331,7 +332,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {details.subjects.map((sub, idx) => (
+                    {(details.subjects || []).map((sub, idx) => (
                       <tr key={idx} className="hover:bg-slate-50/80">
                         <td className="px-4 py-3 font-semibold text-slate-800">{sub.subject}</td>
                         <td className="px-4 py-3 text-slate-600">{sub.chapter || '-'}</td>
@@ -346,7 +347,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                           {sub.skipped}
                         </td>
                         <td className="px-4 py-2 text-center">
-                          <RadialGauge percentage={sub.percentage} />
+                          <RadialGauge percentage={safeNumber(sub.percentage)} />
                         </td>
                       </tr>
                     ))}

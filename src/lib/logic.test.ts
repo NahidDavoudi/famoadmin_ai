@@ -157,11 +157,19 @@ test('API client targets https://api.famoacademy.ir/api/v1 and parses error enve
 });
 
 test('Regression: numeric chat_id, phone, and national_id never throw .trim is not a function', async () => {
-  const { safeTrim } = await import('./exam-math');
+  const { safeTrim, safeNumber, formatFixed } = await import('./exam-math');
   assert.equal(safeTrim(123456789), '123456789');
   assert.equal(safeTrim(null), '');
   assert.equal(safeTrim(undefined), '');
   assert.equal(safeTrim('  987654321  '), '987654321');
+
+  assert.equal(safeNumber('64.25'), 64.25);
+  assert.equal(safeNumber(78.5), 78.5);
+  assert.equal(safeNumber(null), 0);
+  assert.equal(safeNumber(undefined), 0);
+  assert.equal(formatFixed('64.25', 1), '64.3');
+  assert.equal(formatFixed(null, 1), '0.0');
+  assert.equal(formatFixed(undefined, 1), '0.0');
 
   const suppEditErrors = validateSupporterForm(
     {
