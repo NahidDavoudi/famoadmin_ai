@@ -1599,6 +1599,50 @@ class FamoApiClient {
       'خطا در ثبت خروج دانش‌آموز از کلاس رفع اشکال'
     );
   }
+
+  /**
+   * POST /api/v1/tutoring/classrooms
+   */
+  async createTutoringClassroom(payload: {
+    name: string;
+    class_name?: string;
+    field?: string;
+    teacher_name?: string;
+    instructor_id?: number;
+    sort_order?: number;
+  }): Promise<ApiEnvelope<TutoringClassroom>> {
+    const name = safeTrim(payload.name || payload.class_name);
+    const body: Record<string, unknown> = {
+      name,
+      class_name: name,
+    };
+    if (safeTrim(payload.field)) body.field = safeTrim(payload.field);
+    if (safeTrim(payload.teacher_name)) body.teacher_name = safeTrim(payload.teacher_name);
+    if (payload.instructor_id) body.instructor_id = Number(payload.instructor_id);
+    if (payload.sort_order !== undefined) body.sort_order = Number(payload.sort_order);
+
+    return this.requestJson<TutoringClassroom>(
+      '/tutoring/classrooms',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      'خطا در ایجاد ستون کلاس رفع اشکال در سرور'
+    );
+  }
+
+  /**
+   * DELETE /api/v1/tutoring/classrooms/{id}
+   */
+  async deleteTutoringClassroom(id: number): Promise<ApiEnvelope<unknown>> {
+    return this.requestJson(
+      `/tutoring/classrooms/${id}`,
+      {
+        method: 'DELETE',
+      },
+      'خطا در حذف ستون کلاس رفع اشکال از سرور'
+    );
+  }
 }
 
 export const API = new FamoApiClient();

@@ -1324,7 +1324,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     }
   };
 
-  const handleAddRemedialClass = (e: React.FormEvent) => {
+  const handleAddRemedialClass = async (e: React.FormEvent) => {
     e.preventDefault();
     const errors = validateRemedialClassForm({
       class_name: newClassForm.class_name,
@@ -1332,26 +1332,54 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     setNewClassErrors(errors);
     if (hasErrors(errors)) return;
 
-    const newCol: RemedialClassColumn = {
-      id: Date.now(),
-      field: remedialFieldTab,
-      class_name: newClassForm.class_name.trim(),
-      teacher_name: newClassForm.teacher_name.trim() || undefined,
-      attendees: [],
-      student_states: {},
-    };
-    setRemedialClasses((prev) => [...prev, newCol]);
-    setNewClassForm({ class_name: '', teacher_name: '' });
-    setIsAddClassModalOpen(false);
-    showToast(
-      `کلاس «${newCol.class_name}» به ماتریس رشته ${remedialFieldTab} اضافه شد`,
-      'success'
-    );
+    const className = newClassForm.class_name.trim();
+    const teacherName = newClassForm.teacher_name.trim() || undefined;
+
+    try {
+      const res = await API.createTutoringClassroom({
+        name: className,
+        class_name: className,
+        field: remedialFieldTab,
+        teacher_name: teacherName,
+      });
+
+      const createdId = Number(res.data?.id || Date.now());
+      const newCol: RemedialClassColumn = {
+        id: createdId,
+        field: remedialFieldTab,
+        class_name: res.data?.name || className,
+        teacher_name: teacherName,
+        attendees: [],
+        student_states: {},
+      };
+      setRemedialClasses((prev) => [...prev, newCol]);
+      setNewClassForm({ class_name: '', teacher_name: '' });
+      setIsAddClassModalOpen(false);
+      await fetchRemedialAndAttendanceData(remedialDate);
+      showToast(
+        `کلاس «${newCol.class_name}» در سرور ثبت و به ماتریس اضافه شد`,
+        'success'
+      );
+    } catch (err) {
+      showToast(
+        (err as Error)?.message || 'خطا در ثبت کلاس رفع اشکال در سرور',
+        'error'
+      );
+    }
   };
 
-  const handleDeleteRemedialClass = (classId: number) => {
-    setRemedialClasses((prev) => prev.filter((c) => c.id !== classId));
-    showToast('ستون کلاس رفع اشکال حذف شد', 'info');
+  const handleDeleteRemedialClass = async (classId: number) => {
+    try {
+      await API.deleteTutoringClassroom(classId);
+      setRemedialClasses((prev) => prev.filter((c) => c.id !== classId));
+      await fetchRemedialAndAttendanceData(remedialDate);
+      showToast('ستون کلاس رفع اشکال از سرور حذف شد', 'info');
+    } catch (err) {
+      showToast(
+        (err as Error)?.message || 'خطا در حذف ستون کلاس رفع اشکال از سرور',
+        'error'
+      );
+    }
   };
 
   const filteredLogs = useMemo(() => {
@@ -1360,11 +1388,8 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
   }, [smsLogs, logStatusFilter]);
 
   const currentFieldRemedialClasses = useMemo(
-    () =>
-      remedialClasses.filter(
-        (c) => c.field === remedialFieldTab || Boolean(c.instructor_id)
-      ),
-    [remedialClasses, remedialFieldTab]
+    () => remedialClasses,
+    [remedialClasses]
   );
 
   const allFieldStudents = useMemo(() => {
