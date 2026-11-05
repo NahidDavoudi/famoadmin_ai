@@ -596,6 +596,8 @@ export interface RemedialStudentAttendance {
   status: RemedialAttendanceState;
   entered_at?: string;
   exited_at?: string;
+  session_id?: number | null;
+  attendance_id?: number | null;
 }
 
 export interface RemedialClassColumn {
@@ -603,6 +605,8 @@ export interface RemedialClassColumn {
   field: AcademicField;
   class_name: string;
   teacher_name?: string;
+  instructor_id?: number;
+  teacher_status?: 'absent' | 'ready' | 'break' | null;
   attendees: number[]; // student_ids
   student_states?: Record<number, RemedialStudentAttendance>;
 }
@@ -614,4 +618,110 @@ export interface WeeklySessionInfo {
   start_date_jalali: string;
   end_date_jalali: string;
 }
+
+// ============================================================================
+// Daily Attendance (/api/v1/attendance*) & Tutoring (/api/v1/tutoring*)
+// ============================================================================
+
+export type DailyAttendanceStatus = 'present' | 'absent' | 'excused';
+
+export type AttendanceTimestampField =
+  | 'arrived_at'
+  | 'exam_started_at'
+  | 'exam_ended_at'
+  | 'departed_at';
+
+export interface AttendanceEntry {
+  id: number | null;
+  student_id: number | null;
+  name: string | null;
+  guest_name: string | null;
+  is_guest: boolean;
+  field: string | null;
+  status: DailyAttendanceStatus | null;
+  arrived_at: string | null;
+  exam_started_at: string | null;
+  exam_ended_at: string | null;
+  departed_at: string | null;
+  created_at: string | null;
+}
+
+export interface AttendanceDay {
+  date: string;
+  date_jalali: string;
+  field: string | null;
+  entries: AttendanceEntry[];
+}
+
+export interface UpsertAttendanceEntryRequest {
+  date: string;
+  student_id: number;
+  status?: DailyAttendanceStatus;
+  removed?: boolean;
+  client_uuid?: string | null;
+}
+
+export interface PatchAttendanceTimeRequest {
+  field: AttendanceTimestampField;
+  value?: string | null;
+}
+
+export interface CreateAttendanceGuestRequest {
+  date: string;
+  guest_name: string;
+  field: string;
+}
+
+export type TeacherTutoringStatus = 'absent' | 'ready' | 'break';
+
+export interface TutoringClassroom {
+  id: number;
+  name: string;
+  sort_order: number;
+  is_active: boolean;
+}
+
+export interface TutoringStatus {
+  id: number;
+  instructor_id: number;
+  status: TeacherTutoringStatus;
+  status_date: string;
+  started_at: string;
+  ended_at: string | null;
+}
+
+export interface TutoringSession {
+  id: number;
+  session_date: string;
+  classroom_id: number;
+  student_id: number;
+  attendance_id: number | null;
+  entered_at: string;
+  ended_at: string | null;
+  client_entered_at: string | null;
+  entry_source: string;
+  needs_review: boolean;
+  created_by: number | null;
+  client_uuid: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TutoringBoardClass {
+  classroom_id: number;
+  classroom_name: string;
+  instructor_id: number;
+  teacher_name: string;
+  status: TeacherTutoringStatus | null;
+  status_since: string | null;
+  student: {
+    id: number;
+    name: string;
+    grade: number | null;
+    field: string;
+  } | null;
+  entered_at: string | null;
+  open_session_id?: number | null;
+}
+
 

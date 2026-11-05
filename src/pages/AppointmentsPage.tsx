@@ -48,6 +48,10 @@ import type {
   RemedialStudentAttendance,
   WeeklySessionInfo,
   ToastType,
+  AttendanceEntry,
+  AttendanceTimestampField,
+  TutoringBoardClass,
+  TeacherTutoringStatus,
 } from '../types';
 import { API } from '../lib/api';
 import {
@@ -242,11 +246,17 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     FieldErrors<'title' | 'start_date_jalali' | 'end_date_jalali'>
   >({});
 
-  // Remedial Matrix State
+  // Remedial Matrix & Daily Attendance State (/api/v1/tutoring* & /api/v1/attendance*)
   const [remedialFieldTab, setRemedialFieldTab] = useState<AcademicField>('تجربی');
   const [remedialStatusFilter, setRemedialStatusFilter] = useState<
     'all' | RemedialAttendanceState
   >('all');
+  const [remedialDate, setRemedialDate] = useState<string>(() => getTodayGregorianIso());
+  const [attendanceEntries, setAttendanceEntries] = useState<AttendanceEntry[]>([]);
+  const [updatingCellKey, setUpdatingCellKey] = useState<string | null>(null);
+  const [updatingTimeKey, setUpdatingTimeKey] = useState<string | null>(null);
+  const [teacherStatus, setTeacherStatus] = useState<TeacherTutoringStatus>('ready');
+  const [isUpdatingTeacherStatus, setIsUpdatingTeacherStatus] = useState<boolean>(false);
   const [isAddClassModalOpen, setIsAddClassModalOpen] = useState<boolean>(false);
   const [newClassForm, setNewClassForm] = useState({
     class_name: '',
@@ -254,12 +264,117 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
   });
   const [newClassErrors, setNewClassErrors] = useState<FieldErrors<'class_name'>>({});
 
+  // Add Guest Student Modal State (POST /api/v1/attendance/guests)
+  const [isAddGuestModalOpen, setIsAddGuestModalOpen] = useState<boolean>(false);
+  const [guestForm, setGuestForm] = useState<{
+    guest_name: string;
+    field: AcademicField;
+  }>({
+    guest_name: '',
+    field: 'تجربی',
+  });
+  const [guestError, setGuestError] = useState<string | undefined>(undefined);
+  const [isSavingGuest, setIsSavingGuest] = useState<boolean>(false);
+
   const currentWeek = useMemo(
     () => weeks.find((w) => w.id === selectedWeekId) || weeks[0],
     [weeks, selectedWeekId]
   );
 
-  // Fetch preview & logs from backend API
+  const extractHmFromTimestamp = (ts?: string | null): string | undefined => {
+    if (!ts) return undefined;
+    const match = String(ts).match(/(\d{2}:\d{2})/);
+    return match ? match[1] : undefined;
+  };
+
+  // Sync live tutoring board (/api/v1/tutoring/board) & daily attendance (/api/v1/attendance)
+  const fetchRemedialAndAttendanceData = useCallback(
+    async (targetDate: string) => {
+      const [boardRes, attRes] = await Promise.allSettled([
+        API.getTutoringBoard(),
+        API.getAttendanceBoard({ date: targetDate }),
+      ]);
+
+      if (boardRes.status === 'fulfilled') {
+        const boardClasses: TutoringBoardClass[] = boardRes.value.data || [];
+        setRemedialClasses((prev) => {
+          const nextMap = new Map<number, RemedialClassColumn>();
+          for (const existing of prev) {
+            nextMap.set(existing.id, existing);
+          }
+
+          for (const b of boardClasses) {
+            const classId = Number(b.classroom_id);
+            const prevCol = nextMap.get(classId);
+            const prevStates = { ...(prevCol?.student_states || {}) };
+            const prevAttendees = new Set<number>(prevCol?.attendees || []);
+
+            if (b.student && b.student.id) {
+              const sid = Number(b.student.id);
+              prevAttendees.add(sid);
+              prevStates[sid] = {
+                status: 'in_class',
+                entered_at:
+                  extractHmFromTimestamp(b.entered_at) ||
+                  prevStates[sid]?.entered_at,
+                session_id:
+                  b.open_session_id ?? prevStates[sid]?.session_id ?? null,
+              };
+            }
+
+            const resolvedField: AcademicField =
+              (b.student?.field as AcademicField) ||
+              prevCol?.field ||
+              'تجربی';
+
+            nextMap.set(classId, {
+              id: classId,
+              field: resolvedField,
+              class_name: b.classroom_name || prevCol?.class_name || `کلاس #${classId}`,
+              teacher_name: b.teacher_name || prevCol?.teacher_name,
+              instructor_id: b.instructor_id,
+              teacher_status: b.status,
+              attendees: Array.from(prevAttendees),
+              student_states: prevStates,
+            });
+          }
+
+          return Array.from(nextMap.values());
+        });
+      }
+
+      if (attRes.status === 'fulfilled') {
+        const entries = attRes.value.data?.entries || [];
+        setAttendanceEntries(entries);
+        if (entries.length > 0) {
+          setItems((prevItems) =>
+            prevItems.map((item) => {
+              const entry = entries.find((e) => e.student_id === item.student_id);
+              if (!entry) return item;
+              return {
+                ...item,
+                arrival_time:
+                  extractHmFromTimestamp(entry.arrived_at) ||
+                  item.arrival_time ||
+                  null,
+                exam_start_time:
+                  extractHmFromTimestamp(entry.exam_started_at) ||
+                  item.exam_start_time ||
+                  null,
+                exam_end_time:
+                  extractHmFromTimestamp(entry.exam_ended_at) ||
+                  item.exam_end_time ||
+                  null,
+              };
+            })
+          );
+        }
+      }
+    },
+    []
+  );
+
+  // Fetch preview, logs, tutoring board & daily attendance from backend API
   const fetchWeekData = useCallback(
     async (weekDate: string, showRefreshToast = false) => {
       setIsLoading(true);
@@ -311,8 +426,10 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
           setSmsLogs([]);
         }
 
+        await fetchRemedialAndAttendanceData(remedialDate);
+
         if (showRefreshToast && previewRes.status === 'fulfilled') {
-          showToast('اطلاعات نوبت‌ها از سرور بروزرسانی شد', 'info');
+          showToast('اطلاعات نوبت‌ها و کلاس‌های رفع اشکال از سرور بروزرسانی شد', 'info');
         }
       } catch (err) {
         const errMsg = (err as Error)?.message || 'خطا در برقراری ارتباط با سرور';
@@ -325,12 +442,18 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         setIsLoading(false);
       }
     },
-    [showToast]
+    [showToast, fetchRemedialAndAttendanceData, remedialDate]
   );
 
   useEffect(() => {
     fetchWeekData(currentWeek.week_date, false);
   }, [currentWeek.week_date, fetchWeekData]);
+
+  useEffect(() => {
+    if (activeTab === 'remedial') {
+      fetchRemedialAndAttendanceData(remedialDate);
+    }
+  }, [activeTab, remedialDate, fetchRemedialAndAttendanceData]);
 
   // Navigate to previous / next week dynamically
   const handleShiftWeek = (deltaDays: number) => {
@@ -683,6 +806,48 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         description: appointmentForm.description.trim() || null,
       });
 
+      // Sync arrival & exam times with /api/v1/attendance/entries and /api/v1/attendance/{id}/times
+      const hasAnyAttendanceTime = Boolean(
+        appointmentForm.arrival_time.trim() ||
+          appointmentForm.exam_start_time.trim() ||
+          appointmentForm.exam_end_time.trim()
+      );
+      if (hasAnyAttendanceTime || appointmentForm.appointment_status === 'absent') {
+        try {
+          const attDate = appointmentForm.appointment_date || currentWeek.week_date;
+          const upserted = await API.upsertAttendanceEntry({
+            date: attDate,
+            student_id: editingItem.student_id,
+            status:
+              appointmentForm.appointment_status === 'absent' ? 'absent' : 'present',
+          });
+          const entryId = upserted.data?.id;
+          if (entryId) {
+            const timePatches: Array<{
+              field: AttendanceTimestampField;
+              val: string;
+            }> = [
+              { field: 'arrived_at', val: appointmentForm.arrival_time.trim() },
+              {
+                field: 'exam_started_at',
+                val: appointmentForm.exam_start_time.trim(),
+              },
+              { field: 'exam_ended_at', val: appointmentForm.exam_end_time.trim() },
+            ];
+            for (const tp of timePatches) {
+              if (tp.val) {
+                await API.patchAttendanceTime(entryId, {
+                  field: tp.field,
+                  value: `${attDate} ${tp.val.slice(0, 5)}:00`,
+                });
+              }
+            }
+          }
+        } catch {
+          // Non-blocking if attendance endpoint is separate from appointment save
+        }
+      }
+
       setEditingItem(null);
       await fetchWeekData(currentWeek.week_date, false);
       showToast(`نوبت «${editingItem.student_name}» ذخیره شد`, 'success');
@@ -828,6 +993,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
   };
 
   // Remedial Matrix Handlers (3-state: 'none' -> 'in_class' -> 'left_class')
+  // Connected directly to /api/v1/tutoring/sessions, /api/v1/tutoring/sessions/{id}/end & /api/v1/attendance*
   const getStudentClassAttendance = useCallback(
     (col: RemedialClassColumn, studentId: number): RemedialStudentAttendance => {
       if (col.student_states && col.student_states[studentId]) {
@@ -848,34 +1014,166 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     return `${hh}:${mm}`;
   };
 
-  const updateRemedialAttendance = (
+  const updateRemedialAttendance = async (
     classId: number,
     studentId: number,
     nextStatus: RemedialAttendanceState
   ) => {
+    const cellKey = `${classId}-${studentId}`;
+    if (updatingCellKey === cellKey) return;
+
     const nowHm = getCurrentTimeHm();
+    const nowIso = `${remedialDate} ${nowHm}:00`;
     const targetClass = remedialClasses.find((c) => c.id === classId);
     const targetStudent = items.find((s) => s.student_id === studentId);
+    const current = targetClass
+      ? getStudentClassAttendance(targetClass, studentId)
+      : { status: 'none' as RemedialAttendanceState };
 
-    setRemedialClasses((prev) =>
-      prev.map((col) => {
-        if (col.id !== classId) return col;
-        const prevStates = { ...(col.student_states || {}) };
-        const current = getStudentClassAttendance(col, studentId);
+    setUpdatingCellKey(cellKey);
+    try {
+      let resolvedSessionId: number | null = current.session_id ?? null;
+      let resolvedAttendanceId: number | null = current.attendance_id ?? null;
+      let serverEnteredHm: string | undefined = current.entered_at;
+      let serverExitedHm: string | undefined = current.exited_at;
 
-        if (nextStatus === 'none') {
-          delete prevStates[studentId];
-          return {
-            ...col,
-            attendees: col.attendees.filter((id) => id !== studentId),
-            student_states: prevStates,
-          };
+      if (nextStatus === 'in_class') {
+        // 1. Start tutoring session on backend: POST /api/v1/tutoring/sessions
+        const clientUuid = `tut-${remedialDate}-${classId}-${studentId}`;
+        const sessionRes = await API.startTutoringSession({
+          student_id: studentId,
+          classroom_id: classId,
+          client_uuid: clientUuid,
+          entered_at: nowIso,
+        });
+        resolvedSessionId = sessionRes.data?.id ?? resolvedSessionId;
+        resolvedAttendanceId =
+          sessionRes.data?.attendance_id ?? resolvedAttendanceId;
+        serverEnteredHm =
+          extractHmFromTimestamp(sessionRes.data?.entered_at) ||
+          current.entered_at ||
+          nowHm;
+
+        // 2. Ensure student is marked present in Daily Attendance: PUT /api/v1/attendance/entries
+        try {
+          const attRes = await API.upsertAttendanceEntry({
+            date: remedialDate,
+            student_id: studentId,
+            status: 'present',
+          });
+          if (attRes.data?.id) {
+            resolvedAttendanceId = attRes.data.id;
+            if (!attRes.data.arrived_at) {
+              await API.patchAttendanceTime(attRes.data.id, {
+                field: 'arrived_at',
+                value: 'now',
+              });
+            }
+          }
+        } catch {
+          // Tutoring session already recorded
+        }
+      } else if (nextStatus === 'left_class') {
+        // 1. End open tutoring session on backend: POST /api/v1/tutoring/sessions/{id}/end
+        if (!resolvedSessionId) {
+          // Resolve open session via idempotent startTutoringSession first if session_id wasn't cached
+          try {
+            const clientUuid = `tut-${remedialDate}-${classId}-${studentId}`;
+            const openRes = await API.startTutoringSession({
+              student_id: studentId,
+              classroom_id: classId,
+              client_uuid: clientUuid,
+            });
+            resolvedSessionId = openRes.data?.id ?? null;
+          } catch {
+            // Proceed to end if session id resolved
+          }
         }
 
-        if (nextStatus === 'in_class') {
+        if (resolvedSessionId) {
+          const endedRes = await API.endTutoringSession(resolvedSessionId, nowIso);
+          serverExitedHm =
+            extractHmFromTimestamp(endedRes.data?.ended_at) || nowHm;
+        } else {
+          // If classroom is managed via daily attendance timestamps, record departure time
+          const existingEntry = attendanceEntries.find(
+            (e) => e.student_id === studentId
+          );
+          const entryId = resolvedAttendanceId || existingEntry?.id;
+          if (entryId) {
+            await API.patchAttendanceTime(entryId, {
+              field: 'departed_at',
+              value: 'now',
+            });
+          } else {
+            const created = await API.upsertAttendanceEntry({
+              date: remedialDate,
+              student_id: studentId,
+              status: 'present',
+            });
+            if (created.data?.id) {
+              resolvedAttendanceId = created.data.id;
+              await API.patchAttendanceTime(created.data.id, {
+                field: 'departed_at',
+                value: 'now',
+              });
+            }
+          }
+          serverExitedHm = nowHm;
+        }
+      } else if (nextStatus === 'none') {
+        // Reset state: end open session if active
+        if (resolvedSessionId && current.status === 'in_class') {
+          try {
+            await API.endTutoringSession(resolvedSessionId, nowIso);
+          } catch {
+            // Ignore if already ended
+          }
+        }
+        await API.upsertAttendanceEntry({
+          date: remedialDate,
+          student_id: studentId,
+          removed: true,
+        });
+      }
+
+      setRemedialClasses((prev) =>
+        prev.map((col) => {
+          if (col.id !== classId) return col;
+          const prevStates = { ...(col.student_states || {}) };
+
+          if (nextStatus === 'none') {
+            delete prevStates[studentId];
+            return {
+              ...col,
+              attendees: col.attendees.filter((id) => id !== studentId),
+              student_states: prevStates,
+            };
+          }
+
+          if (nextStatus === 'in_class') {
+            prevStates[studentId] = {
+              status: 'in_class',
+              entered_at: serverEnteredHm || nowHm,
+              session_id: resolvedSessionId,
+              attendance_id: resolvedAttendanceId,
+            };
+            const attendees = col.attendees.includes(studentId)
+              ? col.attendees
+              : [...col.attendees, studentId];
+            return {
+              ...col,
+              attendees,
+              student_states: prevStates,
+            };
+          }
+
           prevStates[studentId] = {
-            status: 'in_class',
-            entered_at: current.entered_at || nowHm,
+            status: 'left_class',
+            entered_at: serverEnteredHm || current.entered_at || nowHm,
+            exited_at: serverExitedHm || nowHm,
+            session_id: resolvedSessionId,
+            attendance_id: resolvedAttendanceId,
           };
           const attendees = col.attendees.includes(studentId)
             ? col.attendees
@@ -885,41 +1183,144 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
             attendees,
             student_states: prevStates,
           };
+        })
+      );
+
+      await fetchRemedialAndAttendanceData(remedialDate);
+
+      if (targetStudent && targetClass) {
+        if (nextStatus === 'in_class') {
+          showToast(
+            `ورود «${targetStudent.student_name}» به کلاس «${targetClass.class_name}» در سرور ثبت شد (${toPersianDigits(serverEnteredHm || nowHm)})`,
+            'success'
+          );
+        } else if (nextStatus === 'left_class') {
+          showToast(
+            `خروج «${targetStudent.student_name}» از کلاس «${targetClass.class_name}» در سرور ثبت شد (${toPersianDigits(serverExitedHm || nowHm)})`,
+            'info'
+          );
+        } else {
+          showToast(
+            `وضعیت حضور «${targetStudent.student_name}» در «${targetClass.class_name}» بازنشانی شد`,
+            'warning'
+          );
         }
-
-        prevStates[studentId] = {
-          status: 'left_class',
-          entered_at: current.entered_at || nowHm,
-          exited_at: nowHm,
-        };
-        const attendees = col.attendees.includes(studentId)
-          ? col.attendees
-          : [...col.attendees, studentId];
-        return {
-          ...col,
-          attendees,
-          student_states: prevStates,
-        };
-      })
-    );
-
-    if (targetStudent && targetClass) {
-      if (nextStatus === 'in_class') {
-        showToast(
-          `ورود «${targetStudent.student_name}» به کلاس «${targetClass.class_name}» ثبت شد (${toPersianDigits(nowHm)})`,
-          'success'
-        );
-      } else if (nextStatus === 'left_class') {
-        showToast(
-          `خروج «${targetStudent.student_name}» از کلاس «${targetClass.class_name}» ثبت شد (${toPersianDigits(nowHm)})`,
-          'info'
-        );
-      } else {
-        showToast(
-          `وضعیت حضور «${targetStudent.student_name}» در «${targetClass.class_name}» بازنشانی شد`,
-          'warning'
-        );
       }
+    } catch (err) {
+      showToast(
+        (err as Error)?.message || 'خطا در ثبت وضعیت حضور کلاس رفع اشکال در سرور',
+        'error'
+      );
+    } finally {
+      setUpdatingCellKey(null);
+    }
+  };
+
+  // Record or clear daily attendance timestamp (arrived_at, exam_started_at, exam_ended_at, departed_at)
+  // via PUT /api/v1/attendance/entries + PATCH /api/v1/attendance/{id}/times
+  const handleStampStudentAttendanceTime = async (
+    studentId: number,
+    studentName: string,
+    field: AttendanceTimestampField,
+    clear = false
+  ) => {
+    const key = `${studentId}-${field}`;
+    if (updatingTimeKey === key) return;
+    setUpdatingTimeKey(key);
+
+    try {
+      let entry = attendanceEntries.find((e) => e.student_id === studentId);
+      let entryId = entry?.id ?? null;
+
+      if (!entryId) {
+        const upserted = await API.upsertAttendanceEntry({
+          date: remedialDate,
+          student_id: studentId,
+          status: 'present',
+        });
+        entryId = upserted.data?.id ?? null;
+      }
+
+      if (!entryId) {
+        throw new Error('شناسه رکورد حضور از سرور دریافت نشد');
+      }
+
+      await API.patchAttendanceTime(entryId, {
+        field,
+        value: clear ? null : 'now',
+      });
+
+      await fetchRemedialAndAttendanceData(remedialDate);
+
+      const fieldLabels: Record<AttendanceTimestampField, string> = {
+        arrived_at: 'ساعت ورود به آموزشگاه',
+        exam_started_at: 'ساعت شروع آزمون',
+        exam_ended_at: 'ساعت پایان آزمون',
+        departed_at: 'ساعت خروج از آموزشگاه',
+      };
+      showToast(
+        clear
+          ? `${fieldLabels[field]} برای «${studentName}» پاک شد`
+          : `${fieldLabels[field]} برای «${studentName}» ثبت شد`,
+        clear ? 'info' : 'success'
+      );
+    } catch (err) {
+      showToast(
+        (err as Error)?.message || 'خطا در ثبت ساعت حضور و غیاب در سرور',
+        'error'
+      );
+    } finally {
+      setUpdatingTimeKey(null);
+    }
+  };
+
+  // Change Teacher Tutoring Status (PUT /api/v1/tutoring/status)
+  const handleChangeTeacherStatus = async (next: TeacherTutoringStatus) => {
+    if (isUpdatingTeacherStatus) return;
+    setIsUpdatingTeacherStatus(true);
+    try {
+      await API.setTutoringStatus(next);
+      setTeacherStatus(next);
+      await fetchRemedialAndAttendanceData(remedialDate);
+      const labels: Record<TeacherTutoringStatus, string> = {
+        ready: 'آماده پذیرش',
+        break: 'در حال استراحت',
+        absent: 'غایب',
+      };
+      showToast(`وضعیت مدرس به «${labels[next]}» تغییر یافت`, 'success');
+    } catch (err) {
+      showToast(
+        (err as Error)?.message || 'خطا در تغییر وضعیت حضور استاد',
+        'error'
+      );
+    } finally {
+      setIsUpdatingTeacherStatus(false);
+    }
+  };
+
+  // Add Guest Student to Daily Attendance (POST /api/v1/attendance/guests)
+  const handleAddAttendanceGuest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!guestForm.guest_name.trim()) {
+      setGuestError('نام دانش‌آموز مهمان الزامی است');
+      return;
+    }
+    setGuestError(undefined);
+    setIsSavingGuest(true);
+    try {
+      await API.addAttendanceGuest({
+        date: remedialDate,
+        guest_name: guestForm.guest_name.trim(),
+        field: guestForm.field,
+      });
+      setGuestForm({ guest_name: '', field: remedialFieldTab });
+      setIsAddGuestModalOpen(false);
+      await fetchRemedialAndAttendanceData(remedialDate);
+      showToast('دانش‌آموز مهمان در لیست حضور امروز ثبت شد', 'success');
+    } catch (err) {
+      showToast((err as Error)?.message || 'خطا در ثبت دانش‌آموز مهمان', 'error');
+    } finally {
+      setIsSavingGuest(false);
     }
   };
 
@@ -959,14 +1360,46 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
   }, [smsLogs, logStatusFilter]);
 
   const currentFieldRemedialClasses = useMemo(
-    () => remedialClasses.filter((c) => c.field === remedialFieldTab),
+    () =>
+      remedialClasses.filter(
+        (c) => c.field === remedialFieldTab || Boolean(c.instructor_id)
+      ),
     [remedialClasses, remedialFieldTab]
   );
 
-  const allFieldStudents = useMemo(
-    () => items.filter((s) => s.field === remedialFieldTab),
-    [items, remedialFieldTab]
-  );
+  const allFieldStudents = useMemo(() => {
+    const baseList = items.filter((s) => s.field === remedialFieldTab);
+    const knownIds = new Set(baseList.map((s) => s.student_id));
+    const extraFromAttendance: AppointmentSmsPreviewItem[] = attendanceEntries
+      .filter(
+        (e) =>
+          (e.field === remedialFieldTab || !e.field) &&
+          (e.student_id ? !knownIds.has(e.student_id) : Boolean(e.id))
+      )
+      .map((e, idx) => ({
+        student_id: e.student_id ?? -(e.id ?? idx + 1),
+        student_name: e.name || e.guest_name || 'مهمان',
+        grade: null,
+        field: e.field || remedialFieldTab,
+        status: 'no_appointment',
+        recipient_type: 'parent',
+        parent_name: null,
+        appointment_id: null,
+        appointment_date: remedialDate,
+        start_time: null,
+        end_time: null,
+        appointment_at: null,
+        active_appointments_count: 0,
+        multiple_appointments: false,
+        last_error: null,
+        last_sent_at: null,
+        attempts: 0,
+        arrival_time: extractHmFromTimestamp(e.arrived_at) || null,
+        exam_start_time: extractHmFromTimestamp(e.exam_started_at) || null,
+        exam_end_time: extractHmFromTimestamp(e.exam_ended_at) || null,
+      }));
+    return [...baseList, ...extraFromAttendance];
+  }, [items, attendanceEntries, remedialFieldTab, remedialDate]);
 
   const remedialFieldStats = useMemo(() => {
     let inClassStudentsCount = 0;
@@ -1533,100 +1966,169 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
           )}
         </>
       ) : (
-        /* Remedial Classes Matrix View */
+        /* Remedial Classes & Daily Attendance Matrix View (/api/v1/tutoring* & /api/v1/attendance*) */
         <div className="bg-white rounded-2xl shadow-xs border border-slate-200/80 p-4 sm:p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-            <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200">
-              {(['تجربی', 'ریاضی', 'انسانی'] as AcademicField[]).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => {
-                    setRemedialFieldTab(f);
-                    setRemedialStatusFilter('all');
-                  }}
-                  className={`min-h-[40px] px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    remedialFieldTab === f
-                      ? 'bg-[#445D84] text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  رشته {f}
-                </button>
-              ))}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200">
+                {(['تجربی', 'ریاضی', 'انسانی'] as AcademicField[]).map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => {
+                      setRemedialFieldTab(f);
+                      setRemedialStatusFilter('all');
+                    }}
+                    className={`min-h-[40px] px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      remedialFieldTab === f
+                        ? 'bg-[#445D84] text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    رشته {f}
+                  </button>
+                ))}
+              </div>
+
+              {/* Date Selector for Daily Attendance (/api/v1/attendance?date=...) */}
+              <div className="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
+                <Calendar className="w-3.5 h-3.5 text-[#445D84]" />
+                <input
+                  type="date"
+                  aria-label="تاریخ حضور و رفع اشکال"
+                  value={remedialDate}
+                  onChange={(e) => setRemedialDate(e.target.value)}
+                  className="text-xs font-bold text-slate-700 bg-transparent focus:outline-none min-h-[34px]"
+                />
+                <span className="text-[11px] text-slate-500">
+                  ({toPersianDigits(formatGregorianToJalali(remedialDate))})
+                </span>
+              </div>
             </div>
 
-            <ActionButton
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                setNewClassErrors({});
-                setIsAddClassModalOpen(true);
-              }}
-              icon={<Plus className="w-4 h-4" />}
-            >
-              افزودن ستون کلاس جدید
-            </ActionButton>
-          </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Teacher Tutoring Status (PUT /api/v1/tutoring/status) */}
+              <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-100 border border-slate-200 text-[11px]">
+                {(
+                  [
+                    { id: 'ready', label: 'آماده پذیرش' },
+                    { id: 'break', label: 'استراحت' },
+                    { id: 'absent', label: 'غایب' },
+                  ] as Array<{ id: TeacherTutoringStatus; label: string }>
+                ).map((st) => (
+                  <button
+                    key={st.id}
+                    type="button"
+                    disabled={isUpdatingTeacherStatus}
+                    onClick={() => handleChangeTeacherStatus(st.id)}
+                    className={`min-h-[34px] px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer disabled:opacity-50 ${
+                      teacherStatus === st.id
+                        ? 'bg-[#445D84] text-white'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {st.label}
+                  </button>
+                ))}
+              </div>
 
-          {/* 3-State Filter Chips */}
-          <div className="flex flex-wrap items-center gap-2 bg-slate-50/80 rounded-xl p-3 border border-slate-200/70">
-            <button
-              type="button"
-              onClick={() => setRemedialStatusFilter('all')}
-              className={`min-h-[40px] inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                remedialStatusFilter === 'all'
-                  ? 'bg-[#445D84] text-white border-[#445D84]'
-                  : 'bg-white text-slate-700 border-slate-200'
-              }`}
-            >
-              <span>همه ({toPersianDigits(remedialFieldStats.totalStudents)})</span>
-            </button>
+              {/* Add Guest Student (POST /api/v1/attendance/guests) */}
+              <ActionButton
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setGuestForm({ guest_name: '', field: remedialFieldTab });
+                  setGuestError(undefined);
+                  setIsAddGuestModalOpen(true);
+                }}
+                icon={<UserPlus className="w-4 h-4" />}
+              >
+                ثبت مهمان
+              </ActionButton>
 
-            <button
-              type="button"
-              onClick={() => setRemedialStatusFilter('in_class')}
-              className={`min-h-[40px] inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                remedialStatusFilter === 'in_class'
-                  ? 'bg-emerald-600 text-white border-emerald-600'
-                  : 'bg-white text-emerald-700 border-emerald-200'
-              }`}
-            >
-              <span>حاضر در کلاس ({toPersianDigits(remedialFieldStats.inClassStudentsCount)})</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setRemedialStatusFilter('left_class')}
-              className={`min-h-[40px] inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                remedialStatusFilter === 'left_class'
-                  ? 'bg-indigo-600 text-white border-indigo-600'
-                  : 'bg-white text-indigo-700 border-indigo-200'
-              }`}
-            >
-              <span>خارج شده ({toPersianDigits(remedialFieldStats.leftClassStudentsCount)})</span>
-            </button>
-          </div>
-
-          {currentFieldRemedialClasses.length === 0 ? (
-            <div className="py-12 text-center space-y-3">
-              <p className="text-sm font-bold text-slate-700">
-                هیچ کلاس رفع اشکالی برای رشته {remedialFieldTab} تعریف نشده است
-              </p>
               <ActionButton
                 variant="primary"
                 size="sm"
-                onClick={() => setIsAddClassModalOpen(true)}
+                onClick={() => {
+                  setNewClassErrors({});
+                  setIsAddClassModalOpen(true);
+                }}
                 icon={<Plus className="w-4 h-4" />}
               >
-                ایجاد اولین کلاس رفع اشکال
+                افزودن ستون کلاس جدید
               </ActionButton>
             </div>
-          ) : currentFieldStudents.length === 0 ? (
+          </div>
+
+          {/* 3-State Filter Chips */}
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50/80 rounded-xl p-3 border border-slate-200/70">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setRemedialStatusFilter('all')}
+                className={`min-h-[40px] inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                  remedialStatusFilter === 'all'
+                    ? 'bg-[#445D84] text-white border-[#445D84]'
+                    : 'bg-white text-slate-700 border-slate-200'
+                }`}
+              >
+                <span>همه ({toPersianDigits(remedialFieldStats.totalStudents)})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRemedialStatusFilter('in_class')}
+                className={`min-h-[40px] inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                  remedialStatusFilter === 'in_class'
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white text-emerald-700 border-emerald-200'
+                }`}
+              >
+                <span>
+                  حاضر در کلاس ({toPersianDigits(remedialFieldStats.inClassStudentsCount)})
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRemedialStatusFilter('left_class')}
+                className={`min-h-[40px] inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                  remedialStatusFilter === 'left_class'
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white text-indigo-700 border-indigo-200'
+                }`}
+              >
+                <span>
+                  خارج شده ({toPersianDigits(remedialFieldStats.leftClassStudentsCount)})
+                </span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => fetchRemedialAndAttendanceData(remedialDate)}
+              className="min-h-[40px] px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-[#445D84]" />
+              <span>بروزرسانی بورد کلاس‌ها</span>
+            </button>
+          </div>
+
+          {currentFieldStudents.length === 0 ? (
             <div className="py-10 text-center space-y-2.5">
               <p className="text-sm font-bold text-slate-700">
                 دانش‌آموزی با این وضعیت در رشته {remedialFieldTab} یافت نشد
               </p>
+              {currentFieldRemedialClasses.length === 0 && (
+                <ActionButton
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setIsAddClassModalOpen(true)}
+                  icon={<Plus className="w-4 h-4" />}
+                >
+                  افزودن ستون کلاس رفع اشکال
+                </ActionButton>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-slate-200/80">
@@ -1635,6 +2137,9 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                   <tr className="bg-[#344868] text-white text-xs">
                     <th className="py-3.5 px-4 font-bold min-w-[170px]">
                       نام دانش‌آموز ({remedialFieldTab})
+                    </th>
+                    <th className="py-3.5 px-4 font-bold text-center min-w-[230px] border-r border-white/10">
+                      حضور و آزمون روزانه
                     </th>
                     {currentFieldRemedialClasses.map((col) => {
                       const inClassCount = allFieldStudents.filter(
@@ -1653,7 +2158,14 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                           className="py-3.5 px-4 font-bold text-center min-w-[200px] border-r border-white/10"
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <span className="truncate">{col.class_name}</span>
+                            <div className="min-w-0 text-right">
+                              <div className="truncate">{col.class_name}</div>
+                              {col.teacher_name && (
+                                <div className="text-[10px] font-normal text-white/75 truncate">
+                                  {col.teacher_name}
+                                </div>
+                              )}
+                            </div>
                             <button
                               type="button"
                               onClick={() => handleDeleteRemedialClass(col.id)}
@@ -1677,99 +2189,166 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
-                  {currentFieldStudents.map((student) => (
-                    <tr key={student.student_id} className="hover:bg-slate-50/80">
-                      <td className="py-3.5 px-4 font-bold text-slate-800">
-                        {student.student_name}
-                      </td>
-                      {currentFieldRemedialClasses.map((col) => {
-                        const att = getStudentClassAttendance(col, student.student_id);
-                        return (
-                          <td
-                            key={col.id}
-                            className="py-3 px-3 text-center border-r border-slate-100 align-middle"
-                          >
-                            {att.status === 'none' && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  updateRemedialAttendance(
-                                    col.id,
-                                    student.student_id,
-                                    'in_class'
-                                  )
-                                }
-                                className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/70 text-slate-600 hover:border-emerald-400 hover:bg-emerald-50/60 hover:text-emerald-700 font-bold text-xs transition-all cursor-pointer w-full max-w-[185px]"
-                              >
-                                <LogIn className="w-3.5 h-3.5" />
-                                <span>ثبت ورود</span>
-                              </button>
-                            )}
+                  {currentFieldStudents.map((student) => {
+                    const attEntry = attendanceEntries.find(
+                      (e) => e.student_id === student.student_id
+                    );
+                    const arrivedHm =
+                      extractHmFromTimestamp(attEntry?.arrived_at) ||
+                      student.arrival_time;
+                    const examStartHm =
+                      extractHmFromTimestamp(attEntry?.exam_started_at) ||
+                      student.exam_start_time;
+                    const examEndHm =
+                      extractHmFromTimestamp(attEntry?.exam_ended_at) ||
+                      student.exam_end_time;
+                    const departedHm = extractHmFromTimestamp(
+                      attEntry?.departed_at
+                    );
 
-                            {att.status === 'in_class' && (
-                              <div className="inline-flex flex-col items-stretch gap-1.5 p-2 rounded-xl bg-emerald-50/90 border border-emerald-200 w-full max-w-[195px]">
-                                <div className="flex items-center justify-between gap-1 px-1 text-[11px] font-bold text-emerald-800">
-                                  <span>حاضر</span>
-                                  {att.entered_at && (
-                                    <span>{toPersianDigits(att.entered_at)}</span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      updateRemedialAttendance(
-                                        col.id,
-                                        student.student_id,
-                                        'left_class'
-                                      )
-                                    }
-                                    className="flex-1 min-h-[38px] inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold transition-colors cursor-pointer"
-                                  >
-                                    <LogOut className="w-3 h-3" />
-                                    ثبت خروج
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      updateRemedialAttendance(
-                                        col.id,
-                                        student.student_id,
-                                        'none'
-                                      )
-                                    }
-                                    className="min-w-[38px] min-h-[38px] inline-flex items-center justify-center rounded-lg bg-white text-slate-400 hover:text-rose-600 border border-emerald-200/70 cursor-pointer"
-                                  >
-                                    <RotateCcw className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              </div>
-                            )}
+                    return (
+                      <tr key={student.student_id} className="hover:bg-slate-50/80">
+                        <td className="py-3.5 px-4 font-bold text-slate-800">
+                          <div>{student.student_name}</div>
+                          {student.grade && (
+                            <div className="text-[11px] font-normal text-slate-400 mt-0.5">
+                              پایه {toPersianDigits(student.grade)}
+                            </div>
+                          )}
+                        </td>
 
-                            {att.status === 'left_class' && (
-                              <div className="inline-flex flex-col items-stretch gap-1.5 p-2 rounded-xl bg-indigo-50/80 border border-indigo-200 w-full max-w-[195px]">
-                                <div className="flex items-center justify-between gap-1 px-1 text-[11px] font-bold text-indigo-800">
-                                  <span>خارج شده</span>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      updateRemedialAttendance(
-                                        col.id,
-                                        student.student_id,
-                                        'none'
-                                      )
-                                    }
-                                    className="p-1 rounded-md hover:bg-rose-100 text-slate-400 hover:text-rose-600 cursor-pointer"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </button>
-                                </div>
-                                <div className="text-[10px] font-bold text-indigo-900 bg-white/90 px-2 py-1 rounded-lg">
-                                  {toPersianDigits(att.entered_at || '—')} تا{' '}
-                                  {toPersianDigits(att.exited_at || '—')}
-                                </div>
+                        {/* Daily Attendance Timestamps (/api/v1/attendance/entries & /api/v1/attendance/{id}/times) */}
+                        <td className="py-3 px-3 text-center border-r border-slate-100 align-middle">
+                          <div className="grid grid-cols-2 gap-1.5 max-w-[220px] mx-auto">
+                            <button
+                              type="button"
+                              disabled={
+                                updatingTimeKey === `${student.student_id}-arrived_at`
+                              }
+                              onClick={() =>
+                                handleStampStudentAttendanceTime(
+                                  student.student_id,
+                                  student.student_name,
+                                  'arrived_at',
+                                  Boolean(arrivedHm)
+                                )
+                              }
+                              className={`min-h-[36px] px-2 py-1 rounded-lg border text-[11px] font-bold inline-flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50 ${
+                                arrivedHm
+                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-emerald-300'
+                              }`}
+                            >
+                              <LogIn className="w-3 h-3 shrink-0" />
+                              <span>
+                                {arrivedHm
+                                  ? `ورود: ${toPersianDigits(arrivedHm)}`
+                                  : 'ثبت ورود'}
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={
+                                updatingTimeKey === `${student.student_id}-departed_at`
+                              }
+                              onClick={() =>
+                                handleStampStudentAttendanceTime(
+                                  student.student_id,
+                                  student.student_name,
+                                  'departed_at',
+                                  Boolean(departedHm)
+                                )
+                              }
+                              className={`min-h-[36px] px-2 py-1 rounded-lg border text-[11px] font-bold inline-flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50 ${
+                                departedHm
+                                  ? 'bg-indigo-50 border-indigo-200 text-indigo-800'
+                                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-indigo-300'
+                              }`}
+                            >
+                              <LogOut className="w-3 h-3 shrink-0" />
+                              <span>
+                                {departedHm
+                                  ? `خروج: ${toPersianDigits(departedHm)}`
+                                  : 'ثبت خروج'}
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={
+                                updatingTimeKey ===
+                                `${student.student_id}-exam_started_at`
+                              }
+                              onClick={() =>
+                                handleStampStudentAttendanceTime(
+                                  student.student_id,
+                                  student.student_name,
+                                  'exam_started_at',
+                                  Boolean(examStartHm)
+                                )
+                              }
+                              className={`min-h-[36px] px-2 py-1 rounded-lg border text-[11px] font-bold inline-flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50 ${
+                                examStartHm
+                                  ? 'bg-blue-50 border-blue-200 text-blue-800'
+                                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-blue-300'
+                              }`}
+                            >
+                              <ClipboardList className="w-3 h-3 shrink-0" />
+                              <span>
+                                {examStartHm
+                                  ? `شروع: ${toPersianDigits(examStartHm)}`
+                                  : 'شروع آزمون'}
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={
+                                updatingTimeKey ===
+                                `${student.student_id}-exam_ended_at`
+                              }
+                              onClick={() =>
+                                handleStampStudentAttendanceTime(
+                                  student.student_id,
+                                  student.student_name,
+                                  'exam_ended_at',
+                                  Boolean(examEndHm)
+                                )
+                              }
+                              className={`min-h-[36px] px-2 py-1 rounded-lg border text-[11px] font-bold inline-flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50 ${
+                                examEndHm
+                                  ? 'bg-amber-50 border-amber-200 text-amber-800'
+                                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-amber-300'
+                              }`}
+                            >
+                              <CheckCircle2 className="w-3 h-3 shrink-0" />
+                              <span>
+                                {examEndHm
+                                  ? `پایان: ${toPersianDigits(examEndHm)}`
+                                  : 'پایان آزمون'}
+                              </span>
+                            </button>
+                          </div>
+                        </td>
+
+                        {currentFieldRemedialClasses.map((col) => {
+                          const att = getStudentClassAttendance(
+                            col,
+                            student.student_id
+                          );
+                          const isCellBusy =
+                            updatingCellKey === `${col.id}-${student.student_id}`;
+
+                          return (
+                            <td
+                              key={col.id}
+                              className="py-3 px-3 text-center border-r border-slate-100 align-middle"
+                            >
+                              {att.status === 'none' && (
                                 <button
                                   type="button"
+                                  disabled={isCellBusy}
                                   onClick={() =>
                                     updateRemedialAttendance(
                                       col.id,
@@ -1777,18 +2356,113 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                                       'in_class'
                                     )
                                   }
-                                  className="min-h-[34px] inline-flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-white text-slate-600 hover:text-emerald-700 border border-indigo-200/80 text-[10px] font-bold cursor-pointer"
+                                  className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/70 text-slate-600 hover:border-emerald-400 hover:bg-emerald-50/60 hover:text-emerald-700 font-bold text-xs transition-all cursor-pointer w-full max-w-[185px] disabled:opacity-50"
                                 >
-                                  <UserCheck className="w-3 h-3" />
-                                  برگشت به کلاس
+                                  {isCellBusy ? (
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <LogIn className="w-3.5 h-3.5" />
+                                  )}
+                                  <span>ثبت ورود به کلاس</span>
                                 </button>
-                              </div>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
+                              )}
+
+                              {att.status === 'in_class' && (
+                                <div className="inline-flex flex-col items-stretch gap-1.5 p-2 rounded-xl bg-emerald-50/90 border border-emerald-200 w-full max-w-[195px]">
+                                  <div className="flex items-center justify-between gap-1 px-1 text-[11px] font-bold text-emerald-800">
+                                    <span>حاضر در کلاس</span>
+                                    {att.entered_at && (
+                                      <span>{toPersianDigits(att.entered_at)}</span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      disabled={isCellBusy}
+                                      onClick={() =>
+                                        updateRemedialAttendance(
+                                          col.id,
+                                          student.student_id,
+                                          'left_class'
+                                        )
+                                      }
+                                      className="flex-1 min-h-[38px] inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold transition-colors cursor-pointer disabled:opacity-50"
+                                    >
+                                      {isCellBusy ? (
+                                        <RefreshCw className="w-3 h-3 animate-spin" />
+                                      ) : (
+                                        <LogOut className="w-3 h-3" />
+                                      )}
+                                      ثبت خروج از کلاس
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isCellBusy}
+                                      onClick={() =>
+                                        updateRemedialAttendance(
+                                          col.id,
+                                          student.student_id,
+                                          'none'
+                                        )
+                                      }
+                                      className="min-w-[38px] min-h-[38px] inline-flex items-center justify-center rounded-lg bg-white text-slate-400 hover:text-rose-600 border border-emerald-200/70 cursor-pointer disabled:opacity-50"
+                                    >
+                                      <RotateCcw className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
+                              {att.status === 'left_class' && (
+                                <div className="inline-flex flex-col items-stretch gap-1.5 p-2 rounded-xl bg-indigo-50/80 border border-indigo-200 w-full max-w-[195px]">
+                                  <div className="flex items-center justify-between gap-1 px-1 text-[11px] font-bold text-indigo-800">
+                                    <span>خارج شده</span>
+                                    <button
+                                      type="button"
+                                      disabled={isCellBusy}
+                                      onClick={() =>
+                                        updateRemedialAttendance(
+                                          col.id,
+                                          student.student_id,
+                                          'none'
+                                        )
+                                      }
+                                      className="p-1 rounded-md hover:bg-rose-100 text-slate-400 hover:text-rose-600 cursor-pointer disabled:opacity-50"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                  <div className="text-[10px] font-bold text-indigo-900 bg-white/90 px-2 py-1 rounded-lg">
+                                    {toPersianDigits(att.entered_at || '—')} تا{' '}
+                                    {toPersianDigits(att.exited_at || '—')}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    disabled={isCellBusy}
+                                    onClick={() =>
+                                      updateRemedialAttendance(
+                                        col.id,
+                                        student.student_id,
+                                        'in_class'
+                                      )
+                                    }
+                                    className="min-h-[34px] inline-flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-white text-slate-600 hover:text-emerald-700 border border-indigo-200/80 text-[10px] font-bold cursor-pointer disabled:opacity-50"
+                                  >
+                                    {isCellBusy ? (
+                                      <RefreshCw className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <UserCheck className="w-3 h-3" />
+                                    )}
+                                    برگشت به کلاس
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2646,6 +3320,98 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                 >
                   <Plus className="w-4 h-4" />
                   <span>افزودن کلاس</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Guest Student Bottom-Sheet Modal (POST /api/v1/attendance/guests) */}
+      {isAddGuestModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="ثبت دانش‌آموز مهمان در لیست حضور"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isSavingGuest) {
+              setIsAddGuestModalOpen(false);
+            }
+          }}
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
+          <div className="w-full sm:max-w-md max-h-[90vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-800">
+                ثبت دانش‌آموز مهمان ({toPersianDigits(formatGregorianToJalali(remedialDate))})
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsAddGuestModalOpen(false)}
+                aria-label="بستن"
+                className="min-w-[44px] min-h-[44px] rounded-full inline-flex items-center justify-center bg-slate-100 text-slate-500 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form
+              noValidate
+              onSubmit={handleAddAttendanceGuest}
+              className="flex-1 overflow-y-auto p-5 space-y-4"
+            >
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  نام و نام خانوادگی مهمان *
+                </label>
+                <input
+                  type="text"
+                  value={guestForm.guest_name}
+                  onChange={(e) => {
+                    setGuestForm((prev) => ({
+                      ...prev,
+                      guest_name: e.target.value,
+                    }));
+                    if (guestError) setGuestError(undefined);
+                  }}
+                  placeholder="مثال: آرش محمدی"
+                  className={MOBILE_INPUT_CLASS(Boolean(guestError))}
+                />
+                <FieldError message={guestError} />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  رشته تحصیلی *
+                </label>
+                <select
+                  value={guestForm.field}
+                  onChange={(e) =>
+                    setGuestForm((prev) => ({
+                      ...prev,
+                      field: e.target.value as AcademicField,
+                    }))
+                  }
+                  className={MOBILE_INPUT_CLASS(false)}
+                >
+                  <option value="تجربی">تجربی</option>
+                  <option value="ریاضی">ریاضی</option>
+                  <option value="انسانی">انسانی</option>
+                </select>
+              </div>
+
+              <div className="sticky bottom-0 bg-white pt-3 border-t border-slate-100">
+                <button
+                  type="submit"
+                  disabled={isSavingGuest}
+                  className="w-full min-h-[48px] h-12 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-base inline-flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                >
+                  {isSavingGuest ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <UserPlus className="w-4 h-4" />
+                  )}
+                  <span>ثبت در لیست حضور امروز</span>
                 </button>
               </div>
             </form>

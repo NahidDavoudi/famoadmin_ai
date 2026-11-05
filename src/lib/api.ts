@@ -29,6 +29,16 @@ import type {
   ParentContactRecord,
   CreateParentContactRequest,
   UpdateParentContactRequest,
+  AttendanceDay,
+  AttendanceEntry,
+  UpsertAttendanceEntryRequest,
+  PatchAttendanceTimeRequest,
+  CreateAttendanceGuestRequest,
+  TutoringClassroom,
+  TutoringStatus,
+  TutoringSession,
+  TutoringBoardClass,
+  TeacherTutoringStatus,
 } from '../types';
 import { safeTrim, safeNumber } from './exam-math';
 
@@ -1331,8 +1341,267 @@ class FamoApiClient {
       'خطا در حذف شماره ولی'
     );
   }
+
+  // ============================================================================
+  // Daily Attendance (/api/v1/attendance*)
+  // ============================================================================
+
+  /**
+   * GET /api/v1/attendance?date=YYYY-MM-DD&field=...
+   */
+  async getAttendanceBoard(params?: {
+    date?: string;
+    field?: string;
+  }): Promise<ApiEnvelope<AttendanceDay>> {
+    const query = new URLSearchParams();
+    if (safeTrim(params?.date)) query.set('date', safeTrim(params?.date));
+    if (safeTrim(params?.field) && params?.field !== 'all') {
+      query.set('field', safeTrim(params?.field));
+    }
+    const qs = query.toString();
+    const res = await this.requestJson<AttendanceDay | AttendanceEntry[]>(
+      `/attendance${qs ? `?${qs}` : ''}`,
+      {},
+      'خطا در بارگذاری بورد حضور و غیاب روزانه'
+    );
+    const raw = res.data;
+    const entries: AttendanceEntry[] = Array.isArray(raw)
+      ? raw
+      : Array.isArray(raw?.entries)
+      ? raw.entries
+      : [];
+    return {
+      ...res,
+      data: {
+        date: (!Array.isArray(raw) && raw?.date) || safeTrim(params?.date),
+        date_jalali: (!Array.isArray(raw) && raw?.date_jalali) || '',
+        field: (!Array.isArray(raw) && raw?.field) || params?.field || null,
+        entries,
+      },
+    };
+  }
+
+  /**
+   * PUT /api/v1/attendance/entries
+   */
+  async upsertAttendanceEntry(
+    payload: UpsertAttendanceEntryRequest
+  ): Promise<ApiEnvelope<AttendanceEntry>> {
+    const body: Record<string, unknown> = {
+      date: safeTrim(payload.date),
+      student_id: Number(payload.student_id),
+    };
+    if (payload.status) body.status = payload.status;
+    if (payload.removed !== undefined) body.removed = Boolean(payload.removed);
+    if (safeTrim(payload.client_uuid)) body.client_uuid = safeTrim(payload.client_uuid);
+
+    return this.requestJson<AttendanceEntry>(
+      '/attendance/entries',
+      {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      },
+      'خطا در ثبت حضور و غیاب دانش‌آموز'
+    );
+  }
+
+  /**
+   * PATCH /api/v1/attendance/{id}/times
+   */
+  async patchAttendanceTime(
+    id: number,
+    payload: PatchAttendanceTimeRequest
+  ): Promise<ApiEnvelope<AttendanceEntry>> {
+    return this.requestJson<AttendanceEntry>(
+      `/attendance/${id}/times`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          field: payload.field,
+          value: payload.value ?? null,
+        }),
+      },
+      'خطا در ثبت ساعت حضور یا آزمون'
+    );
+  }
+
+  /**
+   * POST /api/v1/attendance/guests
+   */
+  async addAttendanceGuest(
+    payload: CreateAttendanceGuestRequest
+  ): Promise<ApiEnvelope<AttendanceEntry>> {
+    return this.requestJson<AttendanceEntry>(
+      '/attendance/guests',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          date: safeTrim(payload.date),
+          guest_name: safeTrim(payload.guest_name),
+          field: safeTrim(payload.field),
+        }),
+      },
+      'خطا در ثبت دانش‌آموز مهمان'
+    );
+  }
+
+  /**
+   * GET /api/v1/attendance/print
+   */
+  async getAttendancePrint(params?: {
+    date?: string;
+    field?: string;
+  }): Promise<ApiEnvelope<AttendanceDay>> {
+    const query = new URLSearchParams();
+    if (safeTrim(params?.date)) query.set('date', safeTrim(params?.date));
+    if (safeTrim(params?.field) && params?.field !== 'all') {
+      query.set('field', safeTrim(params?.field));
+    }
+    const qs = query.toString();
+    return this.requestJson<AttendanceDay>(
+      `/attendance/print${qs ? `?${qs}` : ''}`,
+      {},
+      'خطا در دریافت لیست چاپی حضور و غیاب'
+    );
+  }
+
+  // ============================================================================
+  // Tutoring & Remedial Classrooms (/api/v1/tutoring*)
+  // ============================================================================
+
+  /**
+   * GET /api/v1/tutoring/board
+   */
+  async getTutoringBoard(since?: string): Promise<ApiEnvelope<TutoringBoardClass[]>> {
+    const query = new URLSearchParams();
+    if (safeTrim(since)) query.set('since', safeTrim(since));
+    const qs = query.toString();
+    const res = await this.requestJson<
+      | TutoringBoardClass[]
+      | {
+          items?: TutoringBoardClass[];
+          classrooms?: TutoringBoardClass[];
+          classes?: TutoringBoardClass[];
+        }
+    >(
+      `/tutoring/board${qs ? `?${qs}` : ''}`,
+      {},
+      'خطا در بارگذاری وضعیت کلاس‌های رفع اشکال'
+    );
+    const list = Array.isArray(res.data)
+      ? res.data
+      : res.data?.items || res.data?.classrooms || res.data?.classes || [];
+    return { ...res, data: list };
+  }
+
+  /**
+   * GET /api/v1/tutoring/me
+   */
+  async getTutoringMe(): Promise<
+    ApiEnvelope<{
+      classroom: TutoringClassroom;
+      status: {
+        status: TeacherTutoringStatus;
+        started_at: string;
+        status_date: string;
+      } | null;
+      open_session: TutoringSession | null;
+    }>
+  > {
+    return this.requestJson(
+      '/tutoring/me',
+      {},
+      'خطا در دریافت وضعیت کلاس رفع اشکال مدرس'
+    );
+  }
+
+  /**
+   * PUT /api/v1/tutoring/status
+   */
+  async setTutoringStatus(
+    status: TeacherTutoringStatus
+  ): Promise<ApiEnvelope<TutoringStatus>> {
+    return this.requestJson<TutoringStatus>(
+      '/tutoring/status',
+      {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+      },
+      'خطا در تغییر وضعیت حضور استاد'
+    );
+  }
+
+  /**
+   * GET /api/v1/tutoring/students?q=...
+   */
+  async searchTutoringStudents(q?: string): Promise<
+    ApiEnvelope<
+      Array<{
+        id: number;
+        name: string;
+        grade: number | null;
+        field: string;
+      }>
+    >
+  > {
+    const query = new URLSearchParams();
+    if (safeTrim(q)) query.set('q', safeTrim(q));
+    const qs = query.toString();
+    return this.requestJson(
+      `/tutoring/students${qs ? `?${qs}` : ''}`,
+      {},
+      'خطا در جستجوی دانش‌آموزان کلاس رفع اشکال'
+    );
+  }
+
+  /**
+   * POST /api/v1/tutoring/sessions
+   */
+  async startTutoringSession(payload: {
+    student_id: number;
+    classroom_id?: number;
+    client_uuid?: string | null;
+    entered_at?: string | null;
+  }): Promise<ApiEnvelope<TutoringSession>> {
+    const body: Record<string, unknown> = {
+      student_id: Number(payload.student_id),
+    };
+    if (payload.classroom_id) body.classroom_id = Number(payload.classroom_id);
+    if (safeTrim(payload.client_uuid)) body.client_uuid = safeTrim(payload.client_uuid);
+    if (safeTrim(payload.entered_at)) body.entered_at = safeTrim(payload.entered_at);
+
+    return this.requestJson<TutoringSession>(
+      '/tutoring/sessions',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      'خطا در ثبت ورود دانش‌آموز به کلاس رفع اشکال'
+    );
+  }
+
+  /**
+   * POST /api/v1/tutoring/sessions/{id}/end
+   */
+  async endTutoringSession(
+    sessionId: number,
+    endedAt?: string | null
+  ): Promise<ApiEnvelope<TutoringSession>> {
+    const body: Record<string, unknown> = {};
+    if (safeTrim(endedAt)) body.ended_at = safeTrim(endedAt);
+
+    return this.requestJson<TutoringSession>(
+      `/tutoring/sessions/${sessionId}/end`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      'خطا در ثبت خروج دانش‌آموز از کلاس رفع اشکال'
+    );
+  }
 }
 
 export const API = new FamoApiClient();
 export default API;
+
 
