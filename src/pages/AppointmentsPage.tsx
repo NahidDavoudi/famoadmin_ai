@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   Calendar,
   Clock,
@@ -9,10 +9,8 @@ import {
   XCircle,
   RefreshCw,
   Plus,
-  Edit2,
   Trash2,
   Search,
-  Filter,
   Users,
   Phone,
   CheckSquare,
@@ -26,12 +24,13 @@ import {
   X,
   PhoneOff,
   CalendarX2,
-  Layers,
   UserPlus,
   Star,
   LogIn,
   LogOut,
   RotateCcw,
+  Check,
+  ClipboardList,
 } from 'lucide-react';
 import type {
   AcademicField,
@@ -55,7 +54,6 @@ import {
   formatGregorianToJalali,
   getTodayGregorianIso,
   toPersianDigits,
-  JALALI_WEEKDAYS,
 } from '../lib/jalali';
 import {
   validateAppointmentForm,
@@ -65,9 +63,15 @@ import {
   hasErrors,
   type FieldErrors,
 } from '../lib/form-validation';
-import { Modal } from '../components/Modal';
+import {
+  resolveCardAppointmentStatus,
+  formatCardDateLabel,
+  formatCardStartTime,
+  categorizeBulkSmsSelection,
+  buildSmsMessagePreview,
+} from '../lib/appointments-logic';
 import { ConfirmModal } from '../components/ConfirmModal';
-import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
+import { ActionButton, FieldError } from '../components/FormControls';
 
 interface AppointmentsPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -87,6 +91,13 @@ const RELATIONSHIP_LABELS: Record<ParentRelationship, string> = {
   other: 'سایر بستگان',
 };
 
+const MOBILE_INPUT_CLASS = (hasError: boolean) =>
+  `w-full min-h-[48px] h-12 px-3.5 py-2.5 rounded-xl border-2 text-base transition-colors focus:outline-none ${
+    hasError
+      ? 'border-rose-500 bg-rose-50/40 text-slate-900 focus:border-rose-600'
+      : 'border-slate-200 bg-white text-slate-800 focus:border-[#445D84]'
+  }`;
+
 function addDaysIso(isoDate: string, days: number): string {
   const parts = isoDate.split('-').map(Number);
   if (parts.length !== 3 || parts.some(Number.isNaN)) return getTodayGregorianIso();
@@ -99,20 +110,25 @@ function getSaturdayOfWeek(isoDate: string): string {
   const parts = isoDate.split('-').map(Number);
   if (parts.length !== 3 || parts.some(Number.isNaN)) return getTodayGregorianIso();
   const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
-  // JS getUTCDay(): 0 = Sun, 6 = Sat -> offset since Saturday is (day + 1) % 7
   const diffFromSaturday = (d.getUTCDay() + 1) % 7;
   d.setUTCDate(d.getUTCDate() - diffFromSaturday);
   return d.toISOString().slice(0, 10);
 }
 
-function buildWeekSession(weekStartIso: string, id: number, customTitle?: string): WeeklySessionInfo {
+function buildWeekSession(
+  weekStartIso: string,
+  id: number,
+  customTitle?: string
+): WeeklySessionInfo {
   const satIso = getSaturdayOfWeek(weekStartIso);
   const friIso = addDaysIso(satIso, 6);
   const startJalali = formatGregorianToJalali(satIso);
   const endJalali = formatGregorianToJalali(friIso);
   return {
     id,
-    title: customTitle || `هفته ${toPersianDigits(startJalali)} تا ${toPersianDigits(endJalali)}`,
+    title:
+      customTitle ||
+      `${toPersianDigits(startJalali)} تا ${toPersianDigits(endJalali)}`,
     week_date: satIso,
     start_date_jalali: startJalali,
     end_date_jalali: endJalali,
@@ -122,16 +138,17 @@ function buildWeekSession(weekStartIso: string, id: number, customTitle?: string
 export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast }) => {
   const initialSatIso = useMemo(() => getSaturdayOfWeek(getTodayGregorianIso()), []);
 
-  // Navigation & Week Selection (computed dynamically from current date, zero fake data)
+  // Navigation & Compact Week Selection
   const [activeTab, setActiveTab] = useState<MainTab>('appointments');
   const [weeks, setWeeks] = useState<WeeklySessionInfo[]>(() => [
     buildWeekSession(initialSatIso, 1, 'هفته جاری'),
   ]);
   const [selectedWeekId, setSelectedWeekId] = useState<number>(1);
 
-  // Backend Data State (starts empty, populated strictly from API)
+  // Backend Data State
   const [items, setItems] = useState<AppointmentSmsPreviewItem[]>([]);
-  const [serverSummary, setServerSummary] = useState<AppointmentSmsPreviewSummary | null>(null);
+  const [serverSummary, setServerSummary] =
+    useState<AppointmentSmsPreviewSummary | null>(null);
   const [smsLogs, setSmsLogs] = useState<AppointmentSmsLogItem[]>([]);
   const [parentContactsMap, setParentContactsMap] = useState<
     Record<number, ParentContactRecord[]>
@@ -145,40 +162,42 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
   const [fieldFilter, setFieldFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Selection for Bulk Actions
+  // Multi-Select State & Long-Press Refs
+  const [isSelectionMode, setIsSelectionMode] = useState<boolean>(false);
   const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([]);
+  const longPressTimerRef = useRef<number | null>(null);
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const longPressedRef = useRef<boolean>(false);
 
   // SMS Log Drawer State
   const [isLogDrawerOpen, setIsLogDrawerOpen] = useState<boolean>(false);
-  const [logStatusFilter, setLogStatusFilter] = useState<'all' | AppointmentSmsLogStatus>('all');
+  const [logStatusFilter, setLogStatusFilter] = useState<
+    'all' | AppointmentSmsLogStatus
+  >('all');
 
-  // Bulk SMS Confirm Modal State
-  const [smsConfirmModal, setSmsConfirmModal] = useState<{
-    isOpen: boolean;
-    mode: AppointmentSmsSendMode;
-    useSelectedOnly: boolean;
-    targetCount: number;
-    title: string;
-    message: string;
-  }>({
-    isOpen: false,
-    mode: 'unsent',
-    useSelectedOnly: false,
-    targetCount: 0,
-    title: '',
-    message: '',
-  });
+  // Bulk SMS Bottom Sheet State
+  const [isSmsSheetOpen, setIsSmsSheetOpen] = useState<boolean>(false);
+  const [smsSheetMode, setSmsSheetMode] = useState<AppointmentSmsSendMode>('unsent');
+  const [smsSheetCandidateIds, setSmsSheetCandidateIds] = useState<number[]>([]);
+  const [smsSheetCheckedIds, setSmsSheetCheckedIds] = useState<number[]>([]);
   const [isSendingSms, setIsSendingSms] = useState<boolean>(false);
+  const [lastSendBreakdown, setLastSendBreakdown] = useState<{
+    sent: number;
+    failed: number;
+    skipped: number;
+  } | null>(null);
 
-  // Edit / Create Appointment Modal State (no end_time)
-  const [editingItem, setEditingItem] = useState<AppointmentSmsPreviewItem | null>(null);
+  // Edit / Create Appointment Bottom-Sheet Modal State
+  const [editingItem, setEditingItem] = useState<AppointmentSmsPreviewItem | null>(
+    null
+  );
   const [appointmentForm, setAppointmentForm] = useState({
     appointment_date: '',
     start_time: '',
     arrival_time: '',
     exam_start_time: '',
     exam_end_time: '',
-    appointment_status: 'scheduled' as AppointmentStatus,
+    appointment_status: 'confirmed' as AppointmentStatus,
     description: '',
   });
   const [appointmentErrors, setAppointmentErrors] = useState<
@@ -187,7 +206,9 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
   const [isSavingAppointment, setIsSavingAppointment] = useState<boolean>(false);
 
   // Cancel Appointment Confirm State
-  const [cancelingItem, setCancelingItem] = useState<AppointmentSmsPreviewItem | null>(null);
+  const [cancelingItem, setCancelingItem] = useState<AppointmentSmsPreviewItem | null>(
+    null
+  );
 
   // Parent Contacts Modal State (/api/v1/students/{studentId}/parent-contacts)
   const [contactModalStudent, setContactModalStudent] =
@@ -204,7 +225,9 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     phone: '',
     is_primary: true,
   });
-  const [contactErrors, setContactErrors] = useState<FieldErrors<'parent_name' | 'phone'>>({});
+  const [contactErrors, setContactErrors] = useState<
+    FieldErrors<'parent_name' | 'phone'>
+  >({});
   const [isSavingContact, setIsSavingContact] = useState<boolean>(false);
 
   // New Week Session Modal State
@@ -236,7 +259,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     [weeks, selectedWeekId]
   );
 
-  // Fetch preview & logs strictly from backend API
+  // Fetch preview & logs from backend API
   const fetchWeekData = useCallback(
     async (weekDate: string, showRefreshToast = false) => {
       setIsLoading(true);
@@ -257,7 +280,9 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
               data.week_start_jalali || formatGregorianToJalali(data.week_start);
             const endJalali =
               data.week_end_jalali ||
-              formatGregorianToJalali(data.week_end || addDaysIso(data.week_start, 6));
+              formatGregorianToJalali(
+                data.week_end || addDaysIso(data.week_start, 6)
+              );
             setWeeks((prev) =>
               prev.map((w) =>
                 w.week_date === weekDate
@@ -287,11 +312,10 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         }
 
         if (showRefreshToast && previewRes.status === 'fulfilled') {
-          showToast('اطلاعات نوبت‌ها و وضعیت پیامک‌ها از سرور بروزرسانی شد', 'info');
+          showToast('اطلاعات نوبت‌ها از سرور بروزرسانی شد', 'info');
         }
       } catch (err) {
-        const errMsg =
-          (err as Error)?.message || 'خطا در برقراری ارتباط با سرور';
+        const errMsg = (err as Error)?.message || 'خطا در برقراری ارتباط با سرور';
         setItems([]);
         setServerSummary(null);
         setSmsLogs([]);
@@ -322,7 +346,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     setSelectedWeekId(newId);
   };
 
-  // Summary counts matching AppointmentSmsPreviewSummary
+  // Summary counts
   const summary: AppointmentSmsPreviewSummary & { total: number } = useMemo(() => {
     if (serverSummary && items.length === 0) {
       const totalVal = serverSummary.total ?? serverSummary.total_students ?? 0;
@@ -342,7 +366,9 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     const total = items.length;
     const will_send = items.filter((i) => i.status === 'will_send').length;
     const already_sent = items.filter((i) => i.status === 'already_sent').length;
-    const changed_since_sent = items.filter((i) => i.status === 'changed_since_sent').length;
+    const changed_since_sent = items.filter(
+      (i) => i.status === 'changed_since_sent'
+    ).length;
     const failed = items.filter((i) => i.status === 'failed').length;
     const no_phone = items.filter((i) => i.status === 'no_phone').length;
     const no_appointment = items.filter((i) => i.status === 'no_appointment').length;
@@ -361,7 +387,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     };
   }, [items, serverSummary]);
 
-  // Filtered Table Items
+  // Filtered Card Items
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       if (fieldFilter !== 'all' && item.field !== fieldFilter) return false;
@@ -372,7 +398,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         const parentStr = item.parent_name || '';
         const supporterStr = item.supporter_name || '';
         if (
-          !item.student_name.includes(q) &&
+          !String(item.student_name ?? '').includes(q) &&
           !phoneStr.includes(q) &&
           !parentStr.includes(q) &&
           !supporterStr.includes(q)
@@ -392,132 +418,223 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     });
   }, [items, fieldFilter, searchQuery, chipFilter]);
 
-  // Selection helpers
+  // Selection Helpers & Auto-exit when 0 selected
   const allFilteredSelected =
     filteredItems.length > 0 &&
     filteredItems.every((i) => selectedStudentIds.includes(i.student_id));
 
-  const toggleSelectAll = () => {
+  const exitSelectionMode = useCallback(() => {
+    setIsSelectionMode(false);
+    setSelectedStudentIds([]);
+  }, []);
+
+  const toggleSelectOne = useCallback((studentId: number) => {
+    setSelectedStudentIds((prev) => {
+      const exists = prev.includes(studentId);
+      const next = exists
+        ? prev.filter((id) => id !== studentId)
+        : [...prev, studentId];
+      if (next.length === 0) {
+        setIsSelectionMode(false);
+      } else {
+        setIsSelectionMode(true);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAllFiltered = () => {
     if (allFilteredSelected) {
       const filteredSet = new Set(filteredItems.map((i) => i.student_id));
-      setSelectedStudentIds((prev) => prev.filter((id) => !filteredSet.has(id)));
+      const remaining = selectedStudentIds.filter((id) => !filteredSet.has(id));
+      setSelectedStudentIds(remaining);
+      if (remaining.length === 0) {
+        setIsSelectionMode(false);
+      }
     } else {
-      const combined = new Set([
-        ...selectedStudentIds,
-        ...filteredItems.map((i) => i.student_id),
-      ]);
-      setSelectedStudentIds(Array.from(combined));
+      const combined = Array.from(
+        new Set([
+          ...selectedStudentIds,
+          ...filteredItems.map((i) => i.student_id),
+        ])
+      );
+      setSelectedStudentIds(combined);
+      if (combined.length > 0) {
+        setIsSelectionMode(true);
+      }
     }
   };
 
-  const toggleSelectOne = (studentId: number) => {
-    setSelectedStudentIds((prev) =>
-      prev.includes(studentId) ? prev.filter((id) => id !== studentId) : [...prev, studentId]
-    );
-  };
-
-  // Format date & weekday for display (normalizing PHP `weekday` + `appointment_jalali` vs `dev-server.mjs` `day_and_date_fa`)
-  const formatAppointmentDisplayDate = (item: AppointmentSmsPreviewItem) => {
-    if (item.day_and_date_fa) return toPersianDigits(item.day_and_date_fa);
-    if (item.weekday && item.appointment_jalali) {
-      return `${item.weekday} ${toPersianDigits(item.appointment_jalali)}`;
+  // Long-press (~450ms) gesture handlers on cards
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
     }
-    if (item.appointment_jalali) return toPersianDigits(item.appointment_jalali);
-    if (item.appointment_date) {
-      const jalali = formatGregorianToJalali(item.appointment_date);
-      const d = new Date(item.appointment_date);
-      const dayIdx = (d.getDay() + 1) % 7;
-      const dayName = JALALI_WEEKDAYS[dayIdx] || '';
-      return `${dayName} ${toPersianDigits(jalali)}`;
+  };
+
+  const handleCardPointerDown = (
+    e: React.PointerEvent<HTMLDivElement>,
+    studentId: number
+  ) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    touchStartPosRef.current = { x: e.clientX, y: e.clientY };
+    longPressedRef.current = false;
+    clearLongPressTimer();
+
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressedRef.current = true;
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        try {
+          navigator.vibrate(20);
+        } catch {
+          // ignore vibration permission error
+        }
+      }
+      setIsSelectionMode(true);
+      setSelectedStudentIds((prev) =>
+        prev.includes(studentId) ? prev : [...prev, studentId]
+      );
+    }, 450);
+  };
+
+  const handleCardPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!touchStartPosRef.current || longPressTimerRef.current === null) return;
+    const dx = e.clientX - touchStartPosRef.current.x;
+    const dy = e.clientY - touchStartPosRef.current.y;
+    if (Math.hypot(dx, dy) > 10) {
+      clearLongPressTimer();
     }
-    return '—';
   };
 
-  const formatAppointmentStartTime = (item: AppointmentSmsPreviewItem) => {
-    const start = (item.time_fa || item.start_time || '').slice(0, 5);
-    if (!start) return '—';
-    return toPersianDigits(start);
+  const handleCardPointerUpOrCancel = () => {
+    clearLongPressTimer();
+    touchStartPosRef.current = null;
   };
 
-  // Bulk SMS Dispatch Prompt
-  const openSmsConfirm = (mode: AppointmentSmsSendMode, useSelectedOnly = false) => {
-    let targetItems: AppointmentSmsPreviewItem[] = [];
+  const handleCardClick = (item: AppointmentSmsPreviewItem) => {
+    if (longPressedRef.current) {
+      longPressedRef.current = false;
+      return;
+    }
+    if (isSelectionMode) {
+      toggleSelectOne(item.student_id);
+      return;
+    }
+    openEditAppointment(item);
+  };
+
+  // Bulk SMS Bottom Sheet categorization
+  const bulkSmsCandidateItems = useMemo(
+    () => items.filter((i) => smsSheetCandidateIds.includes(i.student_id)),
+    [items, smsSheetCandidateIds]
+  );
+
+  const bulkCategorization = useMemo(
+    () => categorizeBulkSmsSelection(bulkSmsCandidateItems),
+    [bulkSmsCandidateItems]
+  );
+
+  const openBulkSmsSheet = (
+    mode: AppointmentSmsSendMode,
+    useSelectedOnly = false
+  ) => {
+    setLastSendBreakdown(null);
+    let candidateList: AppointmentSmsPreviewItem[] = [];
 
     if (useSelectedOnly) {
-      targetItems = items.filter(
-        (i) =>
-          selectedStudentIds.includes(i.student_id) &&
-          i.appointment_id !== null &&
-          i.status !== 'no_phone'
+      candidateList = items.filter((i) =>
+        selectedStudentIds.includes(i.student_id)
       );
     } else if (mode === 'unsent') {
-      targetItems = items.filter((i) => i.status === 'will_send');
+      candidateList = items.filter((i) => i.status === 'will_send');
     } else if (mode === 'failed') {
-      targetItems = items.filter((i) => i.status === 'failed');
+      candidateList = items.filter((i) => i.status === 'failed');
     } else if (mode === 'changed') {
-      targetItems = items.filter((i) => i.status === 'changed_since_sent');
+      candidateList = items.filter((i) => i.status === 'changed_since_sent');
     }
 
-    if (targetItems.length === 0) {
+    if (candidateList.length === 0) {
       showToast('هیچ دانش‌آموزی واجد شرایط این حالت ارسال پیامک نیست', 'warning');
       return;
     }
 
-    const modeTitles: Record<AppointmentSmsSendMode, string> = {
-      unsent: 'ارسال پیامک به نوبت‌های ارسال‌نشده (unsent)',
-      changed: 'ارسال مجدد به نوبت‌های تغییریافته (changed)',
-      failed: 'تلاش مجدد برای پیامک‌های ناموفق (failed)',
-    };
-
-    const title = useSelectedOnly
-      ? `ارسال پیامک به انتخاب‌شده‌ها (${mode})`
-      : modeTitles[mode];
-
-    const message = `آیا از ارسال پیامک اطلاع‌رسانی نوبت هفتگی به والدین ${toPersianDigits(
-      targetItems.length
-    )} دانش‌آموز در «${currentWeek.title}» با حالت «${mode}» اطمینان دارید؟`;
-
-    setSmsConfirmModal({
-      isOpen: true,
-      mode,
-      useSelectedOnly,
-      targetCount: targetItems.length,
-      title,
-      message,
-    });
+    const cat = categorizeBulkSmsSelection(candidateList);
+    setSmsSheetMode(mode);
+    setSmsSheetCandidateIds(candidateList.map((i) => i.student_id));
+    setSmsSheetCheckedIds(cat.defaultCheckedStudentIds);
+    setIsSmsSheetOpen(true);
   };
 
-  const handleConfirmSendSms = async () => {
-    const { mode, useSelectedOnly } = smsConfirmModal;
-    setIsSendingSms(true);
+  const toggleSmsRecipientGroup = (groupStudentIds: number[]) => {
+    const allChecked = groupStudentIds.every((id) =>
+      smsSheetCheckedIds.includes(id)
+    );
+    if (allChecked) {
+      setSmsSheetCheckedIds((prev) =>
+        prev.filter((id) => !groupStudentIds.includes(id))
+      );
+    } else {
+      setSmsSheetCheckedIds((prev) =>
+        Array.from(new Set([...prev, ...groupStudentIds]))
+      );
+    }
+  };
 
-    // Strictly omit `student_ids` unless sending to a non-empty subset
-    const subsetIds =
-      useSelectedOnly && selectedStudentIds.length > 0 ? selectedStudentIds : undefined;
+  // Unique phone count among currently checked student IDs
+  const checkedUniquePhoneCount = useMemo(() => {
+    const phones = new Set<string>();
+    for (const group of bulkCategorization.recipientGroups) {
+      const hasChecked = group.students.some((s) =>
+        smsSheetCheckedIds.includes(s.student_id)
+      );
+      if (hasChecked) {
+        phones.add(group.phoneKey);
+      }
+    }
+    return phones.size;
+  }, [bulkCategorization.recipientGroups, smsSheetCheckedIds]);
+
+  const handleConfirmSendSms = async () => {
+    if (smsSheetCheckedIds.length === 0) {
+      showToast('حداقل یک گیرنده معتبر برای ارسال پیامک انتخاب کنید', 'warning');
+      return;
+    }
+
+    setIsSendingSms(true);
     const operationId = `op-${currentWeek.week_date.replace(/-/g, '')}-${Date.now()}`;
 
     try {
       const res = await API.sendAppointmentsSms({
         week_date: currentWeek.week_date,
-        mode,
-        student_ids: subsetIds,
+        mode: smsSheetMode,
+        student_ids: smsSheetCheckedIds,
         operation_id: operationId,
       });
 
       const sentCount = res.data?.summary?.sent ?? 0;
       const failedCount = res.data?.summary?.failed ?? 0;
-      setSelectedStudentIds([]);
-      setSmsConfirmModal((prev) => ({ ...prev, isOpen: false }));
-      await fetchWeekData(currentWeek.week_date, false);
+      const skippedCount =
+        (res.data?.summary?.skipped_no_phone ?? 0) +
+        (res.data?.summary?.skipped ?? 0);
 
-      if (failedCount > 0 && sentCount === 0) {
+      await fetchWeekData(currentWeek.week_date, false);
+      exitSelectionMode();
+
+      if (failedCount > 0) {
+        setLastSendBreakdown({
+          sent: sentCount,
+          failed: failedCount,
+          skipped: skippedCount,
+        });
         showToast(
-          `ارسال پیامک برای ${toPersianDigits(failedCount)} نفر با خطا مواجه شد`,
-          'error'
+          `ارسال پیامک: ${toPersianDigits(sentCount)} موفق، ${toPersianDigits(failedCount)} ناموفق`,
+          sentCount > 0 ? 'warning' : 'error'
         );
       } else {
+        setIsSmsSheetOpen(false);
         showToast(
-          `پیامک یادآوری نوبت برای ${toPersianDigits(sentCount)} ولی ارسال شد`,
+          `پیامک یادآوری برای ${toPersianDigits(sentCount)} گیرنده ارسال شد`,
           'success'
         );
       }
@@ -528,51 +645,17 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     }
   };
 
-  // Single row SMS send
-  const handleSendSingleSms = async (item: AppointmentSmsPreviewItem) => {
-    if (!item.appointment_id || !item.appointment_date || !item.start_time) {
-      showToast('ابتدا تاریخ و ساعت نوبت را برای این دانش‌آموز ثبت کنید', 'warning');
-      return;
-    }
-    if (item.status === 'no_phone') {
-      showToast('ابتدا شماره تماس ولی دانش‌آموز را ثبت کنید', 'warning');
-      openParentContactsModal(item);
-      return;
-    }
-
-    const modeForSingle: AppointmentSmsSendMode =
-      item.status === 'failed'
-        ? 'failed'
-        : item.status === 'changed_since_sent'
-        ? 'changed'
-        : 'unsent';
-
-    const operationId = `op-single-${item.student_id}-${Date.now()}`;
-    try {
-      await API.sendAppointmentsSms({
-        week_date: currentWeek.week_date,
-        mode: modeForSingle,
-        student_ids: [item.student_id],
-        operation_id: operationId,
-      });
-      await fetchWeekData(currentWeek.week_date, false);
-      showToast(`پیامک نوبت برای ولی «${item.student_name}» ارسال شد`, 'success');
-    } catch (err) {
-      showToast((err as Error)?.message || 'خطا در ارسال پیامک به ولی دانش‌آموز', 'error');
-    }
-  };
-
-  // Edit / Create Appointment Modal (no end_time)
+  // Single Tap -> Open Edit / Create Appointment Bottom-Sheet Modal
   const openEditAppointment = (item: AppointmentSmsPreviewItem) => {
     setEditingItem(item);
-    const defaultStart = (item.start_time || '10:00').slice(0, 5);
+    const defaultStart = String(item.start_time || '10:00').slice(0, 5);
     setAppointmentForm({
       appointment_date: item.appointment_date || currentWeek.week_date,
       start_time: defaultStart,
       arrival_time: item.arrival_time || '',
       exam_start_time: item.exam_start_time || '',
       exam_end_time: item.exam_end_time || '',
-      appointment_status: item.appointment_status || 'scheduled',
+      appointment_status: item.appointment_status || 'confirmed',
       description: item.description || '',
     });
     setAppointmentErrors({});
@@ -602,26 +685,11 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
 
       setEditingItem(null);
       await fetchWeekData(currentWeek.week_date, false);
-      showToast(`نوبت «${editingItem.student_name}» با موفقیت در سرور ذخیره شد`, 'success');
+      showToast(`نوبت «${editingItem.student_name}» ذخیره شد`, 'success');
     } catch (err) {
       showToast((err as Error)?.message || 'خطا در ذخیره نوبت در سرور', 'error');
     } finally {
       setIsSavingAppointment(false);
-    }
-  };
-
-  // Change Appointment Status (PUT /api/v1/appointments/{id}/status)
-  const handleStatusChange = async (
-    item: AppointmentSmsPreviewItem,
-    newStatus: AppointmentStatus
-  ) => {
-    if (!item.appointment_id) return;
-    try {
-      await API.updateAppointmentStatus(item.appointment_id, newStatus);
-      await fetchWeekData(currentWeek.week_date, false);
-      showToast(`وضعیت نوبت «${item.student_name}» بروزرسانی شد`, 'info');
-    } catch (err) {
-      showToast((err as Error)?.message || 'خطا در تغییر وضعیت نوبت', 'error');
     }
   };
 
@@ -635,8 +703,9 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
       await API.deleteAppointment(cancelingItem.appointment_id);
       const studentName = cancelingItem.student_name;
       setCancelingItem(null);
+      setEditingItem(null);
       await fetchWeekData(currentWeek.week_date, false);
-      showToast(`نوبت «${studentName}» لغو و حذف شد`, 'info');
+      showToast(`نوبت «${studentName}» لغو شد`, 'info');
     } catch (err) {
       showToast((err as Error)?.message || 'خطا در لغو نوبت', 'error');
     }
@@ -661,7 +730,10 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         [item.student_id]: res.data || [],
       }));
     } catch (err) {
-      showToast((err as Error)?.message || 'خطا در دریافت شماره‌های والدین از سرور', 'error');
+      showToast(
+        (err as Error)?.message || 'خطا در دریافت شماره‌های والدین از سرور',
+        'error'
+      );
     } finally {
       setIsLoadingContacts(false);
     }
@@ -704,7 +776,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
 
       await fetchWeekData(currentWeek.week_date, false);
       showToast(
-        `شماره تماس ولی برای «${contactModalStudent.student_name}» در سرور ثبت شد`,
+        `شماره تماس ولی برای «${contactModalStudent.student_name}» ثبت شد`,
         'success'
       );
     } catch (err) {
@@ -738,7 +810,9 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     setNewWeekErrors(errors);
     if (hasErrors(errors)) return;
 
-    const satIso = getSaturdayOfWeek(newWeekForm.week_date || getTodayGregorianIso());
+    const satIso = getSaturdayOfWeek(
+      newWeekForm.week_date || getTodayGregorianIso()
+    );
     const newId = Date.now();
     const created: WeeklySessionInfo = {
       id: newId,
@@ -813,7 +887,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
           };
         }
 
-        // nextStatus === 'left_class'
         prevStates[studentId] = {
           status: 'left_class',
           entered_at: current.entered_at || nowHm,
@@ -852,7 +925,9 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
 
   const handleAddRemedialClass = (e: React.FormEvent) => {
     e.preventDefault();
-    const errors = validateRemedialClassForm({ class_name: newClassForm.class_name });
+    const errors = validateRemedialClassForm({
+      class_name: newClassForm.class_name,
+    });
     setNewClassErrors(errors);
     if (hasErrors(errors)) return;
 
@@ -867,61 +942,15 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     setRemedialClasses((prev) => [...prev, newCol]);
     setNewClassForm({ class_name: '', teacher_name: '' });
     setIsAddClassModalOpen(false);
-    showToast(`کلاس «${newCol.class_name}» به ماتریس رشته ${remedialFieldTab} اضافه شد`, 'success');
+    showToast(
+      `کلاس «${newCol.class_name}» به ماتریس رشته ${remedialFieldTab} اضافه شد`,
+      'success'
+    );
   };
 
   const handleDeleteRemedialClass = (classId: number) => {
     setRemedialClasses((prev) => prev.filter((c) => c.id !== classId));
     showToast('ستون کلاس رفع اشکال حذف شد', 'info');
-  };
-
-  // Badge helper for AppointmentSmsPreviewStatus
-  const renderSmsPreviewStatusBadge = (item: AppointmentSmsPreviewItem) => {
-    switch (item.status) {
-      case 'already_sent':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            ارسال‌شده (already_sent)
-          </span>
-        );
-      case 'changed_since_sent':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
-            <AlertTriangle className="w-3.5 h-3.5" />
-            تغییریافته پس از ارسال
-          </span>
-        );
-      case 'failed':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
-            <XCircle className="w-3.5 h-3.5" />
-            ارسال ناموفق (failed)
-          </span>
-        );
-      case 'will_send':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
-            <Clock className="w-3.5 h-3.5" />
-            آماده ارسال (will_send)
-          </span>
-        );
-      case 'no_phone':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-orange-50 text-orange-700 border border-orange-200">
-            <PhoneOff className="w-3.5 h-3.5" />
-            فاقد شماره ولی (no_phone)
-          </span>
-        );
-      case 'no_appointment':
-      default:
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
-            <CalendarX2 className="w-3.5 h-3.5" />
-            بدون نوبت فعال
-          </span>
-        );
-    }
   };
 
   const filteredLogs = useMemo(() => {
@@ -943,8 +972,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     let inClassStudentsCount = 0;
     let leftClassStudentsCount = 0;
     let notEnteredStudentsCount = 0;
-    let totalInClassSessions = 0;
-    let totalLeftClassSessions = 0;
 
     for (const st of allFieldStudents) {
       const states = currentFieldRemedialClasses.map(
@@ -955,9 +982,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
       if (hasInClass) inClassStudentsCount += 1;
       if (hasLeftClass) leftClassStudentsCount += 1;
       if (!hasInClass && !hasLeftClass) notEnteredStudentsCount += 1;
-
-      totalInClassSessions += states.filter((s) => s === 'in_class').length;
-      totalLeftClassSessions += states.filter((s) => s === 'left_class').length;
     }
 
     return {
@@ -965,8 +989,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
       inClassStudentsCount,
       leftClassStudentsCount,
       notEnteredStudentsCount,
-      totalInClassSessions,
-      totalLeftClassSessions,
     };
   }, [allFieldStudents, currentFieldRemedialClasses, getStudentClassAttendance]);
 
@@ -976,12 +998,9 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
       const states = currentFieldRemedialClasses.map(
         (col) => getStudentClassAttendance(col, st.student_id).status
       );
-      if (remedialStatusFilter === 'in_class') {
-        return states.includes('in_class');
-      }
-      if (remedialStatusFilter === 'left_class') {
+      if (remedialStatusFilter === 'in_class') return states.includes('in_class');
+      if (remedialStatusFilter === 'left_class')
         return states.includes('left_class');
-      }
       return states.every((s) => s === 'none');
     });
   }, [
@@ -991,824 +1010,602 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     getStudentClassAttendance,
   ]);
 
+  const renderCardStatusIcon = (key: string) => {
+    switch (key) {
+      case 'pending':
+        return <Clock className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />;
+      case 'confirmed':
+        return <Calendar className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />;
+      case 'completed':
+        return <CheckCircle2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />;
+      case 'absent':
+        return <XCircle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />;
+      default:
+        return <CalendarX2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />;
+    }
+  };
+
+  const samplePreviewStudent = useMemo(() => {
+    const firstChecked = items.find((i) =>
+      smsSheetCheckedIds.includes(i.student_id)
+    );
+    return firstChecked || bulkSmsCandidateItems[0] || items[0] || null;
+  }, [items, smsSheetCheckedIds, bulkSmsCandidateItems]);
+
   return (
-    <div className="space-y-6">
-      {/* Top Header & Week Selector */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-5">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="flex items-start gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-[#445D84]/10 text-[#445D84] flex items-center justify-center shrink-0">
-              <Calendar className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h2 className="text-xl font-black text-slate-800">
-                  نوبت‌دهی هفتگی و اطلاع‌رسانی پیامکی والدین
-                </h2>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#445D84]/10 text-[#445D84]">
+    <div id="page-appointments" className="space-y-4 pb-24 max-w-full overflow-x-hidden">
+      {/* Compact Header Bar OR Multi-Select Action Header */}
+      {isSelectionMode ? (
+        <div
+          role="region"
+          aria-label="نوار انتخاب چندتایی"
+          className="sticky top-2 z-30 bg-[#344868] text-white rounded-2xl shadow-md px-3.5 py-2.5 flex items-center justify-between gap-2 transition-all"
+        >
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={exitSelectionMode}
+              aria-label="خروج از حالت انتخاب"
+              className="min-w-[44px] min-h-[44px] rounded-xl inline-flex items-center justify-center hover:bg-white/15 active:bg-white/20 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <span className="text-sm font-bold tabular-nums">
+              {toPersianDigits(selectedStudentIds.length)} مورد
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={toggleSelectAllFiltered}
+            className="min-h-[44px] px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            {allFilteredSelected ? (
+              <>
+                <CheckSquare className="w-4 h-4" />
+                <span>لغو انتخاب همه</span>
+              </>
+            ) : (
+              <>
+                <Square className="w-4 h-4" />
+                <span>انتخاب همه</span>
+              </>
+            )}
+          </button>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl shadow-xs border border-slate-200/80 p-2.5 sm:p-3.5 space-y-2.5">
+          {/* Compact Week Navigation + Quick Actions */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {/* Compact Week Bar: Prev Arrow + Week Date Range + Next Arrow */}
+            <div className="flex items-center gap-1 bg-slate-100/90 border border-slate-200/70 rounded-xl p-1 flex-1 sm:flex-initial justify-between sm:justify-start min-w-0">
+              <button
+                type="button"
+                onClick={() => handleShiftWeek(-7)}
+                aria-label="هفته قبل"
+                title="هفته قبل"
+                className="min-w-[44px] min-h-[44px] rounded-lg inline-flex items-center justify-center text-slate-600 hover:bg-white hover:text-[#445D84] transition-colors cursor-pointer shrink-0"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setNewWeekForm({
+                    title: currentWeek.title,
+                    week_date: currentWeek.week_date,
+                    start_date_jalali: currentWeek.start_date_jalali,
+                    end_date_jalali: currentWeek.end_date_jalali,
+                  });
+                  setNewWeekErrors({});
+                  setIsNewWeekModalOpen(true);
+                }}
+                className="min-h-[44px] px-2.5 py-1 rounded-lg hover:bg-white transition-colors text-center cursor-pointer truncate"
+                title="تغییر تاریخ هفته"
+              >
+                <span className="text-xs sm:text-sm font-bold text-slate-800 tabular-nums">
                   {toPersianDigits(currentWeek.start_date_jalali)} تا{' '}
                   {toPersianDigits(currentWeek.end_date_jalali)}
                 </span>
-              </div>
-              <p className="text-xs text-slate-500 mt-1">
-                مدیریت زمان حضور هفتگی، شماره‌های تماس والدین، ارسال گروهی پیامک یادآوری و ماتریس کلاس‌های رفع اشکال
-              </p>
-            </div>
-          </div>
+              </button>
 
-          {/* Week Selector & Quick Actions */}
-          <div className="flex flex-wrap items-center gap-2">
-            <ActionButton
-              variant="secondary"
-              size="sm"
-              onClick={() => handleShiftWeek(-7)}
-              icon={<ChevronRight className="w-4 h-4" />}
-              title="هفته قبل"
-            >
-              هفته قبل
-            </ActionButton>
-
-            <div className="relative min-w-[230px]">
-              <select
-                value={selectedWeekId}
-                onChange={(e) => setSelectedWeekId(Number(e.target.value))}
-                className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#445D84]/25 focus:border-[#445D84]"
+              <button
+                type="button"
+                onClick={() => handleShiftWeek(7)}
+                aria-label="هفته بعد"
+                title="هفته بعد"
+                className="min-w-[44px] min-h-[44px] rounded-lg inline-flex items-center justify-center text-slate-600 hover:bg-white hover:text-[#445D84] transition-colors cursor-pointer shrink-0"
               >
-                {weeks.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.title} ({toPersianDigits(w.start_date_jalali)})
-                  </option>
-                ))}
-              </select>
+                <ChevronLeft className="w-4 h-4" />
+              </button>
             </div>
 
-            <ActionButton
-              variant="secondary"
-              size="sm"
-              onClick={() => handleShiftWeek(7)}
-              icon={<ChevronLeft className="w-4 h-4" />}
-              title="هفته بعد"
-            >
-              هفته بعد
-            </ActionButton>
-
-            <ActionButton
-              variant="secondary"
-              size="md"
-              onClick={() => {
-                const nextSat = addDaysIso(currentWeek.week_date, 7);
-                setNewWeekForm({
-                  title: '',
-                  week_date: nextSat,
-                  start_date_jalali: formatGregorianToJalali(nextSat),
-                  end_date_jalali: formatGregorianToJalali(addDaysIso(nextSat, 6)),
-                });
-                setNewWeekErrors({});
-                setIsNewWeekModalOpen(true);
-              }}
-              icon={<Plus className="w-4 h-4" />}
-            >
-              انتخاب هفته دلخواه
-            </ActionButton>
-
-            <ActionButton
-              variant="primary"
-              size="md"
-              onClick={() => setIsLogDrawerOpen(true)}
-              icon={<History className="w-4 h-4" />}
-            >
-              کشوی لاگ پیامک ({toPersianDigits(smsLogs.length)})
-            </ActionButton>
-          </div>
-        </div>
-
-        {/* Sub-navigation Tabs: Appointments vs Remedial Matrix */}
-        <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200/70">
-            <button
-              type="button"
-              onClick={() => setActiveTab('appointments')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'appointments'
-                  ? 'bg-[#445D84] text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <MessageSquare className="w-4 h-4" />
-              جدول نوبت‌ها و ارسال پیامک هفتگی
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('remedial')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'remedial'
-                  ? 'bg-[#445D84] text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <BookOpen className="w-4 h-4" />
-              ماتریس کلاس‌های رفع اشکال ({toPersianDigits(remedialClasses.length)})
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <ActionButton
-              variant="ghost"
-              size="sm"
-              loading={isLoading}
-              onClick={() => fetchWeekData(currentWeek.week_date, true)}
-              icon={<RefreshCw className="w-4 h-4" />}
-            >
-              بروزرسانی از سرور
-            </ActionButton>
-          </div>
-        </div>
-      </div>
-
-      {activeTab === 'appointments' ? (
-        <>
-          {/* Summary Filter Chips matching AppointmentSmsPreviewSummary */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
-            {[
-              {
-                id: 'all' as PreviewChipFilter,
-                label: 'همه دانش‌آموزان',
-                count: summary.total,
-                activeBg: 'bg-[#445D84] text-white border-[#445D84]',
-                badgeBg: 'bg-slate-100 text-slate-700',
-              },
-              {
-                id: 'will_send' as PreviewChipFilter,
-                label: 'آماده ارسال (unsent)',
-                count: summary.will_send,
-                activeBg: 'bg-blue-600 text-white border-blue-600',
-                badgeBg: 'bg-blue-50 text-blue-700',
-              },
-              {
-                id: 'changed_since_sent' as PreviewChipFilter,
-                label: 'تغییریافته (changed)',
-                count: summary.changed_since_sent,
-                activeBg: 'bg-amber-600 text-white border-amber-600',
-                badgeBg: 'bg-amber-50 text-amber-700',
-              },
-              {
-                id: 'failed' as PreviewChipFilter,
-                label: 'ارسال ناموفق (failed)',
-                count: summary.failed,
-                activeBg: 'bg-rose-600 text-white border-rose-600',
-                badgeBg: 'bg-rose-50 text-rose-700',
-              },
-              {
-                id: 'already_sent' as PreviewChipFilter,
-                label: 'ارسال‌شده (sent)',
-                count: summary.already_sent,
-                activeBg: 'bg-emerald-600 text-white border-emerald-600',
-                badgeBg: 'bg-emerald-50 text-emerald-700',
-              },
-              {
-                id: 'no_phone' as PreviewChipFilter,
-                label: 'فاقد شماره ولی',
-                count: summary.no_phone,
-                activeBg: 'bg-orange-600 text-white border-orange-600',
-                badgeBg: 'bg-orange-50 text-orange-700',
-              },
-              {
-                id: 'no_appointment' as PreviewChipFilter,
-                label: 'بدون نوبت فعال',
-                count: summary.no_appointment,
-                activeBg: 'bg-slate-700 text-white border-slate-700',
-                badgeBg: 'bg-slate-100 text-slate-600',
-              },
-              {
-                id: 'multiple_appointments' as PreviewChipFilter,
-                label: 'چند نوبته در هفته',
-                count: summary.multiple_appointments,
-                activeBg: 'bg-purple-600 text-white border-purple-600',
-                badgeBg: 'bg-purple-50 text-purple-700',
-              },
-            ].map((chip) => {
-              const isActive = chipFilter === chip.id;
-              return (
+            {/* Right Controls: Select Mode, SMS Log Drawer, Refresh */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {activeTab === 'appointments' && (
                 <button
-                  key={chip.id}
                   type="button"
-                  onClick={() => setChipFilter(chip.id)}
-                  className={`flex flex-col justify-between p-3 rounded-xl border text-right transition-all cursor-pointer ${
-                    isActive
-                      ? `${chip.activeBg} shadow-sm`
-                      : 'bg-white border-slate-200/80 hover:border-slate-300 text-slate-700'
-                  }`}
+                  onClick={() => setIsSelectionMode(true)}
+                  className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
-                  <span
-                    className={`text-[11px] font-bold ${
-                      isActive ? 'text-white/90' : 'text-slate-500'
-                    }`}
-                  >
-                    {chip.label}
-                  </span>
-                  <div className="mt-2 flex items-center justify-between">
-                    <span className="text-lg font-black">
-                      {toPersianDigits(chip.count)}
-                    </span>
-                    <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                        isActive ? 'bg-white/20 text-white' : chip.badgeBg
-                      }`}
-                    >
-                      نفر
-                    </span>
-                  </div>
+                  <CheckSquare className="w-4 h-4 text-[#445D84]" />
+                  <span>انتخاب</span>
                 </button>
-              );
-            })}
+              )}
+
+              <button
+                type="button"
+                onClick={() => setIsLogDrawerOpen(true)}
+                className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                aria-label="لاگ پیامک"
+              >
+                <History className="w-4 h-4 text-[#445D84]" />
+                <span>لاگ ({toPersianDigits(smsLogs.length)})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => fetchWeekData(currentWeek.week_date, true)}
+                disabled={isLoading}
+                aria-label="بروزرسانی از سرور"
+                title="بروزرسانی از سرور"
+                className="min-w-[44px] min-h-[44px] rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={`w-4 h-4 ${isLoading ? 'animate-spin text-[#445D84]' : ''}`}
+                />
+              </button>
+            </div>
           </div>
 
-          {/* Bulk Action Bar & Search/Filter Toolbar */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-4 space-y-4">
-            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-bold text-slate-600 ml-1 flex items-center gap-1.5">
-                  <Send className="w-4 h-4 text-[#445D84]" />
-                  ارسال گروهی پیامک والدین:
-                </span>
+          {/* Sub-navigation Tabs: Appointments Cards vs Remedial Matrix */}
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+            <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200/70 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => setActiveTab('appointments')}
+                className={`flex-1 sm:flex-initial min-h-[40px] flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeTab === 'appointments'
+                    ? 'bg-[#445D84] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>نوبت‌ها ({toPersianDigits(summary.total)})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('remedial')}
+                className={`flex-1 sm:flex-initial min-h-[40px] flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeTab === 'remedial'
+                    ? 'bg-[#445D84] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>رفع اشکال ({toPersianDigits(remedialClasses.length)})</span>
+              </button>
+            </div>
 
+            {activeTab === 'appointments' && (
+              <div className="hidden md:flex items-center gap-1.5">
                 <ActionButton
                   variant="primary"
                   size="sm"
-                  onClick={() => openSmsConfirm('unsent', false)}
+                  onClick={() => openBulkSmsSheet('unsent', false)}
                   disabled={summary.will_send === 0}
                   icon={<Send className="w-3.5 h-3.5" />}
                 >
                   ارسال به ارسال‌نشده‌ها ({toPersianDigits(summary.will_send)})
                 </ActionButton>
-
-                <ActionButton
-                  variant="warning"
-                  size="sm"
-                  onClick={() => openSmsConfirm('changed', false)}
-                  disabled={summary.changed_since_sent === 0}
-                  icon={<RefreshCw className="w-3.5 h-3.5" />}
-                >
-                  ارسال به تغییریافته‌ها ({toPersianDigits(summary.changed_since_sent)})
-                </ActionButton>
-
-                <ActionButton
-                  variant="danger"
-                  size="sm"
-                  onClick={() => openSmsConfirm('failed', false)}
-                  disabled={summary.failed === 0}
-                  icon={<AlertTriangle className="w-3.5 h-3.5" />}
-                >
-                  تلاش مجدد ناموفق‌ها ({toPersianDigits(summary.failed)})
-                </ActionButton>
-
-                {selectedStudentIds.length > 0 && (
+                {summary.changed_since_sent > 0 && (
                   <ActionButton
-                    variant="success"
+                    variant="warning"
                     size="sm"
-                    onClick={() => openSmsConfirm('unsent', true)}
-                    icon={<CheckSquare className="w-3.5 h-3.5" />}
+                    onClick={() => openBulkSmsSheet('changed', false)}
+                    icon={<RefreshCw className="w-3.5 h-3.5" />}
                   >
-                    ارسال به انتخاب‌شده‌ها ({toPersianDigits(selectedStudentIds.length)} نفر)
+                    تغییریافته‌ها ({toPersianDigits(summary.changed_since_sent)})
                   </ActionButton>
                 )}
-              </div>
-
-              {/* Search & Field Filter */}
-              <div className="flex flex-wrap items-center gap-2.5">
-                <div className="relative min-w-[230px]">
-                  <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="جستجوی دانش‌آموز، ولی، موبایل..."
-                    className="w-full pr-9 pl-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#445D84]/25 focus:border-[#445D84]"
-                  />
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <Filter className="w-4 h-4 text-slate-400" />
-                  <select
-                    value={fieldFilter}
-                    onChange={(e) => setFieldFilter(e.target.value)}
-                    className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 bg-slate-50/70 focus:outline-none focus:border-[#445D84]"
-                  >
-                    <option value="all">همه رشته‌ها</option>
-                    <option value="تجربی">تجربی</option>
-                    <option value="ریاضی">ریاضی</option>
-                    <option value="انسانی">انسانی</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Error State Banner */}
-            {errorState && (
-              <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-between text-rose-700 text-xs font-bold">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{errorState}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <ActionButton
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => fetchWeekData(currentWeek.week_date, true)}
-                  >
-                    تلاش مجدد
-                  </ActionButton>
+                {summary.failed > 0 && (
                   <ActionButton
                     variant="danger"
                     size="sm"
-                    onClick={() => setErrorState(null)}
+                    onClick={() => openBulkSmsSheet('failed', false)}
+                    icon={<AlertTriangle className="w-3.5 h-3.5" />}
                   >
-                    بستن
-                  </ActionButton>
-                </div>
-              </div>
-            )}
-
-            {/* Appointments Table */}
-            {isLoading ? (
-              <div className="py-16 flex flex-col items-center justify-center gap-3 text-slate-500">
-                <RefreshCw className="w-8 h-8 animate-spin text-[#445D84]" />
-                <p className="text-sm font-bold">در حال دریافت پیش‌نمایش نوبت‌ها و وضعیت پیامک از سرور...</p>
-              </div>
-            ) : filteredItems.length === 0 ? (
-              <div className="py-14 text-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
-                  <Users className="w-6 h-6" />
-                </div>
-                <p className="text-sm font-bold text-slate-700">
-                  {items.length === 0
-                    ? 'هیچ رکوردی برای این هفته در سرور ثبت نشده است'
-                    : 'هیچ دانش‌آموزی با فیلترهای انتخابی یافت نشد'}
-                </p>
-                <p className="text-xs text-slate-500">
-                  {items.length === 0
-                    ? 'می‌توانید هفته دیگری را انتخاب کنید یا دکمه بروزرسانی از سرور را بزنید.'
-                    : 'فیلترهای بالا را تغییر دهید یا عبارت جستجو را پاک کنید.'}
-                </p>
-                {items.length > 0 && (
-                  <ActionButton
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setChipFilter('all');
-                      setFieldFilter('all');
-                      setSearchQuery('');
-                    }}
-                  >
-                    نمایش همه ردیف‌ها
+                    ناموفق‌ها ({toPersianDigits(summary.failed)})
                   </ActionButton>
                 )}
               </div>
-            ) : (
-              <div className="overflow-x-auto rounded-xl border border-slate-200/80">
-                <table className="w-full text-right border-collapse">
-                  <thead>
-                    <tr className="bg-[#344868] text-white text-xs">
-                      <th className="py-3.5 px-3 w-10 text-center">
-                        <button
-                          type="button"
-                          onClick={toggleSelectAll}
-                          className="inline-flex items-center justify-center text-white/90 hover:text-white cursor-pointer"
-                          title="انتخاب همه"
-                        >
-                          {allFilteredSelected ? (
-                            <CheckSquare className="w-4 h-4" />
-                          ) : (
-                            <Square className="w-4 h-4" />
-                          )}
-                        </button>
-                      </th>
-                      <th className="py-3.5 px-3 font-bold">دانش‌آموز و پشتیبان</th>
-                      <th className="py-3.5 px-3 font-bold">ولی و موبایل گیرنده</th>
-                      <th className="py-3.5 px-3 font-bold">تاریخ و ساعت نوبت</th>
-                      <th className="py-3.5 px-3 font-bold">ساعات حضور و آزمون</th>
-                      <th className="py-3.5 px-3 font-bold">وضعیت نوبت</th>
-                      <th className="py-3.5 px-3 font-bold">وضعیت پیامک هفتگی</th>
-                      <th className="py-3.5 px-3 font-bold text-center">عملیات</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-xs">
-                    {filteredItems.map((item) => {
-                      const isSelected = selectedStudentIds.includes(item.student_id);
-                      const displayPhone = item.mobile_mask || item.mobile;
-                      const prevSnap = item.last_appointment_at || item.last_sent_appointment_at;
-                      return (
-                        <tr
-                          key={item.student_id}
-                          className={`transition-colors ${
-                            isSelected ? 'bg-[#445D84]/5' : 'hover:bg-slate-50/80'
-                          }`}
-                        >
-                          {/* Checkbox */}
-                          <td className="py-3.5 px-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => toggleSelectOne(item.student_id)}
-                              className="inline-flex items-center justify-center text-slate-400 hover:text-[#445D84] cursor-pointer"
-                            >
-                              {isSelected ? (
-                                <CheckSquare className="w-4 h-4 text-[#445D84]" />
-                              ) : (
-                                <Square className="w-4 h-4" />
-                              )}
-                            </button>
-                          </td>
-
-                          {/* Student & Field & Supporter */}
-                          <td className="py-3.5 px-3">
-                            <div className="font-bold text-slate-800 text-sm">
-                              {item.student_name}
-                            </div>
-                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                              {item.field && (
-                                <span
-                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                                    item.field === 'تجربی'
-                                      ? 'bg-emerald-50 text-emerald-700'
-                                      : item.field === 'ریاضی'
-                                      ? 'bg-blue-50 text-blue-700'
-                                      : 'bg-purple-50 text-purple-700'
-                                  }`}
-                                >
-                                  {item.field}
-                                </span>
-                              )}
-                              {item.grade && (
-                                <span className="text-[11px] text-slate-500">
-                                  پایه {toPersianDigits(item.grade)}
-                                </span>
-                              )}
-                              {item.supporter_name && (
-                                <span className="text-[10px] text-slate-400">
-                                  • {item.supporter_name}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-
-                          {/* Parent Recipient & Phone */}
-                          <td className="py-3.5 px-3">
-                            {displayPhone ? (
-                              <div className="space-y-1">
-                                <div className="font-bold text-slate-700">
-                                  {item.parent_name || 'ولی دانش‌آموز'}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    dir="ltr"
-                                    className="inline-flex items-center gap-1 font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md text-[11px]"
-                                  >
-                                    <Phone className="w-3 h-3 text-slate-400" />
-                                    {toPersianDigits(displayPhone)}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => openParentContactsModal(item)}
-                                    className="text-[11px] font-bold text-[#445D84] hover:underline cursor-pointer"
-                                  >
-                                    ویرایش
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="space-y-1.5">
-                                <span className="inline-flex items-center gap-1 text-orange-600 font-bold text-[11px]">
-                                  <PhoneOff className="w-3.5 h-3.5" />
-                                  شماره ولی ثبت نشده
-                                </span>
-                                <div>
-                                  <ActionButton
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={() => openParentContactsModal(item)}
-                                    icon={<UserPlus className="w-3.5 h-3.5 text-[#445D84]" />}
-                                  >
-                                    ثبت شماره ولی
-                                  </ActionButton>
-                                </div>
-                              </div>
-                            )}
-                          </td>
-
-                          {/* Appointment Date & Start Time */}
-                          <td className="py-3.5 px-3">
-                            {item.appointment_date && item.start_time ? (
-                              <div className="space-y-1">
-                                <div className="font-bold text-slate-800 flex items-center gap-1.5">
-                                  <Calendar className="w-3.5 h-3.5 text-[#445D84]" />
-                                  {formatAppointmentDisplayDate(item)}
-                                </div>
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold">
-                                    <Clock className="w-3 h-3 text-slate-500" />
-                                    ساعت {formatAppointmentStartTime(item)}
-                                  </span>
-                                  {item.multiple_appointments && (
-                                    <span
-                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200 text-[10px] font-bold"
-                                      title="این دانش‌آموز بیش از یک نوبت فعال در این هفته دارد؛ نزدیک‌ترین نوبت انتخاب شده است"
-                                    >
-                                      <Layers className="w-3 h-3" />
-                                      {toPersianDigits(item.active_appointments_count)} نوبت فعال
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-slate-400 italic">تعیین نشده</span>
-                            )}
-                          </td>
-
-                          {/* Operational Times (Arrival, Exam Start, Exam End) */}
-                          <td className="py-3.5 px-3">
-                            {item.arrival_time || item.exam_start_time || item.exam_end_time ? (
-                              <div className="space-y-1 text-[11px]">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-slate-400">ورود:</span>
-                                  <span className="font-bold text-slate-700">
-                                    {item.arrival_time
-                                      ? toPersianDigits(item.arrival_time)
-                                      : '—'}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-slate-400">آزمون:</span>
-                                  <span className="font-bold text-slate-700">
-                                    {item.exam_start_time
-                                      ? toPersianDigits(item.exam_start_time)
-                                      : '—'}{' '}
-                                    تا{' '}
-                                    {item.exam_end_time
-                                      ? toPersianDigits(item.exam_end_time)
-                                      : '—'}
-                                  </span>
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-slate-400 text-[11px]">ثبت نشده</span>
-                            )}
-                          </td>
-
-                          {/* Appointment Status Selector (PUT /api/v1/appointments/{id}/status) */}
-                          <td className="py-3.5 px-3">
-                            {item.appointment_id ? (
-                              <select
-                                value={item.appointment_status || 'scheduled'}
-                                onChange={(e) =>
-                                  handleStatusChange(
-                                    item,
-                                    e.target.value as AppointmentStatus
-                                  )
-                                }
-                                className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-bold text-slate-700 focus:outline-none focus:border-[#445D84]"
-                              >
-                                <option value="scheduled">برنامه‌ریزی شده (scheduled)</option>
-                                <option value="confirmed">تایید شده (confirmed)</option>
-                                <option value="pending">در انتظار (pending)</option>
-                                <option value="completed">انجام شده (completed)</option>
-                                <option value="absent">غایب (absent)</option>
-                                <option value="cancelled">لغو شده (cancelled)</option>
-                              </select>
-                            ) : (
-                              <span className="text-slate-400 text-[11px]">—</span>
-                            )}
-                          </td>
-
-                          {/* SMS Preview Status & Metadata */}
-                          <td className="py-3.5 px-3">
-                            <div className="space-y-1">
-                              {renderSmsPreviewStatusBadge(item)}
-                              {item.last_sent_at && (
-                                <div className="text-[10px] text-slate-400">
-                                  آخرین ارسال: {toPersianDigits(item.last_sent_at)} (تلاش:{' '}
-                                  {toPersianDigits(item.attempts)})
-                                </div>
-                              )}
-                              {item.status === 'changed_since_sent' && prevSnap && (
-                                <div className="text-[10px] text-amber-700 font-medium">
-                                  نوبت قبلی پیامک‌شده: {toPersianDigits(prevSnap.slice(11, 16))}
-                                </div>
-                              )}
-                              {item.last_error && (
-                                <div className="text-[10px] text-rose-600 font-medium max-w-[230px] truncate">
-                                  {item.last_error}
-                                </div>
-                              )}
-                            </div>
-                          </td>
-
-                          {/* Actions */}
-                          <td className="py-3.5 px-3">
-                            <div className="flex items-center justify-center gap-1.5">
-                              <ActionButton
-                                variant="secondary"
-                                size="sm"
-                                onClick={() => openEditAppointment(item)}
-                                icon={<Edit2 className="w-3.5 h-3.5" />}
-                                title="ثبت یا ویرایش نوبت"
-                              >
-                                {item.appointment_id ? 'ویرایش' : 'ثبت نوبت'}
-                              </ActionButton>
-
-                              <ActionButton
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => openParentContactsModal(item)}
-                                icon={<Phone className="w-3.5 h-3.5 text-[#445D84]" />}
-                                title="مدیریت شماره‌های والدین"
-                              />
-
-                              {item.appointment_id && (
-                                <>
-                                  <ActionButton
-                                    variant="primary"
-                                    size="sm"
-                                    onClick={() => handleSendSingleSms(item)}
-                                    icon={<Send className="w-3.5 h-3.5" />}
-                                    title="ارسال تکی پیامک یادآوری به ولی"
-                                  >
-                                    پیامک
-                                  </ActionButton>
-
-                                  <ActionButton
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => setCancelingItem(item)}
-                                    icon={<Trash2 className="w-3.5 h-3.5 text-rose-500" />}
-                                    title="لغو نوبت"
-                                  />
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
             )}
           </div>
-        </>
-      ) : (
-        /* Remedial Classes Matrix View (with 3-state attendance lifecycle) */
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-5 space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-            <div>
-              <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-[#445D84]" />
-                ماتریس حضور و خروج در کلاس‌های رفع اشکال هفتگی
-              </h3>
-              <p className="text-xs text-slate-500 mt-1">
-                برای هر کلاس ۳ وضعیت تفکیک شده است: «ثبت ورود به کلاس»، «حاضر در کلاس (مشغول)» و «خارج شده از کلاس (پایان حضور)» همراه با ثبت خودکار ساعت ورود و خروج.
-              </p>
-            </div>
+        </div>
+      )}
 
-            <div className="flex flex-wrap items-center gap-2.5">
-              <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200">
-                {(['تجربی', 'ریاضی', 'انسانی'] as AcademicField[]).map((f) => (
-                  <button
-                    key={f}
-                    type="button"
-                    onClick={() => {
-                      setRemedialFieldTab(f);
-                      setRemedialStatusFilter('all');
-                    }}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      remedialFieldTab === f
-                        ? 'bg-[#445D84] text-white shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    رشته {f}
-                  </button>
-                ))}
+      {activeTab === 'appointments' ? (
+        <>
+          {/* Compact Search, Field Filter & Scrollable Status Filter Chips */}
+          <div className="bg-white rounded-2xl shadow-xs border border-slate-200/80 p-3 space-y-3">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <div className="relative flex-1 min-w-0">
+                <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="جستجوی نام دانش‌آموز..."
+                  className="w-full min-h-[44px] pr-10 pl-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-[#445D84]"
+                />
               </div>
 
-              <ActionButton
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  setNewClassErrors({});
-                  setIsAddClassModalOpen(true);
-                }}
-                icon={<Plus className="w-4 h-4" />}
+              <select
+                value={fieldFilter}
+                aria-label="فیلتر رشته"
+                onChange={(e) => setFieldFilter(e.target.value)}
+                className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 bg-slate-50/70 focus:outline-none focus:border-[#445D84]"
               >
-                افزودن ستون کلاس جدید
-              </ActionButton>
+                <option value="all">همه رشته‌ها</option>
+                <option value="تجربی">تجربی</option>
+                <option value="ریاضی">ریاضی</option>
+                <option value="انسانی">انسانی</option>
+              </select>
+            </div>
+
+            {/* Horizontal Filter Chips */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+              {[
+                { id: 'all' as PreviewChipFilter, label: 'همه', count: summary.total },
+                {
+                  id: 'will_send' as PreviewChipFilter,
+                  label: 'آماده ارسال',
+                  count: summary.will_send,
+                },
+                {
+                  id: 'already_sent' as PreviewChipFilter,
+                  label: 'پیامک شده',
+                  count: summary.already_sent,
+                },
+                {
+                  id: 'changed_since_sent' as PreviewChipFilter,
+                  label: 'تغییریافته',
+                  count: summary.changed_since_sent,
+                },
+                {
+                  id: 'failed' as PreviewChipFilter,
+                  label: 'خطای پیامک',
+                  count: summary.failed,
+                },
+                {
+                  id: 'no_phone' as PreviewChipFilter,
+                  label: 'بدون شماره',
+                  count: summary.no_phone,
+                },
+                {
+                  id: 'no_appointment' as PreviewChipFilter,
+                  label: 'بدون نوبت',
+                  count: summary.no_appointment,
+                },
+              ].map((chip) => {
+                const isActive = chipFilter === chip.id;
+                return (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    onClick={() => setChipFilter(chip.id)}
+                    className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap inline-flex items-center gap-1.5 border transition-colors cursor-pointer shrink-0 ${
+                      isActive
+                        ? 'bg-[#445D84] text-white border-[#445D84]'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>{chip.label}</span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded-md text-[11px] tabular-nums ${
+                        isActive
+                          ? 'bg-white/20 text-white'
+                          : 'bg-white text-slate-600 border border-slate-200/70'
+                      }`}
+                    >
+                      {toPersianDigits(chip.count)}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* 3-State Filter Chips & Lifecycle Legend */}
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-slate-50/80 rounded-xl p-3.5 border border-slate-200/70">
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setRemedialStatusFilter('all')}
-                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                  remedialStatusFilter === 'all'
-                    ? 'bg-[#445D84] text-white border-[#445D84] shadow-2xs'
-                    : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                <span>همه دانش‌آموزان ({remedialFieldTab})</span>
-                <span
-                  className={`px-1.5 py-0.5 rounded-md text-[10px] ${
-                    remedialStatusFilter === 'all'
-                      ? 'bg-white/20 text-white'
-                      : 'bg-slate-100 text-slate-600'
-                  }`}
+          {/* Error State Banner */}
+          {errorState && (
+            <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 flex flex-wrap items-center justify-between gap-2 text-rose-700 text-xs font-bold">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{errorState}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => fetchWeekData(currentWeek.week_date, true)}
+                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white border border-rose-200 text-rose-700 hover:bg-rose-100 transition-colors cursor-pointer"
                 >
-                  {toPersianDigits(remedialFieldStats.totalStudents)}
-                </span>
-              </button>
+                  تلاش مجدد
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setErrorState(null)}
+                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-rose-600 text-white hover:bg-rose-700 transition-colors cursor-pointer"
+                >
+                  بستن
+                </button>
+              </div>
+            </div>
+          )}
 
-              <button
-                type="button"
-                onClick={() => setRemedialStatusFilter('in_class')}
-                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                  remedialStatusFilter === 'in_class'
-                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
-                    : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50/60'
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>هم‌اکنون داخل کلاس (حاضر)</span>
-                <span
-                  className={`px-1.5 py-0.5 rounded-md text-[10px] ${
-                    remedialStatusFilter === 'in_class'
-                      ? 'bg-white/20 text-white'
-                      : 'bg-emerald-50 text-emerald-700'
-                  }`}
+          {/* Responsive Card Grid (1 col mobile, 2 tablet, 3-4 desktop) */}
+          {isLoading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <div
+                  key={n}
+                  className="h-28 rounded-2xl bg-slate-200/80 animate-pulse"
+                />
+              ))}
+            </div>
+          ) : filteredItems.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200/80 py-14 px-4 text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                <Users className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-bold text-slate-700">
+                {items.length === 0
+                  ? 'هیچ رکوردی برای این هفته در سرور ثبت نشده است'
+                  : 'هیچ دانش‌آموزی با فیلترهای انتخابی یافت نشد'}
+              </p>
+              {items.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChipFilter('all');
+                    setFieldFilter('all');
+                    setSearchQuery('');
+                  }}
+                  className="min-h-[44px] px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
                 >
-                  {toPersianDigits(remedialFieldStats.inClassStudentsCount)} نفر
-                </span>
-              </button>
+                  نمایش همه کارت‌ها
+                </button>
+              )}
+            </div>
+          ) : (
+            <div
+              role="listbox"
+              aria-multiselectable={isSelectionMode}
+              aria-label="لیست کارت‌های نوبت هفتگی دانش‌آموزان"
+              className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3.5"
+            >
+              {filteredItems.map((item) => {
+                const isSelected = selectedStudentIds.includes(item.student_id);
+                const statusMeta = resolveCardAppointmentStatus(item);
+                const timeStr = formatCardStartTime(item);
+                const dateStr = formatCardDateLabel(item);
+                const hasExam = Boolean(item.exam_start_time || item.exam_end_time);
+                const hasArrival = Boolean(item.arrival_time);
 
-              <button
-                type="button"
-                onClick={() => setRemedialStatusFilter('left_class')}
-                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                  remedialStatusFilter === 'left_class'
-                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                    : 'bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50/60'
-                }`}
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>خارج شده از کلاس (پایان حضور)</span>
-                <span
-                  className={`px-1.5 py-0.5 rounded-md text-[10px] ${
-                    remedialStatusFilter === 'left_class'
-                      ? 'bg-white/20 text-white'
-                      : 'bg-indigo-50 text-indigo-700'
-                  }`}
-                >
-                  {toPersianDigits(remedialFieldStats.leftClassStudentsCount)} نفر
-                </span>
-              </button>
+                return (
+                  <div
+                    key={item.student_id}
+                    role="option"
+                    tabIndex={0}
+                    aria-selected={isSelected}
+                    onContextMenu={(e) => e.preventDefault()}
+                    onPointerDown={(e) => handleCardPointerDown(e, item.student_id)}
+                    onPointerMove={handleCardPointerMove}
+                    onPointerUp={handleCardPointerUpOrCancel}
+                    onPointerCancel={handleCardPointerUpOrCancel}
+                    onClick={() => handleCardClick(item)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleCardClick(item);
+                      }
+                    }}
+                    className={`group relative overflow-hidden rounded-2xl bg-white p-4 pr-5 transition-all cursor-pointer select-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent] border-2 ${
+                      isSelected
+                        ? 'border-[#445D84] bg-[#445D84]/[0.04] shadow-md ring-2 ring-[#445D84]/15'
+                        : 'border-slate-200/80 hover:border-slate-300 hover:shadow-sm'
+                    }`}
+                  >
+                    {/* Right-side narrow status bar (in RTL) */}
+                    <span
+                      aria-hidden="true"
+                      className={`absolute right-0 top-0 bottom-0 w-1.5 ${statusMeta.barColorClass}`}
+                    />
 
-              <button
-                type="button"
-                onClick={() => setRemedialStatusFilter('none')}
-                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                  remedialStatusFilter === 'none'
-                    ? 'bg-slate-700 text-white border-slate-700 shadow-2xs'
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                <span>وارد نشده به کلاس</span>
-                <span
-                  className={`px-1.5 py-0.5 rounded-md text-[10px] ${
-                    remedialStatusFilter === 'none'
-                      ? 'bg-white/20 text-white'
-                      : 'bg-slate-100 text-slate-600'
+                    {/* Selection Checkbox (visible in selection mode or on desktop hover) */}
+                    <button
+                      type="button"
+                      aria-label={`انتخاب ${item.student_name}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleSelectOne(item.student_id);
+                      }}
+                      className={`absolute left-2.5 top-2.5 min-w-[44px] min-h-[44px] rounded-xl inline-flex items-center justify-center transition-opacity cursor-pointer z-10 ${
+                        isSelectionMode || isSelected
+                          ? 'opacity-100'
+                          : 'opacity-0 sm:group-hover:opacity-100'
+                      }`}
+                    >
+                      <span
+                        className={`w-6 h-6 rounded-full border-2 inline-flex items-center justify-center transition-colors ${
+                          isSelected
+                            ? 'bg-[#445D84] border-[#445D84] text-white'
+                            : 'bg-white/90 border-slate-300 text-transparent hover:border-[#445D84]'
+                        }`}
+                      >
+                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                      </span>
+                    </button>
+
+                    {/* Line 1: Student Name (Bold) + Appointment Time */}
+                    <div className="flex items-baseline justify-between gap-2 pl-9">
+                      <h3 className="text-base font-bold text-slate-800 truncate">
+                        {item.student_name}
+                      </h3>
+                      <span className="text-xs font-bold text-slate-700 tabular-nums shrink-0">
+                        {timeStr ? `ساعت ${timeStr}` : '—'}
+                      </span>
+                    </div>
+
+                    {/* Line 2: Grade & Field as plain gray text (NOT a chip) */}
+                    <div className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-500">
+                      <span>
+                        {item.grade ? `پایه ${toPersianDigits(item.grade)}` : 'پایه نامشخص'}
+                        {item.field ? ` • ${item.field}` : ''}
+                      </span>
+                      {dateStr && (
+                        <span className="text-[11px] text-slate-400 truncate">
+                          {dateStr}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Line 3: Small Appointment Status Chip + Subtle Neutral Secondary Icons */}
+                    <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusMeta.chipClass}`}
+                      >
+                        {renderCardStatusIcon(statusMeta.key)}
+                        <span>{statusMeta.label}</span>
+                      </span>
+
+                      {/* Subtle neutral icons for secondary info (SMS, arrival, exam) */}
+                      <div className="flex items-center gap-2.5 text-[11px] text-slate-400">
+                        {item.status === 'already_sent' && (
+                          <span
+                            className="inline-flex items-center gap-1"
+                            title="پیامک یادآوری این هفته ارسال شده است"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            <span>پیامک شد</span>
+                          </span>
+                        )}
+                        {item.status === 'changed_since_sent' && (
+                          <span
+                            className="inline-flex items-center gap-1"
+                            title="ساعت نوبت پس از ارسال پیامک تغییر کرده است"
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            <span>تغییر نوبت</span>
+                          </span>
+                        )}
+                        {item.status === 'no_phone' && (
+                          <span
+                            className="inline-flex items-center gap-1"
+                            title="شماره تماس ولی ثبت نشده است"
+                          >
+                            <PhoneOff className="w-3.5 h-3.5" />
+                          </span>
+                        )}
+                        {hasArrival && (
+                          <span
+                            className="inline-flex items-center gap-0.5 tabular-nums"
+                            title={`ورود: ${toPersianDigits(item.arrival_time)}`}
+                          >
+                            <LogIn className="w-3.5 h-3.5" />
+                            <span>{toPersianDigits(item.arrival_time)}</span>
+                          </span>
+                        )}
+                        {hasExam && (
+                          <span
+                            className="inline-flex items-center gap-0.5"
+                            title="ساعت آزمون ثبت شده است"
+                          >
+                            <ClipboardList className="w-3.5 h-3.5" />
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      ) : (
+        /* Remedial Classes Matrix View */
+        <div className="bg-white rounded-2xl shadow-xs border border-slate-200/80 p-4 sm:p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200">
+              {(['تجربی', 'ریاضی', 'انسانی'] as AcademicField[]).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => {
+                    setRemedialFieldTab(f);
+                    setRemedialStatusFilter('all');
+                  }}
+                  className={`min-h-[40px] px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    remedialFieldTab === f
+                      ? 'bg-[#445D84] text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  {toPersianDigits(remedialFieldStats.notEnteredStudentsCount)} نفر
-                </span>
-              </button>
+                  رشته {f}
+                </button>
+              ))}
             </div>
 
-            {/* Visual 3-Step Guide */}
-            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-              <span className="font-bold text-slate-700">چرخه وضعیت:</span>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-200/70 text-slate-600 font-medium">
-                ۱. ثبت ورود
-              </span>
-              <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">
-                ۲. حاضر در کلاس
-              </span>
-              <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold">
-                ۳. خارج شده از کلاس
-              </span>
-            </div>
+            <ActionButton
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setNewClassErrors({});
+                setIsAddClassModalOpen(true);
+              }}
+              icon={<Plus className="w-4 h-4" />}
+            >
+              افزودن ستون کلاس جدید
+            </ActionButton>
+          </div>
+
+          {/* 3-State Filter Chips */}
+          <div className="flex flex-wrap items-center gap-2 bg-slate-50/80 rounded-xl p-3 border border-slate-200/70">
+            <button
+              type="button"
+              onClick={() => setRemedialStatusFilter('all')}
+              className={`min-h-[40px] inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                remedialStatusFilter === 'all'
+                  ? 'bg-[#445D84] text-white border-[#445D84]'
+                  : 'bg-white text-slate-700 border-slate-200'
+              }`}
+            >
+              <span>همه ({toPersianDigits(remedialFieldStats.totalStudents)})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setRemedialStatusFilter('in_class')}
+              className={`min-h-[40px] inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                remedialStatusFilter === 'in_class'
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'bg-white text-emerald-700 border-emerald-200'
+              }`}
+            >
+              <span>حاضر در کلاس ({toPersianDigits(remedialFieldStats.inClassStudentsCount)})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setRemedialStatusFilter('left_class')}
+              className={`min-h-[40px] inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                remedialStatusFilter === 'left_class'
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'bg-white text-indigo-700 border-indigo-200'
+              }`}
+            >
+              <span>خارج شده ({toPersianDigits(remedialFieldStats.leftClassStudentsCount)})</span>
+            </button>
           </div>
 
           {currentFieldRemedialClasses.length === 0 ? (
@@ -1830,40 +1627,30 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
               <p className="text-sm font-bold text-slate-700">
                 دانش‌آموزی با این وضعیت در رشته {remedialFieldTab} یافت نشد
               </p>
-              {remedialStatusFilter !== 'all' && (
-                <ActionButton
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setRemedialStatusFilter('all')}
-                >
-                  نمایش همه دانش‌آموزان رشته {remedialFieldTab}
-                </ActionButton>
-              )}
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-slate-200/80">
               <table className="w-full text-right border-collapse">
                 <thead>
                   <tr className="bg-[#344868] text-white text-xs">
-                    <th className="py-3.5 px-4 font-bold min-w-[190px]">
+                    <th className="py-3.5 px-4 font-bold min-w-[170px]">
                       نام دانش‌آموز ({remedialFieldTab})
-                    </th>
-                    <th className="py-3.5 px-3 font-bold min-w-[155px]">
-                      نوبت و ساعت حضور
                     </th>
                     {currentFieldRemedialClasses.map((col) => {
                       const inClassCount = allFieldStudents.filter(
                         (s) =>
-                          getStudentClassAttendance(col, s.student_id).status === 'in_class'
+                          getStudentClassAttendance(col, s.student_id).status ===
+                          'in_class'
                       ).length;
                       const leftClassCount = allFieldStudents.filter(
                         (s) =>
-                          getStudentClassAttendance(col, s.student_id).status === 'left_class'
+                          getStudentClassAttendance(col, s.student_id).status ===
+                          'left_class'
                       ).length;
                       return (
                         <th
                           key={col.id}
-                          className="py-3.5 px-4 font-bold text-center min-w-[210px] border-r border-white/10"
+                          className="py-3.5 px-4 font-bold text-center min-w-[200px] border-r border-white/10"
                         >
                           <div className="flex items-center justify-between gap-2">
                             <span className="truncate">{col.class_name}</span>
@@ -1876,17 +1663,11 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
-                          {col.teacher_name && (
-                            <div className="text-[10px] text-white/75 font-normal mt-0.5 text-right">
-                              {col.teacher_name}
-                            </div>
-                          )}
-                          <div className="mt-2 flex items-center justify-center gap-1.5 flex-wrap">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/25 text-emerald-100 text-[10px] font-bold">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-300" />
+                          <div className="mt-1.5 flex items-center justify-center gap-1.5 text-[10px]">
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/25 text-emerald-100">
                               حاضر: {toPersianDigits(inClassCount)}
                             </span>
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-400/25 text-indigo-100 text-[10px] font-bold">
+                            <span className="px-2 py-0.5 rounded-full bg-indigo-400/25 text-indigo-100">
                               خارج‌شده: {toPersianDigits(leftClassCount)}
                             </span>
                           </div>
@@ -1896,66 +1677,97 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
-                  {currentFieldStudents.map((student) => {
-                    const studentStates = currentFieldRemedialClasses.map((c) =>
-                      getStudentClassAttendance(c, student.student_id)
-                    );
-                    const studentInCount = studentStates.filter(
-                      (s) => s.status === 'in_class'
-                    ).length;
-                    const studentLeftCount = studentStates.filter(
-                      (s) => s.status === 'left_class'
-                    ).length;
+                  {currentFieldStudents.map((student) => (
+                    <tr key={student.student_id} className="hover:bg-slate-50/80">
+                      <td className="py-3.5 px-4 font-bold text-slate-800">
+                        {student.student_name}
+                      </td>
+                      {currentFieldRemedialClasses.map((col) => {
+                        const att = getStudentClassAttendance(col, student.student_id);
+                        return (
+                          <td
+                            key={col.id}
+                            className="py-3 px-3 text-center border-r border-slate-100 align-middle"
+                          >
+                            {att.status === 'none' && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateRemedialAttendance(
+                                    col.id,
+                                    student.student_id,
+                                    'in_class'
+                                  )
+                                }
+                                className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/70 text-slate-600 hover:border-emerald-400 hover:bg-emerald-50/60 hover:text-emerald-700 font-bold text-xs transition-all cursor-pointer w-full max-w-[185px]"
+                              >
+                                <LogIn className="w-3.5 h-3.5" />
+                                <span>ثبت ورود</span>
+                              </button>
+                            )}
 
-                    return (
-                      <tr key={student.student_id} className="hover:bg-slate-50/80">
-                        <td className="py-3.5 px-4">
-                          <div className="font-bold text-slate-800">
-                            {student.student_name}
-                          </div>
-                          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                            <span className="text-[11px] text-slate-400">
-                              پایه {toPersianDigits(student.grade || 12)}
-                            </span>
-                            {studentInCount > 0 && (
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
-                                {toPersianDigits(studentInCount)} کلاس در حال حضور
-                              </span>
-                            )}
-                            {studentLeftCount > 0 && (
-                              <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold">
-                                {toPersianDigits(studentLeftCount)} کلاس خارج شده
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-3.5 px-3 text-slate-600">
-                          {student.appointment_date ? (
-                            <div className="space-y-0.5">
-                              <div className="font-bold text-slate-700">
-                                {formatAppointmentDisplayDate(student)}
-                              </div>
-                              <div className="text-[11px] text-slate-500">
-                                ساعت نوبت: {formatAppointmentStartTime(student)}
-                              </div>
-                              {student.arrival_time && (
-                                <div className="text-[10px] text-emerald-700 font-medium">
-                                  ورود به آموزشگاه: {toPersianDigits(student.arrival_time)}
+                            {att.status === 'in_class' && (
+                              <div className="inline-flex flex-col items-stretch gap-1.5 p-2 rounded-xl bg-emerald-50/90 border border-emerald-200 w-full max-w-[195px]">
+                                <div className="flex items-center justify-between gap-1 px-1 text-[11px] font-bold text-emerald-800">
+                                  <span>حاضر</span>
+                                  {att.entered_at && (
+                                    <span>{toPersianDigits(att.entered_at)}</span>
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-slate-400">بدون نوبت</span>
-                          )}
-                        </td>
-                        {currentFieldRemedialClasses.map((col) => {
-                          const att = getStudentClassAttendance(col, student.student_id);
-                          return (
-                            <td
-                              key={col.id}
-                              className="py-3 px-3 text-center border-r border-slate-100 align-middle"
-                            >
-                              {att.status === 'none' && (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateRemedialAttendance(
+                                        col.id,
+                                        student.student_id,
+                                        'left_class'
+                                      )
+                                    }
+                                    className="flex-1 min-h-[38px] inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold transition-colors cursor-pointer"
+                                  >
+                                    <LogOut className="w-3 h-3" />
+                                    ثبت خروج
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateRemedialAttendance(
+                                        col.id,
+                                        student.student_id,
+                                        'none'
+                                      )
+                                    }
+                                    className="min-w-[38px] min-h-[38px] inline-flex items-center justify-center rounded-lg bg-white text-slate-400 hover:text-rose-600 border border-emerald-200/70 cursor-pointer"
+                                  >
+                                    <RotateCcw className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {att.status === 'left_class' && (
+                              <div className="inline-flex flex-col items-stretch gap-1.5 p-2 rounded-xl bg-indigo-50/80 border border-indigo-200 w-full max-w-[195px]">
+                                <div className="flex items-center justify-between gap-1 px-1 text-[11px] font-bold text-indigo-800">
+                                  <span>خارج شده</span>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateRemedialAttendance(
+                                        col.id,
+                                        student.student_id,
+                                        'none'
+                                      )
+                                    }
+                                    className="p-1 rounded-md hover:bg-rose-100 text-slate-400 hover:text-rose-600 cursor-pointer"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                                <div className="text-[10px] font-bold text-indigo-900 bg-white/90 px-2 py-1 rounded-lg">
+                                  {toPersianDigits(att.entered_at || '—')} تا{' '}
+                                  {toPersianDigits(att.exited_at || '—')}
+                                </div>
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -1965,117 +1777,18 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                                       'in_class'
                                     )
                                   }
-                                  className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/70 text-slate-600 hover:border-emerald-400 hover:bg-emerald-50/60 hover:text-emerald-700 font-bold text-xs transition-all cursor-pointer w-full max-w-[185px]"
+                                  className="min-h-[34px] inline-flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-white text-slate-600 hover:text-emerald-700 border border-indigo-200/80 text-[10px] font-bold cursor-pointer"
                                 >
-                                  <LogIn className="w-3.5 h-3.5" />
-                                  <span>ثبت ورود به کلاس</span>
+                                  <UserCheck className="w-3 h-3" />
+                                  برگشت به کلاس
                                 </button>
-                              )}
-
-                              {att.status === 'in_class' && (
-                                <div className="inline-flex flex-col items-stretch gap-1.5 p-2 rounded-xl bg-emerald-50/90 border border-emerald-200 shadow-2xs w-full max-w-[195px]">
-                                  <div className="flex items-center justify-between gap-1 px-1">
-                                    <span className="inline-flex items-center gap-1.5 text-emerald-800 font-black text-[11px]">
-                                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                                      حاضر در کلاس
-                                    </span>
-                                    {att.entered_at && (
-                                      <span className="text-[10px] font-bold text-emerald-700 bg-white/80 px-1.5 py-0.5 rounded-md border border-emerald-200/60">
-                                        ورود {toPersianDigits(att.entered_at)}
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  <div className="flex items-center gap-1">
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        updateRemedialAttendance(
-                                          col.id,
-                                          student.student_id,
-                                          'left_class'
-                                        )
-                                      }
-                                      className="flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold transition-colors cursor-pointer shadow-2xs"
-                                      title="وقتی دانش‌آموز از کلاس خارج شد کلیک کنید تا ساعت خروج ثبت شود"
-                                    >
-                                      <LogOut className="w-3 h-3" />
-                                      ثبت خروج از کلاس
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        updateRemedialAttendance(
-                                          col.id,
-                                          student.student_id,
-                                          'none'
-                                        )
-                                      }
-                                      className="p-1.5 rounded-lg bg-white/80 hover:bg-rose-50 text-slate-400 hover:text-rose-600 border border-emerald-200/70 transition-colors cursor-pointer"
-                                      title="لغو ورود / بازنشانی وضعیت"
-                                    >
-                                      <RotateCcw className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-
-                              {att.status === 'left_class' && (
-                                <div className="inline-flex flex-col items-stretch gap-1.5 p-2 rounded-xl bg-indigo-50/80 border border-indigo-200 shadow-2xs w-full max-w-[195px]">
-                                  <div className="flex items-center justify-between gap-1 px-1">
-                                    <span className="inline-flex items-center gap-1 text-indigo-800 font-black text-[11px]">
-                                      <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                                      خارج شده از کلاس
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        updateRemedialAttendance(
-                                          col.id,
-                                          student.student_id,
-                                          'none'
-                                        )
-                                      }
-                                      className="p-1 rounded-md hover:bg-rose-100 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
-                                      title="پاک کردن وضعیت حضور"
-                                    >
-                                      <X className="w-3 h-3" />
-                                    </button>
-                                  </div>
-
-                                  <div className="flex items-center justify-center gap-1.5 bg-white/90 px-2 py-1 rounded-lg border border-indigo-100 text-[10px] font-bold text-indigo-900">
-                                    <span>
-                                      ورود: {toPersianDigits(att.entered_at || '—')}
-                                    </span>
-                                    <span className="text-indigo-300">•</span>
-                                    <span className="text-indigo-700">
-                                      خروج: {toPersianDigits(att.exited_at || '—')}
-                                    </span>
-                                  </div>
-
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      updateRemedialAttendance(
-                                        col.id,
-                                        student.student_id,
-                                        'in_class'
-                                      )
-                                    }
-                                    className="inline-flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-white hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border border-indigo-200/80 text-[10px] font-bold transition-colors cursor-pointer"
-                                    title="برگرداندن وضعیت به حاضر در کلاس"
-                                  >
-                                    <UserCheck className="w-3 h-3" />
-                                    برگشت به کلاس
-                                  </button>
-                                </div>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
+                              </div>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -2083,342 +1796,657 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         </div>
       )}
 
-      {/* Edit / Create Appointment Modal (without end_time) */}
-      <Modal
-        isOpen={Boolean(editingItem)}
-        onClose={() => setEditingItem(null)}
-        title={
-          editingItem
-            ? `تنظیم نوبت و ساعات حضور: ${editingItem.student_name}`
-            : 'ثبت / ویرایش نوبت'
-        }
-      >
-        <form noValidate onSubmit={handleSaveAppointment} className="space-y-4">
-          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/70 flex items-center justify-between text-xs">
-            <div>
-              <span className="text-slate-500">دانش‌آموز: </span>
-              <span className="font-bold text-slate-800">{editingItem?.student_name}</span>
-              {editingItem?.field && (
-                <span className="mr-2 px-2 py-0.5 rounded bg-[#445D84]/10 text-[#445D84] font-bold">
-                  {editingItem.field}
-                </span>
-              )}
-            </div>
-            <div dir="ltr" className="font-mono text-slate-600">
-              {editingItem?.mobile_mask || editingItem?.mobile
-                ? toPersianDigits(editingItem.mobile_mask || editingItem.mobile || '')
-                : 'بدون شماره ولی'}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                تاریخ نوبت (میلادی / انتخابگر) *
-              </label>
-              <input
-                type="date"
-                value={appointmentForm.appointment_date}
-                onChange={(e) => {
-                  setAppointmentForm((prev) => ({
-                    ...prev,
-                    appointment_date: e.target.value,
-                  }));
-                  if (appointmentErrors.appointment_date) {
-                    setAppointmentErrors((prev) => ({
-                      ...prev,
-                      appointment_date: undefined,
-                    }));
-                  }
-                }}
-                className={getFieldClass(Boolean(appointmentErrors.appointment_date))}
-              />
-              {appointmentForm.appointment_date && (
-                <p className="text-[11px] text-[#445D84] font-medium mt-1">
-                  معادل شمسی: {toPersianDigits(formatGregorianToJalali(appointmentForm.appointment_date))}
-                </p>
-              )}
-              <FieldError message={appointmentErrors.appointment_date} />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                ساعت شروع نوبت (HH:MM) *
-              </label>
-              <input
-                type="time"
-                value={appointmentForm.start_time}
-                onChange={(e) => {
-                  setAppointmentForm((prev) => ({ ...prev, start_time: e.target.value }));
-                  if (appointmentErrors.start_time) {
-                    setAppointmentErrors((prev) => ({ ...prev, start_time: undefined }));
-                  }
-                }}
-                className={getFieldClass(Boolean(appointmentErrors.start_time))}
-              />
-              <FieldError message={appointmentErrors.start_time} />
-            </div>
-          </div>
-
-          {/* Operational Times from dashboard.php */}
-          <div className="pt-2 border-t border-slate-100">
-            <p className="text-xs font-bold text-slate-700 mb-2.5">
-              ساعات حضور و آزمون در آموزشگاه (اختیاری)
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                  ساعت ورود دانش‌آموز
-                </label>
-                <input
-                  type="time"
-                  value={appointmentForm.arrival_time}
-                  onChange={(e) =>
-                    setAppointmentForm((prev) => ({
-                      ...prev,
-                      arrival_time: e.target.value,
-                    }))
-                  }
-                  className={getFieldClass(false)}
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                  ساعت شروع آزمون
-                </label>
-                <input
-                  type="time"
-                  value={appointmentForm.exam_start_time}
-                  onChange={(e) =>
-                    setAppointmentForm((prev) => ({
-                      ...prev,
-                      exam_start_time: e.target.value,
-                    }))
-                  }
-                  className={getFieldClass(false)}
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                  ساعت پایان آزمون
-                </label>
-                <input
-                  type="time"
-                  value={appointmentForm.exam_end_time}
-                  onChange={(e) =>
-                    setAppointmentForm((prev) => ({
-                      ...prev,
-                      exam_end_time: e.target.value,
-                    }))
-                  }
-                  className={getFieldClass(false)}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                وضعیت نوبت
-              </label>
-              <select
-                value={appointmentForm.appointment_status}
-                onChange={(e) =>
-                  setAppointmentForm((prev) => ({
-                    ...prev,
-                    appointment_status: e.target.value as AppointmentStatus,
-                  }))
-                }
-                className={getFieldClass(false)}
-              >
-                <option value="scheduled">برنامه‌ریزی شده (scheduled)</option>
-                <option value="confirmed">تایید شده (confirmed)</option>
-                <option value="pending">در انتظار تایید (pending)</option>
-                <option value="completed">برگزار شده (completed)</option>
-                <option value="absent">غایب (absent)</option>
-                <option value="cancelled">لغو شده (cancelled)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                توضیحات جلسه
-              </label>
-              <input
-                type="text"
-                value={appointmentForm.description}
-                onChange={(e) =>
-                  setAppointmentForm((prev) => ({ ...prev, description: e.target.value }))
-                }
-                placeholder="مثال: بررسی کارنامه آزمون..."
-                className={getFieldClass(false)}
-              />
-            </div>
-          </div>
-
-          {editingItem?.last_log_status === 'sent' && (
-            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
-              <span>
-                توجه: برای این دانش‌آموز قبلاً پیامک نوبت ارسال شده است. در صورت تغییر تاریخ یا ساعت شروع، وضعیت پیامک به «تغییریافته پس از ارسال (changed_since_sent)» تغییر می‌کند.
-              </span>
-            </div>
-          )}
-
-          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
-            <ActionButton
+      {/* Sticky Bottom Action Bar in Multi-Select Mode */}
+      {isSelectionMode && selectedStudentIds.length > 0 && (
+        <div className="fixed bottom-0 inset-x-0 z-40 p-3 bg-white/95 backdrop-blur-xs border-t border-slate-200 shadow-2xl">
+          <div className="max-w-xl mx-auto flex items-center justify-between gap-3">
+            <button
               type="button"
-              variant="secondary"
-              onClick={() => setEditingItem(null)}
+              onClick={() => openBulkSmsSheet('unsent', true)}
+              className="w-full min-h-[48px] h-12 px-5 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-sm inline-flex items-center justify-center gap-2 shadow-md transition-colors cursor-pointer"
             >
-              انصراف
-            </ActionButton>
-            <ActionButton type="submit" variant="primary" loading={isSavingAppointment}>
-              ذخیره نوبت
-            </ActionButton>
+              <Send className="w-4 h-4" />
+              <span>
+                ارسال پیامک ({toPersianDigits(selectedStudentIds.length)})
+              </span>
+            </button>
           </div>
-        </form>
-      </Modal>
+        </div>
+      )}
 
-      {/* Parent Contacts CRUD Modal (/api/v1/students/{studentId}/parent-contacts) */}
-      <Modal
-        isOpen={Boolean(contactModalStudent)}
-        onClose={() => setContactModalStudent(null)}
-        title={
-          contactModalStudent
-            ? `مدیریت شماره‌های والدین: ${contactModalStudent.student_name}`
-            : 'مدیریت شماره‌های والدین'
-        }
-      >
-        <div className="space-y-5">
-          {/* Existing Contacts List */}
-          <div className="space-y-2">
-            <h4 className="text-xs font-bold text-slate-700">
-              شماره‌های ثبت‌شده برای والدین
-            </h4>
-            {isLoadingContacts ? (
-              <div className="p-5 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
-                <RefreshCw className="w-4 h-4 animate-spin text-[#445D84]" />
-                <span>در حال دریافت شماره‌های والدین از سرور...</span>
+      {/* Appointment Booking Modal: Bottom Sheet on Mobile (<640px), Centered Modal on Desktop */}
+      {editingItem && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`ثبت و ویرایش نوبت ${editingItem.student_name}`}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setEditingItem(null);
+          }}
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
+          <div className="w-full sm:max-w-md max-h-[90vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
+            {/* Sheet Header */}
+            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between gap-2 shrink-0">
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-slate-800 truncate">
+                  {editingItem.student_name}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {editingItem.grade
+                    ? `پایه ${toPersianDigits(editingItem.grade)}`
+                    : ''}
+                  {editingItem.field ? ` • ${editingItem.field}` : ''}
+                </p>
               </div>
-            ) : contactModalStudent &&
-              (parentContactsMap[contactModalStudent.student_id] || []).length > 0 ? (
-              <div className="space-y-2">
-                {(parentContactsMap[contactModalStudent.student_id] || []).map((c) => (
-                  <div
-                    key={c.id}
-                    className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 flex items-center justify-between text-xs"
-                  >
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-800">{c.parent_name}</span>
-                        <span className="px-2 py-0.5 rounded bg-slate-200/80 text-slate-700 text-[10px] font-bold">
-                          {RELATIONSHIP_LABELS[c.relationship]}
-                        </span>
-                        {Boolean(c.is_primary) && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
-                            <Star className="w-3 h-3 fill-emerald-600" />
-                            گیرنده اصلی پیامک
-                          </span>
-                        )}
-                      </div>
-                      <div dir="ltr" className="font-mono text-slate-600 text-right">
-                        {toPersianDigits(c.phone)}
-                      </div>
-                    </div>
-                    <ActionButton
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDeleteParentContact(c.id)}
-                      icon={<Trash2 className="w-3.5 h-3.5 text-rose-500" />}
-                    />
+              <button
+                type="button"
+                onClick={() => setEditingItem(null)}
+                aria-label="بستن"
+                className="min-w-[44px] min-h-[44px] rounded-full inline-flex items-center justify-center bg-slate-100 text-slate-500 hover:bg-rose-100 hover:text-rose-600 transition-colors cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Single-Column Scrollable Form */}
+            <form
+              noValidate
+              onSubmit={handleSaveAppointment}
+              className="flex-1 overflow-y-auto px-5 pt-4 pb-0 space-y-4"
+            >
+              {/* Parent Phone Quick Row */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between gap-2">
+                <div className="text-xs min-w-0">
+                  <div className="text-slate-500">شماره ولی گیرنده پیامک:</div>
+                  <div className="font-bold text-slate-800 mt-0.5 truncate" dir="ltr">
+                    {editingItem.mobile_mask || editingItem.mobile
+                      ? toPersianDigits(
+                          editingItem.mobile_mask || editingItem.mobile || ''
+                        )
+                      : 'شماره ندارد'}
                   </div>
-                ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openParentContactsModal(editingItem)}
+                  className="min-h-[44px] px-3 py-2 rounded-xl bg-white border border-slate-200 hover:border-[#445D84] text-[#445D84] text-xs font-bold inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
+                >
+                  <Phone className="w-3.5 h-3.5" />
+                  <span>مدیریت شماره</span>
+                </button>
               </div>
-            ) : (
-              <div className="p-4 rounded-xl border border-dashed border-orange-200 bg-orange-50/50 text-orange-700 text-xs text-center">
-                هیچ شماره تماسی برای والدین این دانش‌آموز در سرور ثبت نشده است.
-              </div>
-            )}
-          </div>
 
-          {/* Add New Parent Contact Form */}
-          <form
-            noValidate
-            onSubmit={handleAddParentContact}
-            className="space-y-3.5 pt-4 border-t border-slate-200/80"
-          >
-            <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-              <UserPlus className="w-4 h-4 text-[#445D84]" />
-              افزودن شماره جدید ولی
-            </h4>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Date Input */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  نام و نام خانوادگی ولی *
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  تاریخ نوبت *
+                </label>
+                <input
+                  type="date"
+                  value={appointmentForm.appointment_date}
+                  onChange={(e) => {
+                    setAppointmentForm((prev) => ({
+                      ...prev,
+                      appointment_date: e.target.value,
+                    }));
+                    if (appointmentErrors.appointment_date) {
+                      setAppointmentErrors((prev) => ({
+                        ...prev,
+                        appointment_date: undefined,
+                      }));
+                    }
+                  }}
+                  className={MOBILE_INPUT_CLASS(
+                    Boolean(appointmentErrors.appointment_date)
+                  )}
+                />
+                {appointmentForm.appointment_date && (
+                  <p className="text-xs text-[#445D84] font-medium mt-1">
+                    معادل شمسی:{' '}
+                    {toPersianDigits(
+                      formatGregorianToJalali(appointmentForm.appointment_date)
+                    )}
+                  </p>
+                )}
+                <FieldError message={appointmentErrors.appointment_date} />
+              </div>
+
+              {/* Start Time Input */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  ساعت نوبت *
+                </label>
+                <input
+                  type="time"
+                  value={appointmentForm.start_time}
+                  onChange={(e) => {
+                    setAppointmentForm((prev) => ({
+                      ...prev,
+                      start_time: e.target.value,
+                    }));
+                    if (appointmentErrors.start_time) {
+                      setAppointmentErrors((prev) => ({
+                        ...prev,
+                        start_time: undefined,
+                      }));
+                    }
+                  }}
+                  className={MOBILE_INPUT_CLASS(Boolean(appointmentErrors.start_time))}
+                />
+                <FieldError message={appointmentErrors.start_time} />
+              </div>
+
+              {/* 5-Status Selector */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  وضعیت نوبت
+                </label>
+                <select
+                  value={appointmentForm.appointment_status}
+                  onChange={(e) =>
+                    setAppointmentForm((prev) => ({
+                      ...prev,
+                      appointment_status: e.target.value as AppointmentStatus,
+                    }))
+                  }
+                  className={MOBILE_INPUT_CLASS(false)}
+                >
+                  <option value="pending">در انتظار</option>
+                  <option value="confirmed">تأیید شده</option>
+                  <option value="completed">انجام شد</option>
+                  <option value="absent">غایب</option>
+                  <option value="cancelled">لغو</option>
+                </select>
+              </div>
+
+              {/* Attendance & Exam Times (single column) */}
+              <div className="pt-2 border-t border-slate-100 space-y-3">
+                <p className="text-xs font-bold text-slate-600">
+                  ساعات حضور و آزمون (اختیاری)
+                </p>
+
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">
+                    ساعت ورود دانش‌آموز
+                  </label>
+                  <input
+                    type="time"
+                    value={appointmentForm.arrival_time}
+                    onChange={(e) =>
+                      setAppointmentForm((prev) => ({
+                        ...prev,
+                        arrival_time: e.target.value,
+                      }))
+                    }
+                    className={MOBILE_INPUT_CLASS(false)}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">
+                    ساعت شروع آزمون
+                  </label>
+                  <input
+                    type="time"
+                    value={appointmentForm.exam_start_time}
+                    onChange={(e) =>
+                      setAppointmentForm((prev) => ({
+                        ...prev,
+                        exam_start_time: e.target.value,
+                      }))
+                    }
+                    className={MOBILE_INPUT_CLASS(false)}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">
+                    ساعت پایان آزمون
+                  </label>
+                  <input
+                    type="time"
+                    value={appointmentForm.exam_end_time}
+                    onChange={(e) =>
+                      setAppointmentForm((prev) => ({
+                        ...prev,
+                        exam_end_time: e.target.value,
+                      }))
+                    }
+                    className={MOBILE_INPUT_CLASS(false)}
+                  />
+                </div>
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  توضیحات جلسه
                 </label>
                 <input
                   type="text"
-                  value={contactForm.parent_name}
-                  onChange={(e) => {
-                    setContactForm((prev) => ({ ...prev, parent_name: e.target.value }));
-                    if (contactErrors.parent_name) {
-                      setContactErrors((prev) => ({ ...prev, parent_name: undefined }));
-                    }
-                  }}
-                  placeholder="مثال: حسین محمدی"
-                  className={getFieldClass(Boolean(contactErrors.parent_name))}
-                />
-                <FieldError message={contactErrors.parent_name} />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  نسبت با دانش‌آموز
-                </label>
-                <select
-                  value={contactForm.relationship}
+                  value={appointmentForm.description}
                   onChange={(e) =>
-                    setContactForm((prev) => ({
+                    setAppointmentForm((prev) => ({
                       ...prev,
-                      relationship: e.target.value as ParentRelationship,
+                      description: e.target.value,
                     }))
                   }
-                  className={getFieldClass(false)}
-                >
-                  <option value="father">پدر (father)</option>
-                  <option value="mother">مادر (mother)</option>
-                  <option value="guardian">قیم قانونی (guardian)</option>
-                  <option value="other">سایر بستگان (other)</option>
-                </select>
+                  placeholder="مثال: بررسی کارنامه آزمون..."
+                  className={MOBILE_INPUT_CLASS(false)}
+                />
               </div>
+
+              {/* Sticky Bottom Save Bar */}
+              <div className="sticky bottom-0 bg-white pt-3 pb-4 border-t border-slate-100 flex items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={isSavingAppointment}
+                  className="flex-1 min-h-[48px] h-12 px-4 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-base inline-flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60"
+                >
+                  {isSavingAppointment ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Check className="w-4 h-4" />
+                  )}
+                  <span>ذخیره نوبت</span>
+                </button>
+
+                {editingItem.appointment_id && (
+                  <button
+                    type="button"
+                    onClick={() => setCancelingItem(editingItem)}
+                    title="لغو و حذف نوبت"
+                    aria-label="لغو نوبت"
+                    className="min-w-[48px] min-h-[48px] h-12 px-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 inline-flex items-center justify-center transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk SMS Confirmation Bottom Sheet (Before Sending) */}
+      {isSmsSheetOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="تأیید ارسال پیامک گروهی"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isSendingSms) {
+              setIsSmsSheetOpen(false);
+            }
+          }}
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
+          <div className="w-full sm:max-w-lg max-h-[90vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
+            {/* Sheet Header */}
+            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between gap-2 shrink-0">
+              <div>
+                <h3 className="text-base font-bold text-slate-800">
+                  تأیید ارسال پیامک یادآوری نوبت
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  گیرنده نهایی: {toPersianDigits(checkedUniquePhoneCount)} شماره یکتا (
+                  {toPersianDigits(smsSheetCheckedIds.length)} دانش‌آموز)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSmsSheetOpen(false)}
+                disabled={isSendingSms}
+                aria-label="بستن"
+                className="min-w-[44px] min-h-[44px] rounded-full inline-flex items-center justify-center bg-slate-100 text-slate-500 hover:bg-rose-100 hover:text-rose-600 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  شماره موبایل ولی (۱۱ رقمی) *
-                </label>
-                <input
-                  type="tel"
-                  dir="ltr"
-                  value={contactForm.phone}
-                  onChange={(e) => {
-                    setContactForm((prev) => ({ ...prev, phone: e.target.value }));
-                    if (contactErrors.phone) {
-                      setContactErrors((prev) => ({ ...prev, phone: undefined }));
-                    }
-                  }}
-                  placeholder="09123456789"
-                  className={getFieldClass(Boolean(contactErrors.phone))}
-                />
-                <FieldError message={contactErrors.phone} />
+            {/* Scrollable Body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+              {/* Partial Failure Breakdown Banner (if any) */}
+              {lastSendBreakdown && (
+                <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 space-y-1">
+                  <div className="font-bold">نتیجه ارسال به تفکیک:</div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-emerald-700 font-bold">
+                      موفق: {toPersianDigits(lastSendBreakdown.sent)}
+                    </span>
+                    <span className="text-rose-700 font-bold">
+                      ناموفق: {toPersianDigits(lastSendBreakdown.failed)}
+                    </span>
+                    {lastSendBreakdown.skipped > 0 && (
+                      <span className="text-slate-600">
+                        رد شده: {toPersianDigits(lastSendBreakdown.skipped)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Message Text Preview */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-slate-700">پیش‌نمایش متن پیامک:</div>
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 leading-relaxed whitespace-pre-line">
+                  {buildSmsMessagePreview(samplePreviewStudent)}
+                </div>
               </div>
 
-              <div className="pt-4">
-                <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+              {/* Merged Duplicate Notice */}
+              {bulkCategorization.mergedDuplicatesCount > 0 && (
+                <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-800 flex items-center gap-2">
+                  <Users className="w-4 h-4 shrink-0" />
+                  <span>
+                    {toPersianDigits(bulkCategorization.mergedDuplicatesCount)} شماره تکراری
+                    والدین (چند فرزند با یک شماره) ادغام شد.
+                  </span>
+                </div>
+              )}
+
+              {/* Eligible Recipients List (with Already-Sent unchecked by default) */}
+              <div className="space-y-2">
+                <div className="font-bold text-slate-700">
+                  گیرندگان واجد شرایط ({toPersianDigits(bulkCategorization.recipientGroups.length)}{' '}
+                  شماره):
+                </div>
+
+                {bulkCategorization.recipientGroups.length === 0 ? (
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-center text-slate-500">
+                    هیچ گیرنده‌ای با شماره معتبر و نوبت فعال در بین موارد انتخابی وجود ندارد.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {bulkCategorization.recipientGroups.map((group) => {
+                      const groupIds = group.students.map((s) => s.student_id);
+                      const isChecked = groupIds.every((id) =>
+                        smsSheetCheckedIds.includes(id)
+                      );
+                      const studentNames = group.students
+                        .map((s) => s.student_name)
+                        .join('، ');
+
+                      return (
+                        <label
+                          key={group.phoneKey}
+                          className={`min-h-[48px] p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-colors ${
+                            isChecked
+                              ? 'border-[#445D84] bg-[#445D84]/[0.04]'
+                              : 'border-slate-200 bg-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleSmsRecipientGroup(groupIds)}
+                              className="w-5 h-5 rounded border-slate-300 text-[#445D84] focus:ring-[#445D84] shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-800 truncate">
+                                {studentNames}
+                              </div>
+                              <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5 flex-wrap">
+                                <span>{group.parentName}</span>
+                                <span dir="ltr" className="font-mono">
+                                  {toPersianDigits(group.displayPhone)}
+                                </span>
+                                {group.students.length > 1 && (
+                                  <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-bold text-[10px]">
+                                    شماره مشترک ({toPersianDigits(group.students.length)} فرزند)
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {group.isAlreadySentAll && (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold shrink-0">
+                              پیامک شده در این هفته
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Excluded: No Phone Recipients */}
+              {bulkCategorization.noPhoneItems.length > 0 && (
+                <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                  <div className="font-bold text-orange-700 flex items-center gap-1.5">
+                    <PhoneOff className="w-4 h-4" />
+                    <span>
+                      حذف‌شده از ارسال — شماره ندارد (
+                      {toPersianDigits(bulkCategorization.noPhoneItems.length)} نفر):
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {bulkCategorization.noPhoneItems.map((st) => (
+                      <span
+                        key={st.student_id}
+                        className="px-2.5 py-1 rounded-lg bg-orange-50 text-orange-800 border border-orange-200 text-[11px] font-medium"
+                      >
+                        {st.student_name} (شماره ندارد)
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Excluded: No Active Appointment */}
+              {bulkCategorization.noAppointmentItems.length > 0 && (
+                <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                  <div className="font-bold text-slate-600">
+                    حذف‌شده از ارسال — بدون نوبت فعال (
+                    {toPersianDigits(bulkCategorization.noAppointmentItems.length)} نفر):
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {bulkCategorization.noAppointmentItems.map((st) => (
+                      <span
+                        key={st.student_id}
+                        className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-[11px]"
+                      >
+                        {st.student_name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Sticky Bottom Confirm Bar */}
+            <div className="sticky bottom-0 bg-white px-5 py-3.5 border-t border-slate-100 flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={handleConfirmSendSms}
+                disabled={isSendingSms || smsSheetCheckedIds.length === 0}
+                className="flex-1 min-h-[48px] h-12 px-4 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-base inline-flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isSendingSms ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+                <span>
+                  {isSendingSms
+                    ? 'در حال ارسال...'
+                    : `ارسال پیامک (${toPersianDigits(checkedUniquePhoneCount)})`}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsSmsSheetOpen(false)}
+                disabled={isSendingSms}
+                className="min-h-[48px] h-12 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm transition-colors cursor-pointer"
+              >
+                انصراف
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Parent Contacts CRUD Bottom-Sheet Modal */}
+      {contactModalStudent && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`مدیریت شماره‌های والدین ${contactModalStudent.student_name}`}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setContactModalStudent(null);
+          }}
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
+          <div className="w-full sm:max-w-md max-h-[90vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between gap-2 shrink-0">
+              <h3 className="text-base font-bold text-slate-800 truncate">
+                شماره والدین: {contactModalStudent.student_name}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setContactModalStudent(null)}
+                aria-label="بستن"
+                className="min-w-[44px] min-h-[44px] rounded-full inline-flex items-center justify-center bg-slate-100 text-slate-500 hover:bg-rose-100 hover:text-rose-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {isLoadingContacts ? (
+                <div className="p-4 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-[#445D84]" />
+                  <span>در حال دریافت شماره‌ها...</span>
+                </div>
+              ) : (parentContactsMap[contactModalStudent.student_id] || []).length >
+                0 ? (
+                <div className="space-y-2">
+                  {(parentContactsMap[contactModalStudent.student_id] || []).map(
+                    (c) => (
+                      <div
+                        key={c.id}
+                        className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 flex items-center justify-between text-xs"
+                      >
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-800">
+                              {c.parent_name}
+                            </span>
+                            <span className="px-2 py-0.5 rounded bg-slate-200/80 text-slate-700 text-[10px] font-bold">
+                              {RELATIONSHIP_LABELS[c.relationship]}
+                            </span>
+                            {Boolean(c.is_primary) && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold">
+                                <Star className="w-3 h-3 fill-emerald-600" />
+                                اصلی
+                              </span>
+                            )}
+                          </div>
+                          <div dir="ltr" className="font-mono text-slate-600 text-right">
+                            {toPersianDigits(c.phone)}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteParentContact(c.id)}
+                          aria-label="حذف شماره ولی"
+                          className="min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl text-rose-500 hover:bg-rose-50 cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )
+                  )}
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-xl border border-dashed border-orange-200 bg-orange-50/50 text-orange-700 text-xs text-center">
+                  هیچ شماره‌ای برای والدین ثبت نشده است.
+                </div>
+              )}
+
+              <form
+                noValidate
+                onSubmit={handleAddParentContact}
+                className="space-y-3.5 pt-3 border-t border-slate-200/80"
+              >
+                <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <UserPlus className="w-4 h-4 text-[#445D84]" />
+                  افزودن شماره جدید ولی
+                </h4>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    نام و نام خانوادگی ولی *
+                  </label>
+                  <input
+                    type="text"
+                    value={contactForm.parent_name}
+                    onChange={(e) => {
+                      setContactForm((prev) => ({
+                        ...prev,
+                        parent_name: e.target.value,
+                      }));
+                      if (contactErrors.parent_name) {
+                        setContactErrors((prev) => ({
+                          ...prev,
+                          parent_name: undefined,
+                        }));
+                      }
+                    }}
+                    placeholder="مثال: حسین محمدی"
+                    className={MOBILE_INPUT_CLASS(Boolean(contactErrors.parent_name))}
+                  />
+                  <FieldError message={contactErrors.parent_name} />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    نسبت با دانش‌آموز
+                  </label>
+                  <select
+                    value={contactForm.relationship}
+                    onChange={(e) =>
+                      setContactForm((prev) => ({
+                        ...prev,
+                        relationship: e.target.value as ParentRelationship,
+                      }))
+                    }
+                    className={MOBILE_INPUT_CLASS(false)}
+                  >
+                    <option value="father">پدر</option>
+                    <option value="mother">مادر</option>
+                    <option value="guardian">قیم قانونی</option>
+                    <option value="other">سایر بستگان</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    شماره موبایل ولی (۱۱ رقمی) *
+                  </label>
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    dir="ltr"
+                    value={contactForm.phone}
+                    onChange={(e) => {
+                      setContactForm((prev) => ({ ...prev, phone: e.target.value }));
+                      if (contactErrors.phone) {
+                        setContactErrors((prev) => ({ ...prev, phone: undefined }));
+                      }
+                    }}
+                    placeholder="09123456789"
+                    className={MOBILE_INPUT_CLASS(Boolean(contactErrors.phone))}
+                  />
+                  <FieldError message={contactErrors.phone} />
+                </div>
+
+                <label className="min-h-[44px] inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={contactForm.is_primary}
@@ -2428,217 +2456,202 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                         is_primary: e.target.checked,
                       }))
                     }
-                    className="rounded border-slate-300 text-[#445D84] focus:ring-[#445D84]"
+                    className="w-5 h-5 rounded border-slate-300 text-[#445D84] focus:ring-[#445D84]"
                   />
-                  تنظیم به عنوان شماره اصلی گیرنده پیامک
+                  شماره اصلی گیرنده پیامک
                 </label>
-              </div>
-            </div>
 
-            <div className="flex justify-end gap-2 pt-2">
-              <ActionButton
-                type="button"
-                variant="secondary"
-                onClick={() => setContactModalStudent(null)}
-              >
-                بستن
-              </ActionButton>
-              <ActionButton type="submit" variant="primary" loading={isSavingContact}>
-                ثبت شماره ولی
-              </ActionButton>
+                <div className="sticky bottom-0 bg-white pt-3 pb-1 border-t border-slate-100">
+                  <button
+                    type="submit"
+                    disabled={isSavingContact}
+                    className="w-full min-h-[48px] h-12 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-base inline-flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60"
+                  >
+                    {isSavingContact ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Check className="w-4 h-4" />
+                    )}
+                    <span>ذخیره شماره ولی</span>
+                  </button>
+                </div>
+              </form>
             </div>
-          </form>
+          </div>
         </div>
-      </Modal>
+      )}
 
-      {/* Select / Add Week Session Modal */}
-      <Modal
-        isOpen={isNewWeekModalOpen}
-        onClose={() => setIsNewWeekModalOpen(false)}
-        title="انتخاب یا معرفی هفته مشاوره"
-      >
-        <form noValidate onSubmit={handleCreateNewWeek} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              عنوان هفته یا جلسه *
-            </label>
-            <input
-              type="text"
-              value={newWeekForm.title}
-              onChange={(e) => {
-                setNewWeekForm((prev) => ({ ...prev, title: e.target.value }));
-                if (newWeekErrors.title) {
-                  setNewWeekErrors((prev) => ({ ...prev, title: undefined }));
-                }
-              }}
-              placeholder="مثال: هفته اول خرداد - جلسه مشاوره"
-              className={getFieldClass(Boolean(newWeekErrors.title))}
-            />
-            <FieldError message={newWeekErrors.title} />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              انتخاب تاریخ در هفته مورد نظر (میلادی)
-            </label>
-            <input
-              type="date"
-              value={newWeekForm.week_date}
-              onChange={(e) => {
-                const picked = e.target.value;
-                const sat = getSaturdayOfWeek(picked);
-                const fri = addDaysIso(sat, 6);
-                setNewWeekForm((prev) => ({
-                  ...prev,
-                  week_date: sat,
-                  start_date_jalali: formatGregorianToJalali(sat),
-                  end_date_jalali: formatGregorianToJalali(fri),
-                }));
-              }}
-              className={getFieldClass(false)}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                تاریخ شروع هفته (شمسی) *
-              </label>
-              <input
-                type="text"
-                dir="ltr"
-                value={newWeekForm.start_date_jalali}
-                onChange={(e) => {
-                  setNewWeekForm((prev) => ({
-                    ...prev,
-                    start_date_jalali: e.target.value,
-                  }));
-                  if (newWeekErrors.start_date_jalali) {
-                    setNewWeekErrors((prev) => ({
-                      ...prev,
-                      start_date_jalali: undefined,
-                    }));
-                  }
-                }}
-                placeholder="1404/02/20"
-                className={getFieldClass(Boolean(newWeekErrors.start_date_jalali))}
-              />
-              <FieldError message={newWeekErrors.start_date_jalali} />
+      {/* Select / Add Week Session Bottom-Sheet Modal */}
+      {isNewWeekModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="انتخاب هفته"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsNewWeekModalOpen(false);
+          }}
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
+          <div className="w-full sm:max-w-md max-h-[90vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-800">انتخاب هفته</h3>
+              <button
+                type="button"
+                onClick={() => setIsNewWeekModalOpen(false)}
+                aria-label="بستن"
+                className="min-w-[44px] min-h-[44px] rounded-full inline-flex items-center justify-center bg-slate-100 text-slate-500 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                تاریخ پایان هفته (شمسی) *
-              </label>
-              <input
-                type="text"
-                dir="ltr"
-                value={newWeekForm.end_date_jalali}
-                onChange={(e) => {
-                  setNewWeekForm((prev) => ({
-                    ...prev,
-                    end_date_jalali: e.target.value,
-                  }));
-                  if (newWeekErrors.end_date_jalali) {
-                    setNewWeekErrors((prev) => ({
+            <form
+              noValidate
+              onSubmit={handleCreateNewWeek}
+              className="flex-1 overflow-y-auto p-5 space-y-4"
+            >
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  انتخاب تاریخ در هفته مورد نظر
+                </label>
+                <input
+                  type="date"
+                  value={newWeekForm.week_date}
+                  onChange={(e) => {
+                    const picked = e.target.value;
+                    const sat = getSaturdayOfWeek(picked);
+                    const fri = addDaysIso(sat, 6);
+                    const sJal = formatGregorianToJalali(sat);
+                    const eJal = formatGregorianToJalali(fri);
+                    setNewWeekForm((prev) => ({
                       ...prev,
-                      end_date_jalali: undefined,
+                      week_date: sat,
+                      title: prev.title || `هفته ${toPersianDigits(sJal)}`,
+                      start_date_jalali: sJal,
+                      end_date_jalali: eJal,
                     }));
-                  }
-                }}
-                placeholder="1404/02/26"
-                className={getFieldClass(Boolean(newWeekErrors.end_date_jalali))}
-              />
-              <FieldError message={newWeekErrors.end_date_jalali} />
+                  }}
+                  className={MOBILE_INPUT_CLASS(false)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  عنوان هفته *
+                </label>
+                <input
+                  type="text"
+                  value={newWeekForm.title}
+                  onChange={(e) => {
+                    setNewWeekForm((prev) => ({ ...prev, title: e.target.value }));
+                    if (newWeekErrors.title) {
+                      setNewWeekErrors((prev) => ({ ...prev, title: undefined }));
+                    }
+                  }}
+                  placeholder="مثال: هفته اول خرداد"
+                  className={MOBILE_INPUT_CLASS(Boolean(newWeekErrors.title))}
+                />
+                <FieldError message={newWeekErrors.title} />
+              </div>
+
+              <div className="sticky bottom-0 bg-white pt-3 border-t border-slate-100">
+                <button
+                  type="submit"
+                  className="w-full min-h-[48px] h-12 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-base inline-flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>مشاهده این هفته</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Remedial Class Bottom-Sheet Modal */}
+      {isAddClassModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`افزودن کلاس رفع اشکال ${remedialFieldTab}`}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsAddClassModalOpen(false);
+          }}
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
+          <div className="w-full sm:max-w-md max-h-[90vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-800">
+                افزودن کلاس رفع اشکال ({remedialFieldTab})
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsAddClassModalOpen(false)}
+                aria-label="بستن"
+                className="min-w-[44px] min-h-[44px] rounded-full inline-flex items-center justify-center bg-slate-100 text-slate-500 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-          </div>
 
-          <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
-            <ActionButton
-              type="button"
-              variant="secondary"
-              onClick={() => setIsNewWeekModalOpen(false)}
+            <form
+              noValidate
+              onSubmit={handleAddRemedialClass}
+              className="flex-1 overflow-y-auto p-5 space-y-4"
             >
-              انصراف
-            </ActionButton>
-            <ActionButton type="submit" variant="primary">
-              مشاهده و بارگذاری هفته
-            </ActionButton>
-          </div>
-        </form>
-      </Modal>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  عنوان کلاس *
+                </label>
+                <input
+                  type="text"
+                  value={newClassForm.class_name}
+                  onChange={(e) => {
+                    setNewClassForm((prev) => ({
+                      ...prev,
+                      class_name: e.target.value,
+                    }));
+                    if (newClassErrors.class_name) {
+                      setNewClassErrors({ class_name: undefined });
+                    }
+                  }}
+                  placeholder="مثال: کارگاه حل تست دینامیک"
+                  className={MOBILE_INPUT_CLASS(Boolean(newClassErrors.class_name))}
+                />
+                <FieldError message={newClassErrors.class_name} />
+              </div>
 
-      {/* Add Remedial Class Modal */}
-      <Modal
-        isOpen={isAddClassModalOpen}
-        onClose={() => setIsAddClassModalOpen(false)}
-        title={`افزودن کلاس رفع اشکال (${remedialFieldTab})`}
-      >
-        <form noValidate onSubmit={handleAddRemedialClass} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              عنوان کلاس / مبحث رفع اشکال *
-            </label>
-            <input
-              type="text"
-              value={newClassForm.class_name}
-              onChange={(e) => {
-                setNewClassForm((prev) => ({ ...prev, class_name: e.target.value }));
-                if (newClassErrors.class_name) {
-                  setNewClassErrors({ class_name: undefined });
-                }
-              }}
-              placeholder="مثال: کارگاه حل تست دینامیک"
-              className={getFieldClass(Boolean(newClassErrors.class_name))}
-            />
-            <FieldError message={newClassErrors.class_name} />
-          </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  نام استاد (اختیاری)
+                </label>
+                <input
+                  type="text"
+                  value={newClassForm.teacher_name}
+                  onChange={(e) =>
+                    setNewClassForm((prev) => ({
+                      ...prev,
+                      teacher_name: e.target.value,
+                    }))
+                  }
+                  placeholder="مثال: استاد بهرامی"
+                  className={MOBILE_INPUT_CLASS(false)}
+                />
+              </div>
 
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              نام استاد (اختیاری)
-            </label>
-            <input
-              type="text"
-              value={newClassForm.teacher_name}
-              onChange={(e) =>
-                setNewClassForm((prev) => ({ ...prev, teacher_name: e.target.value }))
-              }
-              placeholder="مثال: استاد بهرامی"
-              className={getFieldClass(false)}
-            />
+              <div className="sticky bottom-0 bg-white pt-3 border-t border-slate-100">
+                <button
+                  type="submit"
+                  className="w-full min-h-[48px] h-12 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-base inline-flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>افزودن کلاس</span>
+                </button>
+              </div>
+            </form>
           </div>
-
-          <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
-            <ActionButton
-              type="button"
-              variant="secondary"
-              onClick={() => setIsAddClassModalOpen(false)}
-            >
-              انصراف
-            </ActionButton>
-            <ActionButton type="submit" variant="primary">
-              افزودن ستون کلاس
-            </ActionButton>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Bulk SMS Confirmation Modal */}
-      <ConfirmModal
-        isOpen={smsConfirmModal.isOpen}
-        title={smsConfirmModal.title}
-        message={smsConfirmModal.message}
-        confirmText={
-          isSendingSms
-            ? 'در حال ارسال...'
-            : `بله، ارسال پیامک (${toPersianDigits(smsConfirmModal.targetCount)} نفر)`
-        }
-        variant="primary"
-        loading={isSendingSms}
-        onConfirm={handleConfirmSendSms}
-        onCancel={() => setSmsConfirmModal((prev) => ({ ...prev, isOpen: false }))}
-      />
+        </div>
+      )}
 
       {/* Cancel Appointment Confirmation Modal */}
       <ConfirmModal
@@ -2657,32 +2670,32 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
 
       {/* SMS Log Slide-Over Drawer (GET /api/v1/appointments/sms/log) */}
       {isLogDrawerOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 backdrop-blur-xs animate-fadeIn">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="تاریخچه ارسال پیامک نوبت‌ها"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsLogDrawerOpen(false);
+          }}
+          className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 backdrop-blur-xs"
+        >
           <div className="w-full max-w-xl bg-white h-full shadow-2xl border-r border-slate-200 flex flex-col justify-between">
-            {/* Drawer Header */}
-            <div className="p-5 bg-[#344868] text-white flex items-center justify-between">
+            <div className="p-4 sm:p-5 bg-[#344868] text-white flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
-                  <History className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black">کشوی تاریخچه ارسال پیامک نوبت‌ها</h3>
-                  <p className="text-xs text-white/75 mt-0.5">
-                    لاگ کامل پیامک‌های ارسالی به والدین (GET /appointments/sms/log)
-                  </p>
-                </div>
+                <History className="w-5 h-5" />
+                <h3 className="text-base font-black">تاریخچه ارسال پیامک نوبت‌ها</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setIsLogDrawerOpen(false)}
-                className="p-2 rounded-lg text-white/80 hover:text-white hover:bg-white/10 cursor-pointer"
+                aria-label="بستن کشوی لاگ"
+                className="min-w-[44px] min-h-[44px] rounded-xl text-white/80 hover:text-white hover:bg-white/10 inline-flex items-center justify-center cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Drawer Filter Bar */}
-            <div className="p-4 border-b border-slate-100 bg-slate-50/70 flex items-center justify-between gap-2">
+            <div className="p-3 border-b border-slate-100 bg-slate-50/70 flex items-center justify-between gap-2 overflow-x-auto">
               <div className="inline-flex p-1 rounded-xl bg-white border border-slate-200">
                 {[
                   { id: 'all', label: `همه (${toPersianDigits(smsLogs.length)})` },
@@ -2698,12 +2711,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                       smsLogs.filter((l) => l.status === 'failed').length
                     )})`,
                   },
-                  {
-                    id: 'skipped_no_phone',
-                    label: `فاقد شماره (${toPersianDigits(
-                      smsLogs.filter((l) => l.status === 'skipped_no_phone').length
-                    )})`,
-                  },
                 ].map((tab) => (
                   <button
                     key={tab.id}
@@ -2711,7 +2718,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                     onClick={() =>
                       setLogStatusFilter(tab.id as 'all' | AppointmentSmsLogStatus)
                     }
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       logStatusFilter === tab.id
                         ? 'bg-[#445D84] text-white'
                         : 'text-slate-600 hover:text-slate-900'
@@ -2721,13 +2728,8 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                   </button>
                 ))}
               </div>
-
-              <span className="text-[11px] text-slate-500 font-medium">
-                {currentWeek.title}
-              </span>
             </div>
 
-            {/* Drawer Content List */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {filteredLogs.length === 0 ? (
                 <div className="py-16 text-center text-slate-400 text-xs font-bold">
@@ -2737,17 +2739,12 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                 filteredLogs.map((log) => (
                   <div
                     key={log.id}
-                    className="p-4 rounded-xl border border-slate-200/90 bg-white hover:border-slate-300 transition-all space-y-2.5 shadow-2xs"
+                    className="p-3.5 rounded-xl border border-slate-200/90 bg-white space-y-2"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <div className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                          <span>{log.student_name || `دانش‌آموز #${log.student_id}`}</span>
-                          {log.field && (
-                            <span className="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 font-bold">
-                              {log.field}
-                            </span>
-                          )}
+                        <div className="font-bold text-slate-800 text-sm">
+                          {log.student_name || `دانش‌آموز #${log.student_id}`}
                         </div>
                         <div
                           dir="ltr"
@@ -2755,98 +2752,35 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                         >
                           {log.mobile_mask || log.mobile
                             ? toPersianDigits(log.mobile_mask || log.mobile || '')
-                            : 'بدون شماره ولی'}
+                            : 'بدون شماره'}
                         </div>
                       </div>
 
-                      <div className="flex flex-col items-end gap-1">
-                        {log.status === 'sent' ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            <CheckCircle2 className="w-3 h-3" />
-                            ارسال موفق (sent)
-                          </span>
-                        ) : log.status === 'skipped_no_phone' ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-orange-50 text-orange-700 border border-orange-200">
-                            <PhoneOff className="w-3 h-3" />
-                            رد شده - فاقد شماره
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                            <XCircle className="w-3 h-3" />
-                            خطا در ارسال (failed)
-                          </span>
-                        )}
-                        {log.sent_at && (
-                          <span className="text-[10px] text-slate-400">
-                            {toPersianDigits(log.sent_at)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100 text-xs text-slate-600 leading-relaxed flex items-center justify-between">
-                      <span>
-                        نوبت ثبت‌شده:{' '}
-                        <strong>
-                          {log.appointment_jalali ||
-                            (log.appointment_at
-                              ? toPersianDigits(log.appointment_at)
-                              : '—')}
-                        </strong>
-                      </span>
-                      <span className="text-[11px] text-slate-500">
-                        تلاش: {toPersianDigits(log.attempts)} مرتبه
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                          log.status === 'sent'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : log.status === 'skipped_no_phone'
+                            ? 'bg-orange-50 text-orange-700 border-orange-200'
+                            : 'bg-rose-50 text-rose-700 border-rose-200'
+                        }`}
+                      >
+                        {log.status === 'sent'
+                          ? 'ارسال موفق'
+                          : log.status === 'skipped_no_phone'
+                          ? 'فاقد شماره'
+                          : 'خطا در ارسال'}
                       </span>
                     </div>
 
                     {log.last_error && (
-                      <div className="text-[11px] text-rose-600 font-bold flex items-center gap-1.5">
-                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                        <span>علت خطا: {log.last_error}</span>
+                      <div className="text-[11px] text-rose-600 font-bold">
+                        علت خطا: {log.last_error}
                       </div>
                     )}
-
-                    <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
-                      <span>
-                        شناسه پیامک:{' '}
-                        <strong className="font-mono text-slate-600">
-                          {log.provider_message_id || '—'}
-                        </strong>
-                      </span>
-                      {log.operation_id && (
-                        <span className="font-mono text-[10px] text-slate-400">
-                          {log.operation_id}
-                        </span>
-                      )}
-                    </div>
                   </div>
                 ))
               )}
-            </div>
-
-            {/* Drawer Footer */}
-            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
-              <ActionButton
-                variant="danger"
-                size="sm"
-                disabled={summary.failed === 0}
-                onClick={() => {
-                  setIsLogDrawerOpen(false);
-                  openSmsConfirm('failed', false);
-                }}
-                icon={<RefreshCw className="w-3.5 h-3.5" />}
-              >
-                ارسال مجدد پیامک‌های ناموفق ({toPersianDigits(summary.failed)})
-              </ActionButton>
-
-              <ActionButton
-                variant="secondary"
-                size="sm"
-                onClick={() => setIsLogDrawerOpen(false)}
-                icon={<ChevronLeft className="w-4 h-4" />}
-              >
-                بستن کشو
-              </ActionButton>
             </div>
           </div>
         </div>

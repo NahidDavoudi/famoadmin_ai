@@ -246,3 +246,111 @@ test('Regression: numeric chat_id, phone, and national_id never throw .trim is n
   assert.ok(invalidClass.class_name);
 });
 
+test('Appointments card status resolution and bulk SMS categorization handle 5 statuses, phone merging, and already_sent defaults', async () => {
+  const {
+    resolveCardAppointmentStatus,
+    categorizeBulkSmsSelection,
+    buildSmsMessagePreview,
+    formatCardStartTime,
+  } = await import('./appointments-logic');
+  type Item = import('../types').AppointmentSmsPreviewItem;
+
+  const makeItem = (overrides: Partial<Item>): Item => ({
+    student_id: 1,
+    student_name: 'علی رضایی',
+    grade: 12,
+    field: 'ریاضی',
+    parent_name: 'حسن رضایی',
+    recipient_type: 'parent',
+    mobile: '09121112233',
+    mobile_mask: '0912***2233',
+    has_valid_phone: true,
+    appointment_id: 101,
+    appointment_date: '2026-02-22',
+    appointment_jalali: '1404/12/03',
+    weekday: 'شنبه',
+    start_time: '15:30:00',
+    end_time: null,
+    appointment_at: '2026-02-22 15:30:00',
+    active_appointments_count: 1,
+    multiple_appointments: false,
+    last_error: null,
+    last_sent_at: null,
+    attempts: 0,
+    appointment_status: 'scheduled',
+    status: 'will_send',
+    arrival_time: null,
+    exam_start_time: null,
+    exam_end_time: null,
+    ...overrides,
+  });
+
+  // 1. 5 statuses mapping
+  assert.equal(resolveCardAppointmentStatus(makeItem({ appointment_status: 'pending' })).key, 'pending');
+  assert.equal(resolveCardAppointmentStatus(makeItem({ appointment_status: 'scheduled' })).key, 'confirmed');
+  assert.equal(resolveCardAppointmentStatus(makeItem({ appointment_status: 'completed' })).key, 'completed');
+  assert.equal(
+    resolveCardAppointmentStatus(makeItem({ appointment_status: 'scheduled', arrival_time: '15:25' })).key,
+    'completed'
+  );
+  assert.equal(resolveCardAppointmentStatus(makeItem({ appointment_status: 'absent' })).key, 'absent');
+  assert.equal(resolveCardAppointmentStatus(makeItem({ appointment_status: 'cancelled' })).key, 'cancelled');
+  assert.equal(
+    resolveCardAppointmentStatus(makeItem({ appointment_id: null, appointment_status: undefined })).key,
+    'cancelled'
+  );
+  assert.equal(
+    resolveCardAppointmentStatus(makeItem({ appointment_id: null, appointment_status: undefined })).label,
+    'بدون نوبت'
+  );
+
+  // 2. Time formatting
+  assert.equal(formatCardStartTime(makeItem({ start_time: '16:45:00' })), '۱۶:۴۵');
+  assert.equal(formatCardStartTime(makeItem({ appointment_id: null, start_time: null })), '');
+
+  // 3. Bulk SMS categorization: separates no_phone, merges duplicate parent phone, unchecks already_sent by default
+  const items: Item[] = [
+    makeItem({
+      student_id: 1,
+      student_name: 'علی رضایی',
+      mobile: '09121112233',
+      status: 'will_send',
+    }),
+    makeItem({
+      student_id: 2,
+      student_name: 'زهرا رضایی', // sibling with same parent phone
+      mobile: '+989121112233',
+      status: 'changed_since_sent',
+    }),
+    makeItem({
+      student_id: 3,
+      student_name: 'سارا محمدی',
+      mobile: '09123334455',
+      status: 'already_sent',
+    }),
+    makeItem({
+      student_id: 4,
+      student_name: 'امیر حسینی',
+      mobile: '',
+      mobile_mask: '',
+      has_valid_phone: false,
+      status: 'no_phone',
+    }),
+  ];
+
+  const summary = categorizeBulkSmsSelection(items);
+  assert.equal(summary.noPhoneItems.length, 1);
+  assert.equal(summary.noPhoneItems[0].student_id, 4);
+  assert.equal(summary.mergedDuplicatesCount, 1);
+  assert.equal(summary.recipientGroups.length, 2);
+  assert.equal(summary.recipientGroups.filter((g) => g.isAlreadySentAll).length, 1);
+  // Students 1 & 2 checked by default; Student 3 (already_sent) unchecked by default
+  assert.deepEqual(summary.defaultCheckedStudentIds, [1, 2]);
+
+  const msg = buildSmsMessagePreview(items[0]);
+  assert.ok(msg.includes('علی رضایی'));
+  assert.ok(msg.includes('۱۵:۳۰'));
+});
+
+
+
