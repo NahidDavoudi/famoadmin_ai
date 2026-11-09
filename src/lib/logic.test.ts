@@ -352,5 +352,73 @@ test('Appointments card status resolution and bulk SMS categorization handle 5 s
   assert.ok(msg.includes('۱۵:۳۰'));
 });
 
+test('Spreadsheet appointment time normalization and sync plan compute create, update, delete, and invalid rows', async () => {
+  const {
+    normalizeTimeInput,
+    isValidAppointmentTimeHm,
+    computeSpreadsheetSyncPlan,
+  } = await import('./appointments-logic');
+
+  assert.equal(normalizeTimeInput('9'), '09:00');
+  assert.equal(normalizeTimeInput('14'), '14:00');
+  assert.equal(normalizeTimeInput('930'), '09:30');
+  assert.equal(normalizeTimeInput('1445'), '14:45');
+  assert.equal(normalizeTimeInput('۱۶:۱۵'), '16:15');
+  assert.equal(isValidAppointmentTimeHm('14:30'), true);
+  assert.equal(isValidAppointmentTimeHm('930'), true);
+  assert.equal(isValidAppointmentTimeHm('25:00'), false);
+
+  const students = [
+    { student_id: 1, student_name: 'علی رضایی' },
+    { student_id: 2, student_name: 'سارا محمدی' },
+    { student_id: 3, student_name: 'زهرا کریمی' },
+    { student_id: 4, student_name: 'امیر حسینی' },
+  ];
+
+  const existing = {
+    2: {
+      appointment_id: 201,
+      student_id: 2,
+      appointment_date: '2026-11-05',
+      start_time: '10:00',
+    },
+    3: {
+      appointment_id: 202,
+      student_id: 3,
+      appointment_date: '2026-11-05',
+      start_time: '12:00',
+    },
+  };
+
+  const draft = {
+    1: '1430', // create -> 14:30
+    2: '11:15', // update -> 11:15
+    3: '', // delete -> cleared
+    4: '99:99', // invalid
+  };
+
+  const plan = computeSpreadsheetSyncPlan(students, existing, draft);
+  assert.equal(plan.toCreate.length, 1);
+  assert.deepEqual(plan.toCreate[0], {
+    student_id: 1,
+    student_name: 'علی رضایی',
+    start_time: '14:30',
+  });
+  assert.equal(plan.toUpdate.length, 1);
+  assert.deepEqual(plan.toUpdate[0], {
+    appointment_id: 201,
+    student_id: 2,
+    student_name: 'سارا محمدی',
+    old_time: '10:00',
+    start_time: '11:15',
+  });
+  assert.equal(plan.toDelete.length, 1);
+  assert.equal(plan.toDelete[0].appointment_id, 202);
+  assert.equal(plan.invalidRows.length, 1);
+  assert.equal(plan.invalidRows[0].student_id, 4);
+  assert.deepEqual(plan.activeStudentIdsWithTime, [1, 2]);
+});
+
+
 
 

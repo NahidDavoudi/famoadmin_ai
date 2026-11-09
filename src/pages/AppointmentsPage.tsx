@@ -13,8 +13,6 @@ import {
   Search,
   Users,
   Phone,
-  CheckSquare,
-  Square,
   ChevronLeft,
   ChevronRight,
   BookOpen,
@@ -23,7 +21,6 @@ import {
   MessageSquare,
   X,
   PhoneOff,
-  CalendarX2,
   UserPlus,
   Star,
   LogIn,
@@ -31,16 +28,15 @@ import {
   RotateCcw,
   Check,
   ClipboardList,
+  Save,
 } from 'lucide-react';
 import type {
   AcademicField,
+  AppointmentRecord,
   AppointmentSmsPreviewItem,
-  AppointmentSmsPreviewStatus,
   AppointmentSmsPreviewSummary,
-  AppointmentSmsSendMode,
   AppointmentSmsLogItem,
   AppointmentSmsLogStatus,
-  AppointmentStatus,
   ParentContactRecord,
   ParentRelationship,
   RemedialAttendanceState,
@@ -52,15 +48,16 @@ import type {
   AttendanceTimestampField,
   TutoringBoardClass,
   TeacherTutoringStatus,
+  Student,
 } from '../types';
 import { API } from '../lib/api';
 import {
   formatGregorianToJalali,
   getTodayGregorianIso,
   toPersianDigits,
+  JALALI_WEEKDAYS,
 } from '../lib/jalali';
 import {
-  validateAppointmentForm,
   validateParentContactForm,
   validateWeekSessionForm,
   validateRemedialClassForm,
@@ -68,25 +65,22 @@ import {
   type FieldErrors,
 } from '../lib/form-validation';
 import {
-  resolveCardAppointmentStatus,
-  formatCardDateLabel,
-  formatCardStartTime,
-  categorizeBulkSmsSelection,
-  buildSmsMessagePreview,
+  normalizeTimeInput,
+  isValidAppointmentTimeHm,
+  computeSpreadsheetSyncPlan,
+  type ExistingDayAppointment,
 } from '../lib/appointments-logic';
-import { ConfirmModal } from '../components/ConfirmModal';
 import { ActionButton, FieldError } from '../components/FormControls';
 
 interface AppointmentsPageProps {
   showToast: (message: string, type?: ToastType) => void;
 }
 
-type PreviewChipFilter =
-  | 'all'
-  | AppointmentSmsPreviewStatus
-  | 'multiple_appointments';
-
 type MainTab = 'appointments' | 'remedial';
+
+type SpreadsheetField = 'تجربی' | 'ریاضی' | 'انسانی';
+
+const ACADEMIC_FIELDS: SpreadsheetField[] = ['تجربی', 'ریاضی', 'انسانی'];
 
 const RELATIONSHIP_LABELS: Record<ParentRelationship, string> = {
   father: 'پدر',
@@ -140,7 +134,8 @@ function buildWeekSession(
 }
 
 export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast }) => {
-  const initialSatIso = useMemo(() => getSaturdayOfWeek(getTodayGregorianIso()), []);
+  const todayIso = useMemo(() => getTodayGregorianIso(), []);
+  const initialSatIso = useMemo(() => getSaturdayOfWeek(todayIso), [todayIso]);
 
   // Navigation & Compact Week Selection
   const [activeTab, setActiveTab] = useState<MainTab>('appointments');
@@ -148,6 +143,19 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     buildWeekSession(initialSatIso, 1, 'هفته جاری'),
   ]);
   const [selectedWeekId, setSelectedWeekId] = useState<number>(1);
+
+  // Excel-like Appointment Sheet State: Field Tab + Selected Day + Inline Time Drafts
+  const [appointmentFieldTab, setAppointmentFieldTab] =
+    useState<SpreadsheetField>('تجربی');
+  const [selectedDayIso, setSelectedDayIso] = useState<string>(todayIso);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [draftTimesByDay, setDraftTimesByDay] = useState<
+    Record<string, Record<number, string>>
+  >({});
+  const [allAppointments, setAllAppointments] = useState<AppointmentRecord[]>([]);
+  const [isSubmittingSheet, setIsSubmittingSheet] = useState<boolean>(false);
+  const [isSavingOnly, setIsSavingOnly] = useState<boolean>(false);
+  const timeInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
 
   // Backend Data State
   const [items, setItems] = useState<AppointmentSmsPreviewItem[]>([]);
@@ -161,58 +169,11 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorState, setErrorState] = useState<string | null>(null);
 
-  // Filters & Search
-  const [chipFilter, setChipFilter] = useState<PreviewChipFilter>('all');
-  const [fieldFilter, setFieldFilter] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-
-  // Multi-Select State & Long-Press Refs
-  const [isSelectionMode, setIsSelectionMode] = useState<boolean>(false);
-  const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([]);
-  const longPressTimerRef = useRef<number | null>(null);
-  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
-  const longPressedRef = useRef<boolean>(false);
-
   // SMS Log Drawer State
   const [isLogDrawerOpen, setIsLogDrawerOpen] = useState<boolean>(false);
   const [logStatusFilter, setLogStatusFilter] = useState<
     'all' | AppointmentSmsLogStatus
   >('all');
-
-  // Bulk SMS Bottom Sheet State
-  const [isSmsSheetOpen, setIsSmsSheetOpen] = useState<boolean>(false);
-  const [smsSheetMode, setSmsSheetMode] = useState<AppointmentSmsSendMode>('unsent');
-  const [smsSheetCandidateIds, setSmsSheetCandidateIds] = useState<number[]>([]);
-  const [smsSheetCheckedIds, setSmsSheetCheckedIds] = useState<number[]>([]);
-  const [isSendingSms, setIsSendingSms] = useState<boolean>(false);
-  const [lastSendBreakdown, setLastSendBreakdown] = useState<{
-    sent: number;
-    failed: number;
-    skipped: number;
-  } | null>(null);
-
-  // Edit / Create Appointment Bottom-Sheet Modal State
-  const [editingItem, setEditingItem] = useState<AppointmentSmsPreviewItem | null>(
-    null
-  );
-  const [appointmentForm, setAppointmentForm] = useState({
-    appointment_date: '',
-    start_time: '',
-    arrival_time: '',
-    exam_start_time: '',
-    exam_end_time: '',
-    appointment_status: 'confirmed' as AppointmentStatus,
-    description: '',
-  });
-  const [appointmentErrors, setAppointmentErrors] = useState<
-    FieldErrors<'appointment_date' | 'start_time'>
-  >({});
-  const [isSavingAppointment, setIsSavingAppointment] = useState<boolean>(false);
-
-  // Cancel Appointment Confirm State
-  const [cancelingItem, setCancelingItem] = useState<AppointmentSmsPreviewItem | null>(
-    null
-  );
 
   // Parent Contacts Modal State (/api/v1/students/{studentId}/parent-contacts)
   const [contactModalStudent, setContactModalStudent] =
@@ -251,18 +212,20 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
   const [remedialStatusFilter, setRemedialStatusFilter] = useState<
     'all' | RemedialAttendanceState
   >('all');
-  const [remedialDate, setRemedialDate] = useState<string>(() => getTodayGregorianIso());
+  const [remedialDate, setRemedialDate] = useState<string>(todayIso);
   const [attendanceEntries, setAttendanceEntries] = useState<AttendanceEntry[]>([]);
   const [updatingCellKey, setUpdatingCellKey] = useState<string | null>(null);
   const [updatingTimeKey, setUpdatingTimeKey] = useState<string | null>(null);
   const [teacherStatus, setTeacherStatus] = useState<TeacherTutoringStatus>('ready');
-  const [isUpdatingTeacherStatus, setIsUpdatingTeacherStatus] = useState<boolean>(false);
+  const [isUpdatingTeacherStatus, setIsUpdatingTeacherStatus] =
+    useState<boolean>(false);
   const [isAddClassModalOpen, setIsAddClassModalOpen] = useState<boolean>(false);
   const [newClassForm, setNewClassForm] = useState({
     class_name: '',
     teacher_name: '',
   });
-  const [newClassErrors, setNewClassErrors] = useState<FieldErrors<'class_name'>>({});
+  const [newClassErrors, setNewClassErrors] =
+    useState<FieldErrors<'class_name'>>({});
 
   // Add Guest Student Modal State (POST /api/v1/attendance/guests)
   const [isAddGuestModalOpen, setIsAddGuestModalOpen] = useState<boolean>(false);
@@ -280,6 +243,30 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     () => weeks.find((w) => w.id === selectedWeekId) || weeks[0],
     [weeks, selectedWeekId]
   );
+
+  // Days of the current Saturday–Friday week
+  const weekDays = useMemo(() => {
+    return Array.from({ length: 7 }, (_, idx) => {
+      const iso = addDaysIso(currentWeek.week_date, idx);
+      const jalali = formatGregorianToJalali(iso);
+      const shortJalali = jalali.slice(5); // MM/DD
+      return {
+        iso,
+        weekday: JALALI_WEEKDAYS[idx] || '',
+        jalali,
+        shortJalali,
+      };
+    });
+  }, [currentWeek.week_date]);
+
+  // Keep selectedDayIso inside currentWeek when week changes
+  useEffect(() => {
+    const start = currentWeek.week_date;
+    const end = addDaysIso(start, 6);
+    if (selectedDayIso < start || selectedDayIso > end) {
+      setSelectedDayIso(start);
+    }
+  }, [currentWeek.week_date, selectedDayIso]);
 
   const extractHmFromTimestamp = (ts?: string | null): string | undefined => {
     if (!ts) return undefined;
@@ -330,7 +317,8 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
             nextMap.set(classId, {
               id: classId,
               field: resolvedField,
-              class_name: b.classroom_name || prevCol?.class_name || `کلاس #${classId}`,
+              class_name:
+                b.classroom_name || prevCol?.class_name || `کلاس #${classId}`,
               teacher_name: b.teacher_name || prevCol?.teacher_name,
               instructor_id: b.instructor_id,
               teacher_status: b.status,
@@ -346,48 +334,30 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
       if (attRes.status === 'fulfilled') {
         const entries = attRes.value.data?.entries || [];
         setAttendanceEntries(entries);
-        if (entries.length > 0) {
-          setItems((prevItems) =>
-            prevItems.map((item) => {
-              const entry = entries.find((e) => e.student_id === item.student_id);
-              if (!entry) return item;
-              return {
-                ...item,
-                arrival_time:
-                  extractHmFromTimestamp(entry.arrived_at) ||
-                  item.arrival_time ||
-                  null,
-                exam_start_time:
-                  extractHmFromTimestamp(entry.exam_started_at) ||
-                  item.exam_start_time ||
-                  null,
-                exam_end_time:
-                  extractHmFromTimestamp(entry.exam_ended_at) ||
-                  item.exam_end_time ||
-                  null,
-              };
-            })
-          );
-        }
       }
     },
     []
   );
 
-  // Fetch preview, logs, tutoring board & daily attendance from backend API
+  // Fetch preview, students list, appointments list, logs, tutoring board & daily attendance
   const fetchWeekData = useCallback(
     async (weekDate: string, showRefreshToast = false) => {
       setIsLoading(true);
       setErrorState(null);
       try {
-        const [previewRes, logRes] = await Promise.allSettled([
-          API.getAppointmentsSmsPreview(weekDate),
-          API.getAppointmentsSmsLog({ week_date: weekDate, per_page: 50 }),
-        ]);
+        const [previewRes, logRes, apptsRes, studentsRes] =
+          await Promise.allSettled([
+            API.getAppointmentsSmsPreview(weekDate),
+            API.getAppointmentsSmsLog({ week_date: weekDate, per_page: 50 }),
+            API.getAppointmentsList({ page: 1, per_page: 200 }),
+            API.getStudentsList(),
+          ]);
+
+        let mergedItems: AppointmentSmsPreviewItem[] = [];
 
         if (previewRes.status === 'fulfilled') {
           const data = previewRes.value.data;
-          setItems(data?.items || []);
+          mergedItems = [...(data?.items || [])];
           setServerSummary(data?.summary || null);
 
           if (data?.week_start) {
@@ -411,13 +381,52 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
             );
           }
         } else {
-          setItems([]);
           setServerSummary(null);
           const errMsg =
             (previewRes.reason as Error)?.message ||
             'خطا در دریافت لیست نوبت‌های هفتگی از سرور';
           setErrorState(errMsg);
           showToast(errMsg, 'error');
+        }
+
+        // Merge any active students from /api/v1/students if not already present in preview
+        if (studentsRes.status === 'fulfilled') {
+          const rawStudents: Student[] = studentsRes.value.data || [];
+          const knownIds = new Set(mergedItems.map((i) => i.student_id));
+          for (const st of rawStudents) {
+            if (st.is_active !== 0 && !knownIds.has(st.id)) {
+              knownIds.add(st.id);
+              mergedItems.push({
+                student_id: st.id,
+                student_name: st.name,
+                grade: st.grade,
+                field: st.field,
+                status: 'no_appointment',
+                recipient_type: 'parent',
+                parent_name: null,
+                mobile: null,
+                mobile_mask: null,
+                appointment_id: null,
+                appointment_date: null,
+                start_time: null,
+                end_time: null,
+                appointment_at: null,
+                active_appointments_count: 0,
+                multiple_appointments: false,
+                last_error: null,
+                last_sent_at: null,
+                attempts: 0,
+              });
+            }
+          }
+        }
+
+        setItems(mergedItems);
+
+        if (apptsRes.status === 'fulfilled') {
+          setAllAppointments(apptsRes.value.data || []);
+        } else {
+          setAllAppointments([]);
         }
 
         if (logRes.status === 'fulfilled') {
@@ -429,7 +438,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         await fetchRemedialAndAttendanceData(remedialDate);
 
         if (showRefreshToast && previewRes.status === 'fulfilled') {
-          showToast('اطلاعات نوبت‌ها و کلاس‌های رفع اشکال از سرور بروزرسانی شد', 'info');
+          showToast('اطلاعات نوبت‌ها از سرور بروزرسانی شد', 'info');
         }
       } catch (err) {
         const errMsg = (err as Error)?.message || 'خطا در برقراری ارتباط با سرور';
@@ -457,16 +466,20 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
 
   // Navigate to previous / next week dynamically
   const handleShiftWeek = (deltaDays: number) => {
-    const targetSat = getSaturdayOfWeek(addDaysIso(currentWeek.week_date, deltaDays));
+    const targetSat = getSaturdayOfWeek(
+      addDaysIso(currentWeek.week_date, deltaDays)
+    );
     const existing = weeks.find((w) => w.week_date === targetSat);
     if (existing) {
       setSelectedWeekId(existing.id);
+      setSelectedDayIso(targetSat);
       return;
     }
     const newId = Date.now();
     const created = buildWeekSession(targetSat, newId);
     setWeeks((prev) => [created, ...prev]);
     setSelectedWeekId(newId);
+    setSelectedDayIso(targetSat);
   };
 
   // Summary counts
@@ -510,384 +523,387 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     };
   }, [items, serverSummary]);
 
-  // Filtered Card Items
-  const filteredItems = useMemo(() => {
-    return items.filter((item) => {
-      if (fieldFilter !== 'all' && item.field !== fieldFilter) return false;
+  // Existing appointments on selectedDayIso indexed by student_id
+  const existingAppointmentsForSelectedDay = useMemo(() => {
+    const map: Record<number, ExistingDayAppointment | undefined> = {};
 
+    // 1. From preview items (including nested item.appointments array if provided by backend)
+    for (const item of items) {
+      const itemWithList = item as AppointmentSmsPreviewItem & {
+        appointments?: Array<{
+          id: number;
+          date?: string;
+          appointment_date?: string;
+          time_start?: string;
+          start_time?: string;
+          status?: string;
+        }>;
+      };
+
+      if (Array.isArray(itemWithList.appointments)) {
+        for (const ap of itemWithList.appointments) {
+          const apDate = ap.appointment_date || ap.date;
+          const apTime = ap.start_time || ap.time_start;
+          if (
+            apDate === selectedDayIso &&
+            apTime &&
+            ap.status !== 'cancelled' &&
+            ap.status !== 'canceled'
+          ) {
+            map[item.student_id] = {
+              appointment_id: ap.id,
+              student_id: item.student_id,
+              appointment_date: apDate,
+              start_time: String(apTime).slice(0, 5),
+            };
+          }
+        }
+      }
+
+      if (
+        item.appointment_id &&
+        item.appointment_date === selectedDayIso &&
+        item.start_time &&
+        item.appointment_status !== 'cancelled' &&
+        item.appointment_status !== 'canceled'
+      ) {
+        map[item.student_id] = {
+          appointment_id: item.appointment_id,
+          student_id: item.student_id,
+          appointment_date: item.appointment_date,
+          start_time: String(item.start_time).slice(0, 5),
+        };
+      }
+    }
+
+    // 2. From /api/v1/appointments list
+    for (const ap of allAppointments) {
+      if (
+        ap.appointment_date === selectedDayIso &&
+        ap.start_time &&
+        ap.status !== 'cancelled' &&
+        ap.status !== 'canceled'
+      ) {
+        map[ap.student_id] = {
+          appointment_id: ap.id,
+          student_id: ap.student_id,
+          appointment_date: ap.appointment_date,
+          start_time: String(ap.start_time).slice(0, 5),
+        };
+      }
+    }
+
+    return map;
+  }, [items, allAppointments, selectedDayIso]);
+
+  // Draft map for current selectedDayIso
+  const currentDayDrafts = useMemo(
+    () => draftTimesByDay[selectedDayIso] || {},
+    [draftTimesByDay, selectedDayIso]
+  );
+
+  // Get displayed value for a student's time input on selectedDayIso
+  const getStudentInputTime = useCallback(
+    (studentId: number): string => {
+      if (studentId in currentDayDrafts) {
+        return currentDayDrafts[studentId];
+      }
+      return existingAppointmentsForSelectedDay[studentId]?.start_time || '';
+    },
+    [currentDayDrafts, existingAppointmentsForSelectedDay]
+  );
+
+  const handleTimeInputChange = (studentId: number, value: string) => {
+    setDraftTimesByDay((prev) => ({
+      ...prev,
+      [selectedDayIso]: {
+        ...(prev[selectedDayIso] || {}),
+        [studentId]: value,
+      },
+    }));
+  };
+
+  const handleTimeInputBlur = (studentId: number) => {
+    const currentVal = getStudentInputTime(studentId);
+    if (!currentVal.trim()) return;
+    const normalized = normalizeTimeInput(currentVal);
+    if (normalized !== currentVal) {
+      handleTimeInputChange(studentId, normalized);
+    }
+  };
+
+  // Students filtered by selected academic field tab & search query
+  const spreadsheetStudents = useMemo(() => {
+    return items.filter((item) => {
+      const itemField = item.field || 'تجربی';
+      if (itemField !== appointmentFieldTab) return false;
       if (searchQuery.trim() !== '') {
         const q = searchQuery.trim();
-        const phoneStr = item.mobile_mask || item.mobile || '';
-        const parentStr = item.parent_name || '';
-        const supporterStr = item.supporter_name || '';
-        if (
-          !String(item.student_name ?? '').includes(q) &&
-          !phoneStr.includes(q) &&
-          !parentStr.includes(q) &&
-          !supporterStr.includes(q)
-        ) {
+        if (!String(item.student_name ?? '').includes(q)) {
           return false;
         }
       }
-
-      if (chipFilter === 'multiple_appointments') {
-        return item.multiple_appointments;
-      }
-      if (chipFilter !== 'all') {
-        return item.status === chipFilter;
-      }
-
       return true;
     });
-  }, [items, fieldFilter, searchQuery, chipFilter]);
+  }, [items, appointmentFieldTab, searchQuery]);
 
-  // Selection Helpers & Auto-exit when 0 selected
-  const allFilteredSelected =
-    filteredItems.length > 0 &&
-    filteredItems.every((i) => selectedStudentIds.includes(i.student_id));
+  // Counts per field tab
+  const fieldTabCounts = useMemo(() => {
+    const counts: Record<SpreadsheetField, { total: number; filled: number }> = {
+      تجربی: { total: 0, filled: 0 },
+      ریاضی: { total: 0, filled: 0 },
+      انسانی: { total: 0, filled: 0 },
+    };
 
-  const exitSelectionMode = useCallback(() => {
-    setIsSelectionMode(false);
-    setSelectedStudentIds([]);
-  }, []);
-
-  const toggleSelectOne = useCallback((studentId: number) => {
-    setSelectedStudentIds((prev) => {
-      const exists = prev.includes(studentId);
-      const next = exists
-        ? prev.filter((id) => id !== studentId)
-        : [...prev, studentId];
-      if (next.length === 0) {
-        setIsSelectionMode(false);
-      } else {
-        setIsSelectionMode(true);
-      }
-      return next;
-    });
-  }, []);
-
-  const toggleSelectAllFiltered = () => {
-    if (allFilteredSelected) {
-      const filteredSet = new Set(filteredItems.map((i) => i.student_id));
-      const remaining = selectedStudentIds.filter((id) => !filteredSet.has(id));
-      setSelectedStudentIds(remaining);
-      if (remaining.length === 0) {
-        setIsSelectionMode(false);
-      }
-    } else {
-      const combined = Array.from(
-        new Set([
-          ...selectedStudentIds,
-          ...filteredItems.map((i) => i.student_id),
-        ])
-      );
-      setSelectedStudentIds(combined);
-      if (combined.length > 0) {
-        setIsSelectionMode(true);
+    for (const item of items) {
+      const f: SpreadsheetField =
+        item.field === 'ریاضی' || item.field === 'انسانی' ? item.field : 'تجربی';
+      counts[f].total += 1;
+      const t = getStudentInputTime(item.student_id).trim();
+      if (t && isValidAppointmentTimeHm(t)) {
+        counts[f].filled += 1;
       }
     }
-  };
 
-  // Long-press (~450ms) gesture handlers on cards
-  const clearLongPressTimer = () => {
-    if (longPressTimerRef.current !== null) {
-      window.clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-  };
+    return counts;
+  }, [items, getStudentInputTime]);
 
-  const handleCardPointerDown = (
-    e: React.PointerEvent<HTMLDivElement>,
+  // Sync plan across ALL students for selectedDayIso (so switching field tabs never loses edits)
+  const syncPlan = useMemo(
+    () =>
+      computeSpreadsheetSyncPlan(
+        items,
+        existingAppointmentsForSelectedDay,
+        currentDayDrafts
+      ),
+    [items, existingAppointmentsForSelectedDay, currentDayDrafts]
+  );
+
+  const pendingChangesCount =
+    syncPlan.toCreate.length + syncPlan.toUpdate.length + syncPlan.toDelete.length;
+
+  // Excel-like Enter / ArrowDown / ArrowUp navigation between row inputs
+  const handleTimeInputKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    rowIndex: number,
     studentId: number
   ) => {
-    if (e.button !== 0 && e.pointerType === 'mouse') return;
-    touchStartPosRef.current = { x: e.clientX, y: e.clientY };
-    longPressedRef.current = false;
-    clearLongPressTimer();
-
-    longPressTimerRef.current = window.setTimeout(() => {
-      longPressedRef.current = true;
-      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-        try {
-          navigator.vibrate(20);
-        } catch {
-          // ignore vibration permission error
-        }
+    if (e.key === 'Enter' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      handleTimeInputBlur(studentId);
+      const nextStudent = spreadsheetStudents[rowIndex + 1];
+      if (nextStudent) {
+        const nextEl = timeInputRefs.current[nextStudent.student_id];
+        nextEl?.focus();
+        nextEl?.select();
       }
-      setIsSelectionMode(true);
-      setSelectedStudentIds((prev) =>
-        prev.includes(studentId) ? prev : [...prev, studentId]
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      handleTimeInputBlur(studentId);
+      const prevStudent = spreadsheetStudents[rowIndex - 1];
+      if (prevStudent) {
+        const prevEl = timeInputRefs.current[prevStudent.student_id];
+        prevEl?.focus();
+        prevEl?.select();
+      }
+    }
+  };
+
+  // Save all entered/modified times for selectedDayIso, and optionally dispatch SMS immediately
+  const handlePersistAndSend = async (sendSmsAfterSave: boolean) => {
+    if (syncPlan.invalidRows.length > 0) {
+      const firstInvalid = syncPlan.invalidRows[0];
+      showToast(
+        `ساعت واردشده برای «${firstInvalid.student_name}» معتبر نیست (فرمت صحیح: مثلاً ۱۴:۳۰)`,
+        'error'
       );
-    }, 450);
-  };
-
-  const handleCardPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!touchStartPosRef.current || longPressTimerRef.current === null) return;
-    const dx = e.clientX - touchStartPosRef.current.x;
-    const dy = e.clientY - touchStartPosRef.current.y;
-    if (Math.hypot(dx, dy) > 10) {
-      clearLongPressTimer();
-    }
-  };
-
-  const handleCardPointerUpOrCancel = () => {
-    clearLongPressTimer();
-    touchStartPosRef.current = null;
-  };
-
-  const handleCardClick = (item: AppointmentSmsPreviewItem) => {
-    if (longPressedRef.current) {
-      longPressedRef.current = false;
-      return;
-    }
-    if (isSelectionMode) {
-      toggleSelectOne(item.student_id);
-      return;
-    }
-    openEditAppointment(item);
-  };
-
-  // Bulk SMS Bottom Sheet categorization
-  const bulkSmsCandidateItems = useMemo(
-    () => items.filter((i) => smsSheetCandidateIds.includes(i.student_id)),
-    [items, smsSheetCandidateIds]
-  );
-
-  const bulkCategorization = useMemo(
-    () => categorizeBulkSmsSelection(bulkSmsCandidateItems),
-    [bulkSmsCandidateItems]
-  );
-
-  const openBulkSmsSheet = (
-    mode: AppointmentSmsSendMode,
-    useSelectedOnly = false
-  ) => {
-    setLastSendBreakdown(null);
-    let candidateList: AppointmentSmsPreviewItem[] = [];
-
-    if (useSelectedOnly) {
-      candidateList = items.filter((i) =>
-        selectedStudentIds.includes(i.student_id)
-      );
-    } else if (mode === 'unsent') {
-      candidateList = items.filter((i) => i.status === 'will_send');
-    } else if (mode === 'failed') {
-      candidateList = items.filter((i) => i.status === 'failed');
-    } else if (mode === 'changed') {
-      candidateList = items.filter((i) => i.status === 'changed_since_sent');
-    }
-
-    if (candidateList.length === 0) {
-      showToast('هیچ دانش‌آموزی واجد شرایط این حالت ارسال پیامک نیست', 'warning');
+      timeInputRefs.current[firstInvalid.student_id]?.focus();
       return;
     }
 
-    const cat = categorizeBulkSmsSelection(candidateList);
-    setSmsSheetMode(mode);
-    setSmsSheetCandidateIds(candidateList.map((i) => i.student_id));
-    setSmsSheetCheckedIds(cat.defaultCheckedStudentIds);
-    setIsSmsSheetOpen(true);
-  };
+    if (
+      !sendSmsAfterSave &&
+      pendingChangesCount === 0
+    ) {
+      showToast('تغییر جدیدی برای ذخیره وجود ندارد', 'info');
+      return;
+    }
 
-  const toggleSmsRecipientGroup = (groupStudentIds: number[]) => {
-    const allChecked = groupStudentIds.every((id) =>
-      smsSheetCheckedIds.includes(id)
-    );
-    if (allChecked) {
-      setSmsSheetCheckedIds((prev) =>
-        prev.filter((id) => !groupStudentIds.includes(id))
+    if (
+      sendSmsAfterSave &&
+      pendingChangesCount === 0 &&
+      syncPlan.activeStudentIdsWithTime.length === 0 &&
+      summary.will_send === 0 &&
+      summary.changed_since_sent === 0
+    ) {
+      showToast(
+        'ابتدا ساعت نوبت حداقل یک دانش‌آموز را در جدول وارد کنید',
+        'warning'
       );
+      return;
+    }
+
+    if (sendSmsAfterSave) {
+      setIsSubmittingSheet(true);
     } else {
-      setSmsSheetCheckedIds((prev) =>
-        Array.from(new Set([...prev, ...groupStudentIds]))
-      );
+      setIsSavingOnly(true);
     }
-  };
-
-  // Unique phone count among currently checked student IDs
-  const checkedUniquePhoneCount = useMemo(() => {
-    const phones = new Set<string>();
-    for (const group of bulkCategorization.recipientGroups) {
-      const hasChecked = group.students.some((s) =>
-        smsSheetCheckedIds.includes(s.student_id)
-      );
-      if (hasChecked) {
-        phones.add(group.phoneKey);
-      }
-    }
-    return phones.size;
-  }, [bulkCategorization.recipientGroups, smsSheetCheckedIds]);
-
-  const handleConfirmSendSms = async () => {
-    if (smsSheetCheckedIds.length === 0) {
-      showToast('حداقل یک گیرنده معتبر برای ارسال پیامک انتخاب کنید', 'warning');
-      return;
-    }
-
-    setIsSendingSms(true);
-    const operationId = `op-${currentWeek.week_date.replace(/-/g, '')}-${Date.now()}`;
 
     try {
-      const res = await API.sendAppointmentsSms({
-        week_date: currentWeek.week_date,
-        mode: smsSheetMode,
-        student_ids: smsSheetCheckedIds,
-        operation_id: operationId,
+      let savedCount = 0;
+      let deletedCount = 0;
+
+      // 1. Delete cleared appointments
+      for (const delItem of syncPlan.toDelete) {
+        await API.deleteAppointment(delItem.appointment_id);
+        deletedCount += 1;
+      }
+
+      // 2. Update modified appointments (PUT or DELETE + POST fallback)
+      for (const updItem of syncPlan.toUpdate) {
+        try {
+          await API.upsertAppointment({
+            id: updItem.appointment_id,
+            student_id: updItem.student_id,
+            appointment_date: selectedDayIso,
+            start_time: updItem.start_time,
+            status: 'confirmed',
+          });
+        } catch {
+          await API.deleteAppointment(updItem.appointment_id);
+          await API.upsertAppointment({
+            student_id: updItem.student_id,
+            appointment_date: selectedDayIso,
+            start_time: updItem.start_time,
+            status: 'confirmed',
+          });
+        }
+        savedCount += 1;
+      }
+
+      // 3. Create newly entered appointments
+      for (const newItem of syncPlan.toCreate) {
+        await API.upsertAppointment({
+          student_id: newItem.student_id,
+          appointment_date: selectedDayIso,
+          start_time: newItem.start_time,
+          status: 'confirmed',
+        });
+        savedCount += 1;
+      }
+
+      // Clear local draft overrides for selectedDayIso now that they're persisted
+      setDraftTimesByDay((prev) => {
+        const next = { ...prev };
+        delete next[selectedDayIso];
+        return next;
       });
 
-      const sentCount = res.data?.summary?.sent ?? 0;
-      const failedCount = res.data?.summary?.failed ?? 0;
-      const skippedCount =
-        (res.data?.summary?.skipped_no_phone ?? 0) +
-        (res.data?.summary?.skipped ?? 0);
-
-      await fetchWeekData(currentWeek.week_date, false);
-      exitSelectionMode();
-
-      if (failedCount > 0) {
-        setLastSendBreakdown({
-          sent: sentCount,
-          failed: failedCount,
-          skipped: skippedCount,
-        });
-        showToast(
-          `ارسال پیامک: ${toPersianDigits(sentCount)} موفق، ${toPersianDigits(failedCount)} ناموفق`,
-          sentCount > 0 ? 'warning' : 'error'
+      // 4. If sendSmsAfterSave is true, dispatch SMS reminders via POST /api/v1/appointments/sms/send
+      if (sendSmsAfterSave) {
+        const targetStudentIds = Array.from(
+          new Set([
+            ...syncPlan.toCreate.map((i) => i.student_id),
+            ...syncPlan.toUpdate.map((i) => i.student_id),
+            ...syncPlan.activeStudentIdsWithTime,
+          ])
         );
+
+        let totalSent = 0;
+        let totalFailed = 0;
+
+        // Send unsent appointments
+        const unsentRes = await API.sendAppointmentsSms({
+          week_date: currentWeek.week_date,
+          mode: 'unsent',
+          student_ids: targetStudentIds.length > 0 ? targetStudentIds : undefined,
+          operation_id: `op-unsent-${currentWeek.week_date.replace(/-/g, '')}-${Date.now()}`,
+        });
+        totalSent += unsentRes.data?.summary?.sent ?? 0;
+        totalFailed += unsentRes.data?.summary?.failed ?? 0;
+
+        // If any existing appointments were updated, also send 'changed' mode for them
+        if (syncPlan.toUpdate.length > 0 || summary.changed_since_sent > 0) {
+          const changedIds = syncPlan.toUpdate.map((u) => u.student_id);
+          try {
+            const changedRes = await API.sendAppointmentsSms({
+              week_date: currentWeek.week_date,
+              mode: 'changed',
+              student_ids: changedIds.length > 0 ? changedIds : undefined,
+              operation_id: `op-changed-${currentWeek.week_date.replace(/-/g, '')}-${Date.now()}`,
+            });
+            totalSent += changedRes.data?.summary?.sent ?? 0;
+            totalFailed += changedRes.data?.summary?.failed ?? 0;
+          } catch {
+            // Ignore if no changed items needed SMS
+          }
+        }
+
+        await fetchWeekData(currentWeek.week_date, false);
+
+        if (totalFailed > 0) {
+          showToast(
+            `${toPersianDigits(savedCount)} نوبت ذخیره شد • پیامک: ${toPersianDigits(totalSent)} موفق، ${toPersianDigits(totalFailed)} ناموفق`,
+            'warning'
+          );
+        } else {
+          showToast(
+            `نوبت‌ها ثبت و پیامک یادآوری برای ${toPersianDigits(totalSent)} نفر ارسال شد`,
+            'success'
+          );
+        }
       } else {
-        setIsSmsSheetOpen(false);
+        await fetchWeekData(currentWeek.week_date, false);
         showToast(
-          `پیامک یادآوری برای ${toPersianDigits(sentCount)} گیرنده ارسال شد`,
+          `${toPersianDigits(savedCount)} نوبت ذخیره${
+            deletedCount > 0 ? ` و ${toPersianDigits(deletedCount)} نوبت حذف` : ''
+          } شد`,
           'success'
         );
       }
     } catch (err) {
-      showToast((err as Error)?.message || 'خطا در ارسال پیامک نوبت‌ها', 'error');
-    } finally {
-      setIsSendingSms(false);
-    }
-  };
-
-  // Single Tap -> Open Edit / Create Appointment Bottom-Sheet Modal
-  const openEditAppointment = (item: AppointmentSmsPreviewItem) => {
-    setEditingItem(item);
-    const defaultStart = String(item.start_time || '10:00').slice(0, 5);
-    setAppointmentForm({
-      appointment_date: item.appointment_date || currentWeek.week_date,
-      start_time: defaultStart,
-      arrival_time: item.arrival_time || '',
-      exam_start_time: item.exam_start_time || '',
-      exam_end_time: item.exam_end_time || '',
-      appointment_status: item.appointment_status || 'confirmed',
-      description: item.description || '',
-    });
-    setAppointmentErrors({});
-  };
-
-  const handleSaveAppointment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingItem) return;
-
-    const errors = validateAppointmentForm({
-      appointment_date: appointmentForm.appointment_date,
-      start_time: appointmentForm.start_time,
-    });
-    setAppointmentErrors(errors);
-    if (hasErrors(errors)) return;
-
-    setIsSavingAppointment(true);
-    try {
-      await API.upsertAppointment({
-        id: editingItem.appointment_id,
-        student_id: editingItem.student_id,
-        appointment_date: appointmentForm.appointment_date,
-        start_time: appointmentForm.start_time.trim().slice(0, 5),
-        status: appointmentForm.appointment_status,
-        description: appointmentForm.description.trim() || null,
-      });
-
-      // Sync arrival & exam times with /api/v1/attendance/entries and /api/v1/attendance/{id}/times
-      const hasAnyAttendanceTime = Boolean(
-        appointmentForm.arrival_time.trim() ||
-          appointmentForm.exam_start_time.trim() ||
-          appointmentForm.exam_end_time.trim()
+      showToast(
+        (err as Error)?.message || 'خطا در ثبت نوبت‌ها یا ارسال پیامک',
+        'error'
       );
-      if (hasAnyAttendanceTime || appointmentForm.appointment_status === 'absent') {
-        try {
-          const attDate = appointmentForm.appointment_date || currentWeek.week_date;
-          const upserted = await API.upsertAttendanceEntry({
-            date: attDate,
-            student_id: editingItem.student_id,
-            status:
-              appointmentForm.appointment_status === 'absent' ? 'absent' : 'present',
-          });
-          const entryId = upserted.data?.id;
-          if (entryId) {
-            const timePatches: Array<{
-              field: AttendanceTimestampField;
-              val: string;
-            }> = [
-              { field: 'arrived_at', val: appointmentForm.arrival_time.trim() },
-              {
-                field: 'exam_started_at',
-                val: appointmentForm.exam_start_time.trim(),
-              },
-              { field: 'exam_ended_at', val: appointmentForm.exam_end_time.trim() },
-            ];
-            for (const tp of timePatches) {
-              if (tp.val) {
-                await API.patchAttendanceTime(entryId, {
-                  field: tp.field,
-                  value: `${attDate} ${tp.val.slice(0, 5)}:00`,
-                });
-              }
-            }
-          }
-        } catch {
-          // Non-blocking if attendance endpoint is separate from appointment save
-        }
-      }
-
-      setEditingItem(null);
-      await fetchWeekData(currentWeek.week_date, false);
-      showToast(`نوبت «${editingItem.student_name}» ذخیره شد`, 'success');
-    } catch (err) {
-      showToast((err as Error)?.message || 'خطا در ذخیره نوبت در سرور', 'error');
     } finally {
-      setIsSavingAppointment(false);
+      setIsSubmittingSheet(false);
+      setIsSavingOnly(false);
     }
   };
 
-  // Cancel / Delete Appointment (DELETE /api/v1/appointments/{id})
-  const handleConfirmCancelAppointment = async () => {
-    if (!cancelingItem || !cancelingItem.appointment_id) {
-      setCancelingItem(null);
-      return;
-    }
-    try {
-      await API.deleteAppointment(cancelingItem.appointment_id);
-      const studentName = cancelingItem.student_name;
-      setCancelingItem(null);
-      setEditingItem(null);
-      await fetchWeekData(currentWeek.week_date, false);
-      showToast(`نوبت «${studentName}» لغو شد`, 'info');
-    } catch (err) {
-      showToast((err as Error)?.message || 'خطا در لغو نوبت', 'error');
+  // Clear a single student's appointment on selectedDayIso immediately or in draft
+  const handleClearStudentRowTime = async (studentId: number, studentName: string) => {
+    const existing = existingAppointmentsForSelectedDay[studentId];
+    if (existing && existing.appointment_id) {
+      try {
+        await API.deleteAppointment(existing.appointment_id);
+        setDraftTimesByDay((prev) => {
+          const dayMap = { ...(prev[selectedDayIso] || {}) };
+          delete dayMap[studentId];
+          return { ...prev, [selectedDayIso]: dayMap };
+        });
+        await fetchWeekData(currentWeek.week_date, false);
+        showToast(`نوبت «${studentName}» حذف شد`, 'info');
+      } catch (err) {
+        showToast((err as Error)?.message || 'خطا در حذف نوبت', 'error');
+      }
+    } else {
+      handleTimeInputChange(studentId, '');
     }
   };
 
-  // Parent Contacts Modal (/api/v1/students/{studentId}/parent-contacts)
+  // Parent Contacts Modal Handlers (/api/v1/students/{studentId}/parent-contacts)
   const openParentContactsModal = async (item: AppointmentSmsPreviewItem) => {
     setContactModalStudent(item);
     setContactForm({
-      parent_name: '',
+      parent_name: item.parent_name || '',
       relationship: 'father',
       phone: '',
       is_primary: true,
     });
     setContactErrors({});
     setIsLoadingContacts(true);
-
     try {
       const res = await API.getParentContacts(item.student_id);
       setParentContactsMap((prev) => ({
@@ -896,7 +912,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
       }));
     } catch (err) {
       showToast(
-        (err as Error)?.message || 'خطا در دریافت شماره‌های والدین از سرور',
+        (err as Error)?.message || 'خطا در دریافت شماره‌های تماس والدین',
         'error'
       );
     } finally {
@@ -915,9 +931,8 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     setContactErrors(errors);
     if (hasErrors(errors)) return;
 
-    setIsSavingContact(true);
     const studentId = contactModalStudent.student_id;
-
+    setIsSavingContact(true);
     try {
       await API.createParentContact(studentId, {
         parent_name: contactForm.parent_name.trim(),
@@ -931,6 +946,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         ...prev,
         [studentId]: updatedContactsRes.data || [],
       }));
+      await fetchWeekData(currentWeek.week_date, false);
 
       setContactForm({
         parent_name: '',
@@ -938,12 +954,8 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         phone: '',
         is_primary: false,
       });
-
-      await fetchWeekData(currentWeek.week_date, false);
-      showToast(
-        `شماره تماس ولی برای «${contactModalStudent.student_name}» ثبت شد`,
-        'success'
-      );
+      setContactErrors({});
+      showToast('شماره تماس ولی ثبت شد', 'success');
     } catch (err) {
       showToast((err as Error)?.message || 'خطا در ثبت شماره تماس ولی', 'error');
     } finally {
@@ -988,12 +1000,12 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     };
     setWeeks((prev) => [created, ...prev]);
     setSelectedWeekId(newId);
+    setSelectedDayIso(satIso);
     setIsNewWeekModalOpen(false);
     showToast(`«${created.title}» انتخاب شد`, 'success');
   };
 
   // Remedial Matrix Handlers (3-state: 'none' -> 'in_class' -> 'left_class')
-  // Connected directly to /api/v1/tutoring/sessions, /api/v1/tutoring/sessions/{id}/end & /api/v1/attendance*
   const getStudentClassAttendance = useCallback(
     (col: RemedialClassColumn, studentId: number): RemedialStudentAttendance => {
       if (col.student_states && col.student_states[studentId]) {
@@ -1038,7 +1050,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
       let serverExitedHm: string | undefined = current.exited_at;
 
       if (nextStatus === 'in_class') {
-        // 1. Start tutoring session on backend: POST /api/v1/tutoring/sessions
         const clientUuid = `tut-${remedialDate}-${classId}-${studentId}`;
         const sessionRes = await API.startTutoringSession({
           student_id: studentId,
@@ -1054,7 +1065,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
           current.entered_at ||
           nowHm;
 
-        // 2. Ensure student is marked present in Daily Attendance: PUT /api/v1/attendance/entries
         try {
           const attRes = await API.upsertAttendanceEntry({
             date: remedialDate,
@@ -1074,9 +1084,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
           // Tutoring session already recorded
         }
       } else if (nextStatus === 'left_class') {
-        // 1. End open tutoring session on backend: POST /api/v1/tutoring/sessions/{id}/end
         if (!resolvedSessionId) {
-          // Resolve open session via idempotent startTutoringSession first if session_id wasn't cached
           try {
             const clientUuid = `tut-${remedialDate}-${classId}-${studentId}`;
             const openRes = await API.startTutoringSession({
@@ -1095,7 +1103,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
           serverExitedHm =
             extractHmFromTimestamp(endedRes.data?.ended_at) || nowHm;
         } else {
-          // If classroom is managed via daily attendance timestamps, record departure time
           const existingEntry = attendanceEntries.find(
             (e) => e.student_id === studentId
           );
@@ -1122,7 +1129,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
           serverExitedHm = nowHm;
         }
       } else if (nextStatus === 'none') {
-        // Reset state: end open session if active
         if (resolvedSessionId && current.status === 'in_class') {
           try {
             await API.endTutoringSession(resolvedSessionId, nowIso);
@@ -1216,8 +1222,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     }
   };
 
-  // Record or clear daily attendance timestamp (arrived_at, exam_started_at, exam_ended_at, departed_at)
-  // via PUT /api/v1/attendance/entries + PATCH /api/v1/attendance/{id}/times
   const handleStampStudentAttendanceTime = async (
     studentId: number,
     studentName: string,
@@ -1229,7 +1233,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     setUpdatingTimeKey(key);
 
     try {
-      let entry = attendanceEntries.find((e) => e.student_id === studentId);
+      const entry = attendanceEntries.find((e) => e.student_id === studentId);
       let entryId = entry?.id ?? null;
 
       if (!entryId) {
@@ -1274,7 +1278,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     }
   };
 
-  // Change Teacher Tutoring Status (PUT /api/v1/tutoring/status)
   const handleChangeTeacherStatus = async (next: TeacherTutoringStatus) => {
     if (isUpdatingTeacherStatus) return;
     setIsUpdatingTeacherStatus(true);
@@ -1298,7 +1301,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     }
   };
 
-  // Add Guest Student to Daily Attendance (POST /api/v1/attendance/guests)
   const handleAddAttendanceGuest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!guestForm.guest_name.trim()) {
@@ -1468,535 +1470,576 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     getStudentClassAttendance,
   ]);
 
-  const renderCardStatusIcon = (key: string) => {
-    switch (key) {
-      case 'pending':
-        return <Clock className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />;
-      case 'confirmed':
-        return <Calendar className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />;
-      case 'completed':
-        return <CheckCircle2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />;
-      case 'absent':
-        return <XCircle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />;
-      default:
-        return <CalendarX2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />;
-    }
-  };
-
-  const samplePreviewStudent = useMemo(() => {
-    const firstChecked = items.find((i) =>
-      smsSheetCheckedIds.includes(i.student_id)
-    );
-    return firstChecked || bulkSmsCandidateItems[0] || items[0] || null;
-  }, [items, smsSheetCheckedIds, bulkSmsCandidateItems]);
+  const selectedDayMeta = useMemo(
+    () =>
+      weekDays.find((d) => d.iso === selectedDayIso) || {
+        iso: selectedDayIso,
+        weekday: '',
+        jalali: formatGregorianToJalali(selectedDayIso),
+        shortJalali: formatGregorianToJalali(selectedDayIso).slice(5),
+      },
+    [weekDays, selectedDayIso]
+  );
 
   return (
-    <div id="page-appointments" className="space-y-4 pb-24 max-w-full overflow-x-hidden">
-      {/* Compact Header Bar OR Multi-Select Action Header */}
-      {isSelectionMode ? (
-        <div
-          role="region"
-          aria-label="نوار انتخاب چندتایی"
-          className="sticky top-2 z-30 bg-[#344868] text-white rounded-2xl shadow-md px-3.5 py-2.5 flex items-center justify-between gap-2 transition-all"
-        >
-          <div className="flex items-center gap-2">
+    <div
+      id="page-appointments"
+      className="space-y-4 pb-24 max-w-full overflow-x-hidden"
+    >
+      {/* Top Bar: Week Navigation + Mode Switch (Appointments Sheet vs Remedial Matrix) + SMS Log */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-3 sm:p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {/* Week Navigation */}
+          <div className="flex items-center gap-1 bg-slate-100/90 border border-slate-200/70 rounded-xl p-1">
             <button
               type="button"
-              onClick={exitSelectionMode}
-              aria-label="خروج از حالت انتخاب"
-              className="min-w-[44px] min-h-[44px] rounded-xl inline-flex items-center justify-center hover:bg-white/15 active:bg-white/20 transition-colors cursor-pointer"
+              onClick={() => handleShiftWeek(-7)}
+              aria-label="هفته قبل"
+              title="هفته قبل"
+              className="min-w-[40px] min-h-[40px] rounded-lg inline-flex items-center justify-center text-slate-600 hover:bg-white hover:text-[#445D84] transition-colors cursor-pointer shrink-0"
             >
-              <X className="w-5 h-5" />
+              <ChevronRight className="w-4 h-4" />
             </button>
-            <span className="text-sm font-bold tabular-nums">
-              {toPersianDigits(selectedStudentIds.length)} مورد
-            </span>
+
+            <button
+              type="button"
+              onClick={() => {
+                setNewWeekForm({
+                  title: currentWeek.title,
+                  week_date: currentWeek.week_date,
+                  start_date_jalali: currentWeek.start_date_jalali,
+                  end_date_jalali: currentWeek.end_date_jalali,
+                });
+                setNewWeekErrors({});
+                setIsNewWeekModalOpen(true);
+              }}
+              className="min-h-[40px] px-3 py-1 rounded-lg hover:bg-white transition-colors text-center cursor-pointer whitespace-nowrap"
+              title="تغییر بازه هفته"
+            >
+              <span className="text-xs sm:text-sm font-bold text-slate-800 tabular-nums">
+                {toPersianDigits(currentWeek.start_date_jalali)} تا{' '}
+                {toPersianDigits(currentWeek.end_date_jalali)}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleShiftWeek(7)}
+              aria-label="هفته بعد"
+              title="هفته بعد"
+              className="min-w-[40px] min-h-[40px] rounded-lg inline-flex items-center justify-center text-slate-600 hover:bg-white hover:text-[#445D84] transition-colors cursor-pointer shrink-0"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={toggleSelectAllFiltered}
-            className="min-h-[44px] px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            {allFilteredSelected ? (
-              <>
-                <CheckSquare className="w-4 h-4" />
-                <span>لغو انتخاب همه</span>
-              </>
-            ) : (
-              <>
-                <Square className="w-4 h-4" />
-                <span>انتخاب همه</span>
-              </>
-            )}
-          </button>
-        </div>
-      ) : (
-        <div className="bg-white rounded-2xl shadow-xs border border-slate-200/80 p-2.5 sm:p-3.5 space-y-2.5">
-          {/* Compact Week Navigation + Quick Actions */}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            {/* Compact Week Bar: Prev Arrow + Week Date Range + Next Arrow */}
-            <div className="flex items-center gap-1 bg-slate-100/90 border border-slate-200/70 rounded-xl p-1 flex-1 sm:flex-initial justify-between sm:justify-start min-w-0">
-              <button
-                type="button"
-                onClick={() => handleShiftWeek(-7)}
-                aria-label="هفته قبل"
-                title="هفته قبل"
-                className="min-w-[44px] min-h-[44px] rounded-lg inline-flex items-center justify-center text-slate-600 hover:bg-white hover:text-[#445D84] transition-colors cursor-pointer shrink-0"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setNewWeekForm({
-                    title: currentWeek.title,
-                    week_date: currentWeek.week_date,
-                    start_date_jalali: currentWeek.start_date_jalali,
-                    end_date_jalali: currentWeek.end_date_jalali,
-                  });
-                  setNewWeekErrors({});
-                  setIsNewWeekModalOpen(true);
-                }}
-                className="min-h-[44px] px-2.5 py-1 rounded-lg hover:bg-white transition-colors text-center cursor-pointer truncate"
-                title="تغییر تاریخ هفته"
-              >
-                <span className="text-xs sm:text-sm font-bold text-slate-800 tabular-nums">
-                  {toPersianDigits(currentWeek.start_date_jalali)} تا{' '}
-                  {toPersianDigits(currentWeek.end_date_jalali)}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleShiftWeek(7)}
-                aria-label="هفته بعد"
-                title="هفته بعد"
-                className="min-w-[44px] min-h-[44px] rounded-lg inline-flex items-center justify-center text-slate-600 hover:bg-white hover:text-[#445D84] transition-colors cursor-pointer shrink-0"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Right Controls: Select Mode, SMS Log Drawer, Refresh */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {activeTab === 'appointments' && (
-                <button
-                  type="button"
-                  onClick={() => setIsSelectionMode(true)}
-                  className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <CheckSquare className="w-4 h-4 text-[#445D84]" />
-                  <span>انتخاب</span>
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => setIsLogDrawerOpen(true)}
-                className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                aria-label="لاگ پیامک"
-              >
-                <History className="w-4 h-4 text-[#445D84]" />
-                <span>لاگ ({toPersianDigits(smsLogs.length)})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => fetchWeekData(currentWeek.week_date, true)}
-                disabled={isLoading}
-                aria-label="بروزرسانی از سرور"
-                title="بروزرسانی از سرور"
-                className="min-w-[44px] min-h-[44px] rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
-              >
-                <RefreshCw
-                  className={`w-4 h-4 ${isLoading ? 'animate-spin text-[#445D84]' : ''}`}
-                />
-              </button>
-            </div>
+          {/* Sub-navigation: Appointments Spreadsheet vs Remedial Matrix */}
+          <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200/70">
+            <button
+              type="button"
+              onClick={() => setActiveTab('appointments')}
+              className={`min-h-[40px] flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'appointments'
+                  ? 'bg-[#445D84] text-white'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>جدول نوبت‌دهی ({toPersianDigits(summary.total)})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('remedial')}
+              className={`min-h-[40px] flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'remedial'
+                  ? 'bg-[#445D84] text-white'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>رفع اشکال ({toPersianDigits(remedialClasses.length)})</span>
+            </button>
           </div>
 
-          {/* Sub-navigation Tabs: Appointments Cards vs Remedial Matrix */}
-          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
-            <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200/70 w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={() => setActiveTab('appointments')}
-                className={`flex-1 sm:flex-initial min-h-[40px] flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  activeTab === 'appointments'
-                    ? 'bg-[#445D84] text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                <span>نوبت‌ها ({toPersianDigits(summary.total)})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('remedial')}
-                className={`flex-1 sm:flex-initial min-h-[40px] flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  activeTab === 'remedial'
-                    ? 'bg-[#445D84] text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                <span>رفع اشکال ({toPersianDigits(remedialClasses.length)})</span>
-              </button>
-            </div>
+          {/* Right Quick Utilities: SMS Logs + Server Refresh */}
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setIsLogDrawerOpen(true)}
+              className="min-h-[40px] px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+              aria-label="لاگ پیامک"
+            >
+              <History className="w-4 h-4 text-[#445D84]" />
+              <span>لاگ پیامک ({toPersianDigits(smsLogs.length)})</span>
+            </button>
 
-            {activeTab === 'appointments' && (
-              <div className="hidden md:flex items-center gap-1.5">
-                <ActionButton
-                  variant="primary"
-                  size="sm"
-                  onClick={() => openBulkSmsSheet('unsent', false)}
-                  disabled={summary.will_send === 0}
-                  icon={<Send className="w-3.5 h-3.5" />}
-                >
-                  ارسال به ارسال‌نشده‌ها ({toPersianDigits(summary.will_send)})
-                </ActionButton>
-                {summary.changed_since_sent > 0 && (
-                  <ActionButton
-                    variant="warning"
-                    size="sm"
-                    onClick={() => openBulkSmsSheet('changed', false)}
-                    icon={<RefreshCw className="w-3.5 h-3.5" />}
-                  >
-                    تغییریافته‌ها ({toPersianDigits(summary.changed_since_sent)})
-                  </ActionButton>
-                )}
-                {summary.failed > 0 && (
-                  <ActionButton
-                    variant="danger"
-                    size="sm"
-                    onClick={() => openBulkSmsSheet('failed', false)}
-                    icon={<AlertTriangle className="w-3.5 h-3.5" />}
-                  >
-                    ناموفق‌ها ({toPersianDigits(summary.failed)})
-                  </ActionButton>
-                )}
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={() => fetchWeekData(currentWeek.week_date, true)}
+              disabled={isLoading}
+              aria-label="بروزرسانی از سرور"
+              title="بروزرسانی از سرور"
+              className="min-w-[40px] min-h-[40px] rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw
+                className={`w-4 h-4 ${isLoading ? 'animate-spin text-[#445D84]' : ''}`}
+              />
+            </button>
           </div>
         </div>
-      )}
+      </div>
 
       {activeTab === 'appointments' ? (
-        <>
-          {/* Compact Search, Field Filter & Scrollable Status Filter Chips */}
-          <div className="bg-white rounded-2xl shadow-xs border border-slate-200/80 p-3 space-y-3">
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-              <div className="relative flex-1 min-w-0">
-                <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="search"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="جستجوی نام دانش‌آموز..."
-                  className="w-full min-h-[44px] pr-10 pl-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-[#445D84]"
-                />
-              </div>
-
-              <select
-                value={fieldFilter}
-                aria-label="فیلتر رشته"
-                onChange={(e) => setFieldFilter(e.target.value)}
-                className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 bg-slate-50/70 focus:outline-none focus:border-[#445D84]"
-              >
-                <option value="all">همه رشته‌ها</option>
-                <option value="تجربی">تجربی</option>
-                <option value="ریاضی">ریاضی</option>
-                <option value="انسانی">انسانی</option>
-              </select>
-            </div>
-
-            {/* Horizontal Filter Chips */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-              {[
-                { id: 'all' as PreviewChipFilter, label: 'همه', count: summary.total },
-                {
-                  id: 'will_send' as PreviewChipFilter,
-                  label: 'آماده ارسال',
-                  count: summary.will_send,
-                },
-                {
-                  id: 'already_sent' as PreviewChipFilter,
-                  label: 'پیامک شده',
-                  count: summary.already_sent,
-                },
-                {
-                  id: 'changed_since_sent' as PreviewChipFilter,
-                  label: 'تغییریافته',
-                  count: summary.changed_since_sent,
-                },
-                {
-                  id: 'failed' as PreviewChipFilter,
-                  label: 'خطای پیامک',
-                  count: summary.failed,
-                },
-                {
-                  id: 'no_phone' as PreviewChipFilter,
-                  label: 'بدون شماره',
-                  count: summary.no_phone,
-                },
-                {
-                  id: 'no_appointment' as PreviewChipFilter,
-                  label: 'بدون نوبت',
-                  count: summary.no_appointment,
-                },
-              ].map((chip) => {
-                const isActive = chipFilter === chip.id;
-                return (
-                  <button
-                    key={chip.id}
-                    type="button"
-                    onClick={() => setChipFilter(chip.id)}
-                    className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap inline-flex items-center gap-1.5 border transition-colors cursor-pointer shrink-0 ${
-                      isActive
-                        ? 'bg-[#445D84] text-white border-[#445D84]'
-                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span>{chip.label}</span>
-                    <span
-                      className={`px-1.5 py-0.5 rounded-md text-[11px] tabular-nums ${
-                        isActive
-                          ? 'bg-white/20 text-white'
-                          : 'bg-white text-slate-600 border border-slate-200/70'
+        /* ======================================================================
+           Excel-Like Fast Appointment Scheduling View
+           1. Field Tabs (تجربی | ریاضی | انسانی)
+           2. Day Selector (شنبه تا جمعه)
+           3. Spreadsheet Table (Student Name + Time Input HH:MM)
+           4. Primary "ارسال" Button (Saves times & sends SMS)
+           ====================================================================== */
+        <div className="bg-white rounded-2xl border border-slate-200/80 overflow-hidden">
+          {/* Control Strip: Day Selector + Field Tabs + Search + Send Button */}
+          <div className="p-3.5 sm:p-4 border-b border-slate-200/80 space-y-3.5 bg-slate-50/50">
+            {/* Step 1: Select Day of the Week */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                <span className="text-xs font-bold text-slate-500 pl-1 whitespace-nowrap shrink-0">
+                  انتخاب روز نوبت:
+                </span>
+                {weekDays.map((day) => {
+                  const isSelectedDay = day.iso === selectedDayIso;
+                  return (
+                    <button
+                      key={day.iso}
+                      type="button"
+                      onClick={() => setSelectedDayIso(day.iso)}
+                      className={`min-h-[40px] px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 border ${
+                        isSelectedDay
+                          ? 'bg-[#445D84] text-white border-[#445D84]'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
                       }`}
                     >
-                      {toPersianDigits(chip.count)}
+                      <span>{day.weekday}</span>
+                      <span
+                        className={`tabular-nums text-[11px] ${
+                          isSelectedDay ? 'text-white/85' : 'text-slate-400'
+                        }`}
+                      >
+                        {toPersianDigits(day.shortJalali)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Direct Date Input fallback */}
+              <div className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1 self-start lg:self-auto shrink-0">
+                <Calendar className="w-3.5 h-3.5 text-[#445D84]" />
+                <input
+                  type="date"
+                  aria-label="تاریخ دقیق نوبت"
+                  value={selectedDayIso}
+                  onChange={(e) => {
+                    if (e.target.value) setSelectedDayIso(e.target.value);
+                  }}
+                  className="text-xs font-bold text-slate-700 bg-transparent focus:outline-none min-h-[32px] tabular-nums"
+                />
+                <span className="text-[11px] text-slate-500 tabular-nums">
+                  ({toPersianDigits(selectedDayMeta.jalali)})
+                </span>
+              </div>
+            </div>
+
+            {/* Step 2: Field Tabs (تجربی | ریاضی | انسانی) + Search + Primary Send CTA */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 pt-2 border-t border-slate-200/60">
+              <div className="flex flex-wrap items-center gap-2">
+                <div
+                  role="tablist"
+                  aria-label="تب‌های رشته تحصیلی"
+                  className="inline-flex p-1 rounded-xl bg-slate-200/70 border border-slate-200"
+                >
+                  {ACADEMIC_FIELDS.map((field) => {
+                    const isActive = appointmentFieldTab === field;
+                    const stat = fieldTabCounts[field];
+                    return (
+                      <button
+                        key={field}
+                        type="button"
+                        role="tab"
+                        aria-selected={isActive}
+                        onClick={() => setAppointmentFieldTab(field)}
+                        className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                          isActive
+                            ? 'bg-white text-[#445D84] shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <span>رشته {field}</span>
+                        <span className="text-[11px] text-slate-400 tabular-nums">
+                          ({toPersianDigits(stat.filled)}/{toPersianDigits(stat.total)})
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Quick Student Name Filter */}
+                <div className="relative min-w-[200px] flex-1 sm:flex-initial">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="search"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="جستجوی نام شاگرد..."
+                    className="w-full min-h-[38px] pr-8 pl-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs focus:outline-none focus:border-[#445D84]"
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons: Save Only & Save + Send SMS */}
+              <div className="flex items-center gap-2 shrink-0">
+                {pendingChangesCount > 0 && (
+                  <button
+                    type="button"
+                    disabled={isSavingOnly || isSubmittingSheet}
+                    onClick={() => handlePersistAndSend(false)}
+                    className="min-h-[40px] px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {isSavingOnly ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Save className="w-3.5 h-3.5 text-[#445D84]" />
+                    )}
+                    <span>
+                      فقط ذخیره ({toPersianDigits(pendingChangesCount)})
                     </span>
                   </button>
-                );
-              })}
+                )}
+
+                <button
+                  type="button"
+                  disabled={isSubmittingSheet || isSavingOnly}
+                  onClick={() => handlePersistAndSend(true)}
+                  className="min-h-[40px] px-5 py-2 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                >
+                  {isSubmittingSheet ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                  <span>
+                    {isSubmittingSheet ? 'در حال ثبت و ارسال...' : 'ارسال'}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Error State Banner */}
+          {/* Error Banner if API failed */}
           {errorState && (
-            <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 flex flex-wrap items-center justify-between gap-2 text-rose-700 text-xs font-bold">
+            <div className="m-4 p-3.5 rounded-xl bg-rose-50 border border-rose-200 flex flex-wrap items-center justify-between gap-2 text-rose-700 text-xs font-bold">
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{errorState}</span>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => fetchWeekData(currentWeek.week_date, true)}
-                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white border border-rose-200 text-rose-700 hover:bg-rose-100 transition-colors cursor-pointer"
-                >
-                  تلاش مجدد
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setErrorState(null)}
-                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-rose-600 text-white hover:bg-rose-700 transition-colors cursor-pointer"
-                >
-                  بستن
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => fetchWeekData(currentWeek.week_date, true)}
+                className="min-h-[34px] px-3 py-1 rounded-lg bg-white border border-rose-200 text-rose-700 hover:bg-rose-100 transition-colors cursor-pointer"
+              >
+                تلاش مجدد
+              </button>
             </div>
           )}
 
-          {/* Responsive Card Grid (1 col mobile, 2 tablet, 3-4 desktop) */}
+          {/* Step 3: Excel-Like Spreadsheet Table */}
           {isLoading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
+            <div className="p-4 space-y-2">
               {[1, 2, 3, 4, 5, 6].map((n) => (
                 <div
                   key={n}
-                  className="h-28 rounded-2xl bg-slate-200/80 animate-pulse"
+                  className="h-11 rounded-lg bg-slate-100 animate-pulse"
                 />
               ))}
             </div>
-          ) : filteredItems.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-slate-200/80 py-14 px-4 text-center space-y-3">
-              <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
-                <Users className="w-6 h-6" />
+          ) : spreadsheetStudents.length === 0 ? (
+            <div className="py-12 px-4 text-center space-y-2">
+              <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                <Users className="w-5 h-5" />
               </div>
               <p className="text-sm font-bold text-slate-700">
-                {items.length === 0
-                  ? 'هیچ رکوردی برای این هفته در سرور ثبت نشده است'
-                  : 'هیچ دانش‌آموزی با فیلترهای انتخابی یافت نشد'}
+                دانش‌آموزی در رشته {appointmentFieldTab} یافت نشد
               </p>
-              {items.length > 0 && (
+              {searchQuery.trim() !== '' && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setChipFilter('all');
-                    setFieldFilter('all');
-                    setSearchQuery('');
-                  }}
-                  className="min-h-[44px] px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
+                  onClick={() => setSearchQuery('')}
+                  className="text-xs font-bold text-[#445D84] hover:underline cursor-pointer"
                 >
-                  نمایش همه کارت‌ها
+                  پاک کردن جستجو
                 </button>
               )}
             </div>
           ) : (
-            <div
-              role="listbox"
-              aria-multiselectable={isSelectionMode}
-              aria-label="لیست کارت‌های نوبت هفتگی دانش‌آموزان"
-              className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3.5"
-            >
-              {filteredItems.map((item) => {
-                const isSelected = selectedStudentIds.includes(item.student_id);
-                const statusMeta = resolveCardAppointmentStatus(item);
-                const timeStr = formatCardStartTime(item);
-                const dateStr = formatCardDateLabel(item);
-                const hasExam = Boolean(item.exam_start_time || item.exam_end_time);
-                const hasArrival = Boolean(item.arrival_time);
+            <div className="overflow-x-auto">
+              <table
+                aria-label={`جدول اکسل نوبت‌دهی رشته ${appointmentFieldTab}`}
+                className="w-full text-right border-collapse"
+              >
+                <thead>
+                  <tr className="bg-slate-100/90 border-b border-slate-200 text-slate-700 text-xs">
+                    <th className="py-2.5 px-3 font-bold w-12 text-center border-l border-slate-200/80">
+                      #
+                    </th>
+                    <th className="py-2.5 px-4 font-bold min-w-[180px] border-l border-slate-200/80">
+                      نام شاگرد ({appointmentFieldTab})
+                    </th>
+                    <th className="py-2.5 px-4 font-bold w-56 border-l border-slate-200/80">
+                      ساعت نوبت ({selectedDayMeta.weekday}{' '}
+                      {toPersianDigits(selectedDayMeta.shortJalali)})
+                    </th>
+                    <th className="py-2.5 px-4 font-bold min-w-[190px]">
+                      وضعیت و شماره ولی
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200/70 text-xs">
+                  {spreadsheetStudents.map((student, idx) => {
+                    const existingOnDay =
+                      existingAppointmentsForSelectedDay[student.student_id];
+                    const existingTime = existingOnDay?.start_time || '';
+                    const inputVal = getStudentInputTime(student.student_id);
+                    const trimmedVal = inputVal.trim();
+                    const isValidTime =
+                      !trimmedVal || isValidAppointmentTimeHm(trimmedVal);
+                    const normalizedVal = trimmedVal
+                      ? normalizeTimeInput(trimmedVal)
+                      : '';
+                    const isModified = normalizedVal !== existingTime;
+                    const hasPhone =
+                      Boolean(student.mobile_mask || student.mobile) &&
+                      student.status !== 'no_phone';
 
-                return (
-                  <div
-                    key={item.student_id}
-                    role="option"
-                    tabIndex={0}
-                    aria-selected={isSelected}
-                    onContextMenu={(e) => e.preventDefault()}
-                    onPointerDown={(e) => handleCardPointerDown(e, item.student_id)}
-                    onPointerMove={handleCardPointerMove}
-                    onPointerUp={handleCardPointerUpOrCancel}
-                    onPointerCancel={handleCardPointerUpOrCancel}
-                    onClick={() => handleCardClick(item)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        handleCardClick(item);
-                      }
-                    }}
-                    className={`group relative overflow-hidden rounded-2xl bg-white p-4 pr-5 transition-all cursor-pointer select-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent] border-2 ${
-                      isSelected
-                        ? 'border-[#445D84] bg-[#445D84]/[0.04] shadow-md ring-2 ring-[#445D84]/15'
-                        : 'border-slate-200/80 hover:border-slate-300 hover:shadow-sm'
-                    }`}
-                  >
-                    {/* Right-side narrow status bar (in RTL) */}
-                    <span
-                      aria-hidden="true"
-                      className={`absolute right-0 top-0 bottom-0 w-1.5 ${statusMeta.barColorClass}`}
-                    />
-
-                    {/* Selection Checkbox (visible in selection mode or on desktop hover) */}
-                    <button
-                      type="button"
-                      aria-label={`انتخاب ${item.student_name}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleSelectOne(item.student_id);
-                      }}
-                      className={`absolute left-2.5 top-2.5 min-w-[44px] min-h-[44px] rounded-xl inline-flex items-center justify-center transition-opacity cursor-pointer z-10 ${
-                        isSelectionMode || isSelected
-                          ? 'opacity-100'
-                          : 'opacity-0 sm:group-hover:opacity-100'
-                      }`}
-                    >
-                      <span
-                        className={`w-6 h-6 rounded-full border-2 inline-flex items-center justify-center transition-colors ${
-                          isSelected
-                            ? 'bg-[#445D84] border-[#445D84] text-white'
-                            : 'bg-white/90 border-slate-300 text-transparent hover:border-[#445D84]'
+                    return (
+                      <tr
+                        key={student.student_id}
+                        className={`transition-colors ${
+                          !isValidTime
+                            ? 'bg-rose-50/50'
+                            : isModified
+                            ? 'bg-amber-50/40'
+                            : existingTime
+                            ? 'bg-emerald-50/20 hover:bg-slate-50'
+                            : 'hover:bg-slate-50/80'
                         }`}
                       >
-                        <Check className="w-3.5 h-3.5 stroke-[3]" />
-                      </span>
-                    </button>
+                        {/* Row Number */}
+                        <td className="py-2 px-3 text-center text-slate-400 font-mono tabular-nums border-l border-slate-200/60">
+                          {toPersianDigits(idx + 1)}
+                        </td>
 
-                    {/* Line 1: Student Name (Bold) + Appointment Time */}
-                    <div className="flex items-baseline justify-between gap-2 pl-9">
-                      <h3 className="text-base font-bold text-slate-800 truncate">
-                        {item.student_name}
-                      </h3>
-                      <span className="text-xs font-bold text-slate-700 tabular-nums shrink-0">
-                        {timeStr ? `ساعت ${timeStr}` : '—'}
-                      </span>
-                    </div>
+                        {/* Student Name & Grade */}
+                        <td className="py-2 px-4 border-l border-slate-200/60">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-800 text-sm">
+                              {student.student_name}
+                            </span>
+                            {student.grade && (
+                              <span className="text-[11px] text-slate-400 tabular-nums shrink-0">
+                                پایه {toPersianDigits(student.grade)}
+                              </span>
+                            )}
+                          </div>
+                        </td>
 
-                    {/* Line 2: Grade & Field as plain gray text (NOT a chip) */}
-                    <div className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-500">
-                      <span>
-                        {item.grade ? `پایه ${toPersianDigits(item.grade)}` : 'پایه نامشخص'}
-                        {item.field ? ` • ${item.field}` : ''}
-                      </span>
-                      {dateStr && (
-                        <span className="text-[11px] text-slate-400 truncate">
-                          {dateStr}
-                        </span>
-                      )}
-                    </div>
+                        {/* Spreadsheet Time Input Cell */}
+                        <td className="py-1.5 px-3 border-l border-slate-200/60">
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              ref={(el) => {
+                                timeInputRefs.current[student.student_id] = el;
+                              }}
+                              type="text"
+                              inputMode="numeric"
+                              dir="ltr"
+                              aria-label={`ساعت نوبت ${student.student_name}`}
+                              value={inputVal}
+                              placeholder="مثلاً 14:30"
+                              onChange={(e) =>
+                                handleTimeInputChange(
+                                  student.student_id,
+                                  e.target.value
+                                )
+                              }
+                              onBlur={() => handleTimeInputBlur(student.student_id)}
+                              onKeyDown={(e) =>
+                                handleTimeInputKeyDown(
+                                  e,
+                                  idx,
+                                  student.student_id
+                                )
+                              }
+                              className={`w-full h-9 px-3 rounded-lg border font-mono text-sm font-bold text-center tabular-nums transition-colors focus:outline-none ${
+                                !isValidTime
+                                  ? 'border-rose-400 bg-white text-rose-700 focus:border-rose-600'
+                                  : isModified
+                                  ? 'border-amber-400 bg-white text-slate-900 focus:border-[#445D84]'
+                                  : trimmedVal
+                                  ? 'border-emerald-300 bg-white text-emerald-900 focus:border-[#445D84]'
+                                  : 'border-slate-200 bg-slate-50/70 text-slate-800 focus:bg-white focus:border-[#445D84]'
+                              }`}
+                            />
+                            {(trimmedVal || existingTime) && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleClearStudentRowTime(
+                                    student.student_id,
+                                    student.student_name
+                                  )
+                                }
+                                title="پاک کردن ساعت نوبت"
+                                aria-label={`پاک کردن ساعت نوبت ${student.student_name}`}
+                                className="min-w-[32px] min-h-[32px] rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 inline-flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
 
-                    {/* Line 3: Small Appointment Status Chip + Subtle Neutral Secondary Icons */}
-                    <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
-                      <span
-                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusMeta.chipClass}`}
-                      >
-                        {renderCardStatusIcon(statusMeta.key)}
-                        <span>{statusMeta.label}</span>
-                      </span>
+                        {/* Status & Parent Phone Info */}
+                        <td className="py-2 px-4">
+                          <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                            <div className="flex items-center gap-1.5 min-w-0 truncate">
+                              {!isValidTime ? (
+                                <span className="text-rose-600 font-bold">
+                                  ساعت نامعتبر (مثال: 14:30)
+                                </span>
+                              ) : isModified && normalizedVal ? (
+                                <span className="text-amber-700 font-bold">
+                                  آماده ثبت ({toPersianDigits(normalizedVal)})
+                                </span>
+                              ) : isModified && !normalizedVal ? (
+                                <span className="text-rose-600 font-bold">
+                                  حذف نوبت پس از ارسال
+                                </span>
+                              ) : existingTime ? (
+                                student.status === 'already_sent' ? (
+                                  <span className="text-emerald-700 font-bold">
+                                    ثبت و پیامک شده ({toPersianDigits(existingTime)})
+                                  </span>
+                                ) : (
+                                  <span className="text-[#445D84] font-bold">
+                                    ثبت شده ({toPersianDigits(existingTime)})
+                                  </span>
+                                )
+                              ) : student.appointment_date &&
+                                student.appointment_date !== selectedDayIso &&
+                                student.start_time ? (
+                                <span className="text-slate-400">
+                                  نوبت در{' '}
+                                  {toPersianDigits(
+                                    formatGregorianToJalali(
+                                      student.appointment_date
+                                    ).slice(5)
+                                  )}{' '}
+                                  ساعت {toPersianDigits(student.start_time.slice(0, 5))}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">—</span>
+                              )}
+                            </div>
 
-                      {/* Subtle neutral icons for secondary info (SMS, arrival, exam) */}
-                      <div className="flex items-center gap-2.5 text-[11px] text-slate-400">
-                        {item.status === 'already_sent' && (
-                          <span
-                            className="inline-flex items-center gap-1"
-                            title="پیامک یادآوری این هفته ارسال شده است"
-                          >
-                            <MessageSquare className="w-3.5 h-3.5" />
-                            <span>پیامک شد</span>
-                          </span>
-                        )}
-                        {item.status === 'changed_since_sent' && (
-                          <span
-                            className="inline-flex items-center gap-1"
-                            title="ساعت نوبت پس از ارسال پیامک تغییر کرده است"
-                          >
-                            <AlertTriangle className="w-3.5 h-3.5" />
-                            <span>تغییر نوبت</span>
-                          </span>
-                        )}
-                        {item.status === 'no_phone' && (
-                          <span
-                            className="inline-flex items-center gap-1"
-                            title="شماره تماس ولی ثبت نشده است"
-                          >
-                            <PhoneOff className="w-3.5 h-3.5" />
-                          </span>
-                        )}
-                        {hasArrival && (
-                          <span
-                            className="inline-flex items-center gap-0.5 tabular-nums"
-                            title={`ورود: ${toPersianDigits(item.arrival_time)}`}
-                          >
-                            <LogIn className="w-3.5 h-3.5" />
-                            <span>{toPersianDigits(item.arrival_time)}</span>
-                          </span>
-                        )}
-                        {hasExam && (
-                          <span
-                            className="inline-flex items-center gap-0.5"
-                            title="ساعت آزمون ثبت شده است"
-                          >
-                            <ClipboardList className="w-3.5 h-3.5" />
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                            <button
+                              type="button"
+                              onClick={() => openParentContactsModal(student)}
+                              className={`px-2 py-1 rounded-lg text-[11px] font-medium inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0 ${
+                                hasPhone
+                                  ? 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+                                  : 'text-orange-600 bg-orange-50 hover:bg-orange-100 font-bold'
+                              }`}
+                              title="مدیریت شماره موبایل ولی"
+                            >
+                              {hasPhone ? (
+                                <>
+                                  <Phone className="w-3 h-3" />
+                                  <span dir="ltr" className="font-mono tabular-nums">
+                                    {toPersianDigits(
+                                      student.mobile_mask || student.mobile || ''
+                                    )}
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <PhoneOff className="w-3 h-3" />
+                                  <span>ثبت شماره ولی</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
-        </>
+
+          {/* Bottom Quick Summary & Submit Bar */}
+          <div className="p-3.5 sm:p-4 bg-slate-50/80 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>
+                روز انتخابی:{' '}
+                <strong className="text-slate-800">
+                  {selectedDayMeta.weekday}{' '}
+                  {toPersianDigits(selectedDayMeta.jalali)}
+                </strong>
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>
+                دارای ساعت در این روز:{' '}
+                <strong className="text-slate-800 tabular-nums">
+                  {toPersianDigits(syncPlan.activeStudentIdsWithTime.length)} نفر
+                </strong>
+              </span>
+              {pendingChangesCount > 0 && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="text-amber-700 font-bold tabular-nums">
+                    {toPersianDigits(pendingChangesCount)} تغییر ذخیره‌نشده
+                  </span>
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={isSubmittingSheet || isSavingOnly}
+                onClick={() => handlePersistAndSend(true)}
+                className="min-h-[42px] px-6 py-2 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isSubmittingSheet ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+                <span>
+                  {isSubmittingSheet ? 'در حال ثبت و ارسال...' : 'ارسال'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
       ) : (
         /* Remedial Classes & Daily Attendance Matrix View (/api/v1/tutoring* & /api/v1/attendance*) */
         <div className="bg-white rounded-2xl shadow-xs border border-slate-200/80 p-4 sm:p-5 space-y-4">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-100">
             <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200">
-                {(['تجربی', 'ریاضی', 'انسانی'] as AcademicField[]).map((f) => (
+                {ACADEMIC_FIELDS.map((f) => (
                   <button
                     key={f}
                     type="button"
@@ -2242,7 +2285,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                           )}
                         </td>
 
-                        {/* Daily Attendance Timestamps (/api/v1/attendance/entries & /api/v1/attendance/{id}/times) */}
                         <td className="py-3 px-3 text-center border-r border-slate-100 align-middle">
                           <div className="grid grid-cols-2 gap-1.5 max-w-[220px] mx-auto">
                             <button
@@ -2495,501 +2537,6 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         </div>
       )}
 
-      {/* Sticky Bottom Action Bar in Multi-Select Mode */}
-      {isSelectionMode && selectedStudentIds.length > 0 && (
-        <div className="fixed bottom-0 inset-x-0 z-40 p-3 bg-white/95 backdrop-blur-xs border-t border-slate-200 shadow-2xl">
-          <div className="max-w-xl mx-auto flex items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={() => openBulkSmsSheet('unsent', true)}
-              className="w-full min-h-[48px] h-12 px-5 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-sm inline-flex items-center justify-center gap-2 shadow-md transition-colors cursor-pointer"
-            >
-              <Send className="w-4 h-4" />
-              <span>
-                ارسال پیامک ({toPersianDigits(selectedStudentIds.length)})
-              </span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Appointment Booking Modal: Bottom Sheet on Mobile (<640px), Centered Modal on Desktop */}
-      {editingItem && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={`ثبت و ویرایش نوبت ${editingItem.student_name}`}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setEditingItem(null);
-          }}
-          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
-        >
-          <div className="w-full sm:max-w-md max-h-[90vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
-            {/* Sheet Header */}
-            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between gap-2 shrink-0">
-              <div className="min-w-0">
-                <h3 className="text-base font-bold text-slate-800 truncate">
-                  {editingItem.student_name}
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {editingItem.grade
-                    ? `پایه ${toPersianDigits(editingItem.grade)}`
-                    : ''}
-                  {editingItem.field ? ` • ${editingItem.field}` : ''}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingItem(null)}
-                aria-label="بستن"
-                className="min-w-[44px] min-h-[44px] rounded-full inline-flex items-center justify-center bg-slate-100 text-slate-500 hover:bg-rose-100 hover:text-rose-600 transition-colors cursor-pointer shrink-0"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Single-Column Scrollable Form */}
-            <form
-              noValidate
-              onSubmit={handleSaveAppointment}
-              className="flex-1 overflow-y-auto px-5 pt-4 pb-0 space-y-4"
-            >
-              {/* Parent Phone Quick Row */}
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between gap-2">
-                <div className="text-xs min-w-0">
-                  <div className="text-slate-500">شماره ولی گیرنده پیامک:</div>
-                  <div className="font-bold text-slate-800 mt-0.5 truncate" dir="ltr">
-                    {editingItem.mobile_mask || editingItem.mobile
-                      ? toPersianDigits(
-                          editingItem.mobile_mask || editingItem.mobile || ''
-                        )
-                      : 'شماره ندارد'}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => openParentContactsModal(editingItem)}
-                  className="min-h-[44px] px-3 py-2 rounded-xl bg-white border border-slate-200 hover:border-[#445D84] text-[#445D84] text-xs font-bold inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
-                >
-                  <Phone className="w-3.5 h-3.5" />
-                  <span>مدیریت شماره</span>
-                </button>
-              </div>
-
-              {/* Date Input */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  تاریخ نوبت *
-                </label>
-                <input
-                  type="date"
-                  value={appointmentForm.appointment_date}
-                  onChange={(e) => {
-                    setAppointmentForm((prev) => ({
-                      ...prev,
-                      appointment_date: e.target.value,
-                    }));
-                    if (appointmentErrors.appointment_date) {
-                      setAppointmentErrors((prev) => ({
-                        ...prev,
-                        appointment_date: undefined,
-                      }));
-                    }
-                  }}
-                  className={MOBILE_INPUT_CLASS(
-                    Boolean(appointmentErrors.appointment_date)
-                  )}
-                />
-                {appointmentForm.appointment_date && (
-                  <p className="text-xs text-[#445D84] font-medium mt-1">
-                    معادل شمسی:{' '}
-                    {toPersianDigits(
-                      formatGregorianToJalali(appointmentForm.appointment_date)
-                    )}
-                  </p>
-                )}
-                <FieldError message={appointmentErrors.appointment_date} />
-              </div>
-
-              {/* Start Time Input */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  ساعت نوبت *
-                </label>
-                <input
-                  type="time"
-                  value={appointmentForm.start_time}
-                  onChange={(e) => {
-                    setAppointmentForm((prev) => ({
-                      ...prev,
-                      start_time: e.target.value,
-                    }));
-                    if (appointmentErrors.start_time) {
-                      setAppointmentErrors((prev) => ({
-                        ...prev,
-                        start_time: undefined,
-                      }));
-                    }
-                  }}
-                  className={MOBILE_INPUT_CLASS(Boolean(appointmentErrors.start_time))}
-                />
-                <FieldError message={appointmentErrors.start_time} />
-              </div>
-
-              {/* 5-Status Selector */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  وضعیت نوبت
-                </label>
-                <select
-                  value={appointmentForm.appointment_status}
-                  onChange={(e) =>
-                    setAppointmentForm((prev) => ({
-                      ...prev,
-                      appointment_status: e.target.value as AppointmentStatus,
-                    }))
-                  }
-                  className={MOBILE_INPUT_CLASS(false)}
-                >
-                  <option value="pending">در انتظار</option>
-                  <option value="confirmed">تأیید شده</option>
-                  <option value="completed">انجام شد</option>
-                  <option value="absent">غایب</option>
-                  <option value="cancelled">لغو</option>
-                </select>
-              </div>
-
-              {/* Attendance & Exam Times (single column) */}
-              <div className="pt-2 border-t border-slate-100 space-y-3">
-                <p className="text-xs font-bold text-slate-600">
-                  ساعات حضور و آزمون (اختیاری)
-                </p>
-
-                <div>
-                  <label className="block text-xs text-slate-600 mb-1">
-                    ساعت ورود دانش‌آموز
-                  </label>
-                  <input
-                    type="time"
-                    value={appointmentForm.arrival_time}
-                    onChange={(e) =>
-                      setAppointmentForm((prev) => ({
-                        ...prev,
-                        arrival_time: e.target.value,
-                      }))
-                    }
-                    className={MOBILE_INPUT_CLASS(false)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs text-slate-600 mb-1">
-                    ساعت شروع آزمون
-                  </label>
-                  <input
-                    type="time"
-                    value={appointmentForm.exam_start_time}
-                    onChange={(e) =>
-                      setAppointmentForm((prev) => ({
-                        ...prev,
-                        exam_start_time: e.target.value,
-                      }))
-                    }
-                    className={MOBILE_INPUT_CLASS(false)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs text-slate-600 mb-1">
-                    ساعت پایان آزمون
-                  </label>
-                  <input
-                    type="time"
-                    value={appointmentForm.exam_end_time}
-                    onChange={(e) =>
-                      setAppointmentForm((prev) => ({
-                        ...prev,
-                        exam_end_time: e.target.value,
-                      }))
-                    }
-                    className={MOBILE_INPUT_CLASS(false)}
-                  />
-                </div>
-              </div>
-
-              {/* Description */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  توضیحات جلسه
-                </label>
-                <input
-                  type="text"
-                  value={appointmentForm.description}
-                  onChange={(e) =>
-                    setAppointmentForm((prev) => ({
-                      ...prev,
-                      description: e.target.value,
-                    }))
-                  }
-                  placeholder="مثال: بررسی کارنامه آزمون..."
-                  className={MOBILE_INPUT_CLASS(false)}
-                />
-              </div>
-
-              {/* Sticky Bottom Save Bar */}
-              <div className="sticky bottom-0 bg-white pt-3 pb-4 border-t border-slate-100 flex items-center gap-2">
-                <button
-                  type="submit"
-                  disabled={isSavingAppointment}
-                  className="flex-1 min-h-[48px] h-12 px-4 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-base inline-flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60"
-                >
-                  {isSavingAppointment ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Check className="w-4 h-4" />
-                  )}
-                  <span>ذخیره نوبت</span>
-                </button>
-
-                {editingItem.appointment_id && (
-                  <button
-                    type="button"
-                    onClick={() => setCancelingItem(editingItem)}
-                    title="لغو و حذف نوبت"
-                    aria-label="لغو نوبت"
-                    className="min-w-[48px] min-h-[48px] h-12 px-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 inline-flex items-center justify-center transition-colors cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Bulk SMS Confirmation Bottom Sheet (Before Sending) */}
-      {isSmsSheetOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="تأیید ارسال پیامک گروهی"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !isSendingSms) {
-              setIsSmsSheetOpen(false);
-            }
-          }}
-          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
-        >
-          <div className="w-full sm:max-w-lg max-h-[90vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
-            {/* Sheet Header */}
-            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between gap-2 shrink-0">
-              <div>
-                <h3 className="text-base font-bold text-slate-800">
-                  تأیید ارسال پیامک یادآوری نوبت
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  گیرنده نهایی: {toPersianDigits(checkedUniquePhoneCount)} شماره یکتا (
-                  {toPersianDigits(smsSheetCheckedIds.length)} دانش‌آموز)
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsSmsSheetOpen(false)}
-                disabled={isSendingSms}
-                aria-label="بستن"
-                className="min-w-[44px] min-h-[44px] rounded-full inline-flex items-center justify-center bg-slate-100 text-slate-500 hover:bg-rose-100 hover:text-rose-600 transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Scrollable Body */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
-              {/* Partial Failure Breakdown Banner (if any) */}
-              {lastSendBreakdown && (
-                <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 space-y-1">
-                  <div className="font-bold">نتیجه ارسال به تفکیک:</div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-emerald-700 font-bold">
-                      موفق: {toPersianDigits(lastSendBreakdown.sent)}
-                    </span>
-                    <span className="text-rose-700 font-bold">
-                      ناموفق: {toPersianDigits(lastSendBreakdown.failed)}
-                    </span>
-                    {lastSendBreakdown.skipped > 0 && (
-                      <span className="text-slate-600">
-                        رد شده: {toPersianDigits(lastSendBreakdown.skipped)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Message Text Preview */}
-              <div className="space-y-1.5">
-                <div className="font-bold text-slate-700">پیش‌نمایش متن پیامک:</div>
-                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 leading-relaxed whitespace-pre-line">
-                  {buildSmsMessagePreview(samplePreviewStudent)}
-                </div>
-              </div>
-
-              {/* Merged Duplicate Notice */}
-              {bulkCategorization.mergedDuplicatesCount > 0 && (
-                <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-800 flex items-center gap-2">
-                  <Users className="w-4 h-4 shrink-0" />
-                  <span>
-                    {toPersianDigits(bulkCategorization.mergedDuplicatesCount)} شماره تکراری
-                    والدین (چند فرزند با یک شماره) ادغام شد.
-                  </span>
-                </div>
-              )}
-
-              {/* Eligible Recipients List (with Already-Sent unchecked by default) */}
-              <div className="space-y-2">
-                <div className="font-bold text-slate-700">
-                  گیرندگان واجد شرایط ({toPersianDigits(bulkCategorization.recipientGroups.length)}{' '}
-                  شماره):
-                </div>
-
-                {bulkCategorization.recipientGroups.length === 0 ? (
-                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-center text-slate-500">
-                    هیچ گیرنده‌ای با شماره معتبر و نوبت فعال در بین موارد انتخابی وجود ندارد.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {bulkCategorization.recipientGroups.map((group) => {
-                      const groupIds = group.students.map((s) => s.student_id);
-                      const isChecked = groupIds.every((id) =>
-                        smsSheetCheckedIds.includes(id)
-                      );
-                      const studentNames = group.students
-                        .map((s) => s.student_name)
-                        .join('، ');
-
-                      return (
-                        <label
-                          key={group.phoneKey}
-                          className={`min-h-[48px] p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-colors ${
-                            isChecked
-                              ? 'border-[#445D84] bg-[#445D84]/[0.04]'
-                              : 'border-slate-200 bg-white'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => toggleSmsRecipientGroup(groupIds)}
-                              className="w-5 h-5 rounded border-slate-300 text-[#445D84] focus:ring-[#445D84] shrink-0"
-                            />
-                            <div className="min-w-0">
-                              <div className="font-bold text-slate-800 truncate">
-                                {studentNames}
-                              </div>
-                              <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5 flex-wrap">
-                                <span>{group.parentName}</span>
-                                <span dir="ltr" className="font-mono">
-                                  {toPersianDigits(group.displayPhone)}
-                                </span>
-                                {group.students.length > 1 && (
-                                  <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-bold text-[10px]">
-                                    شماره مشترک ({toPersianDigits(group.students.length)} فرزند)
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {group.isAlreadySentAll && (
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold shrink-0">
-                              پیامک شده در این هفته
-                            </span>
-                          )}
-                        </label>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Excluded: No Phone Recipients */}
-              {bulkCategorization.noPhoneItems.length > 0 && (
-                <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                  <div className="font-bold text-orange-700 flex items-center gap-1.5">
-                    <PhoneOff className="w-4 h-4" />
-                    <span>
-                      حذف‌شده از ارسال — شماره ندارد (
-                      {toPersianDigits(bulkCategorization.noPhoneItems.length)} نفر):
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {bulkCategorization.noPhoneItems.map((st) => (
-                      <span
-                        key={st.student_id}
-                        className="px-2.5 py-1 rounded-lg bg-orange-50 text-orange-800 border border-orange-200 text-[11px] font-medium"
-                      >
-                        {st.student_name} (شماره ندارد)
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Excluded: No Active Appointment */}
-              {bulkCategorization.noAppointmentItems.length > 0 && (
-                <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                  <div className="font-bold text-slate-600">
-                    حذف‌شده از ارسال — بدون نوبت فعال (
-                    {toPersianDigits(bulkCategorization.noAppointmentItems.length)} نفر):
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {bulkCategorization.noAppointmentItems.map((st) => (
-                      <span
-                        key={st.student_id}
-                        className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-[11px]"
-                      >
-                        {st.student_name}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Sticky Bottom Confirm Bar */}
-            <div className="sticky bottom-0 bg-white px-5 py-3.5 border-t border-slate-100 flex items-center gap-2.5">
-              <button
-                type="button"
-                onClick={handleConfirmSendSms}
-                disabled={isSendingSms || smsSheetCheckedIds.length === 0}
-                className="flex-1 min-h-[48px] h-12 px-4 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-base inline-flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
-              >
-                {isSendingSms ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Send className="w-4 h-4" />
-                )}
-                <span>
-                  {isSendingSms
-                    ? 'در حال ارسال...'
-                    : `ارسال پیامک (${toPersianDigits(checkedUniquePhoneCount)})`}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsSmsSheetOpen(false)}
-                disabled={isSendingSms}
-                className="min-h-[48px] h-12 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm transition-colors cursor-pointer"
-              >
-                انصراف
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Parent Contacts CRUD Bottom-Sheet Modal */}
       {contactModalStudent && (
         <div
@@ -3180,127 +2727,224 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
         </div>
       )}
 
-      {/* Select / Add Week Session Bottom-Sheet Modal */}
-      {isNewWeekModalOpen && (
+      {/* SMS Log Slide-Over / Bottom Sheet Drawer */}
+      {isLogDrawerOpen && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="انتخاب هفته"
+          aria-label="گزارش لاگ پیامک‌های یادآوری نوبت"
           onClick={(e) => {
-            if (e.target === e.currentTarget) setIsNewWeekModalOpen(false);
+            if (e.target === e.currentTarget) setIsLogDrawerOpen(false);
           }}
-          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-stretch sm:justify-end"
         >
-          <div className="w-full sm:max-w-md max-h-[90vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-800">انتخاب هفته</h3>
+          <div className="w-full sm:max-w-md max-h-[88vh] sm:max-h-full bg-white rounded-t-3xl sm:rounded-none shadow-2xl flex flex-col overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 bg-[#344868] text-white flex items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-2">
+                <History className="w-4 h-4" />
+                <h3 className="text-sm font-bold">
+                  تاریخچه ارسال پیامک ({toPersianDigits(smsLogs.length)})
+                </h3>
+              </div>
               <button
                 type="button"
-                onClick={() => setIsNewWeekModalOpen(false)}
+                onClick={() => setIsLogDrawerOpen(false)}
                 aria-label="بستن"
-                className="min-w-[44px] min-h-[44px] rounded-full inline-flex items-center justify-center bg-slate-100 text-slate-500 cursor-pointer"
+                className="min-w-[44px] min-h-[44px] rounded-xl inline-flex items-center justify-center hover:bg-white/15 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
+            <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto shrink-0">
+              {(
+                [
+                  { id: 'all', label: 'همه' },
+                  { id: 'sent', label: 'ارسال موفق' },
+                  { id: 'failed', label: 'ناموفق' },
+                  { id: 'skipped_no_phone', label: 'بدون شماره' },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setLogStatusFilter(tab.id)}
+                  className={`min-h-[38px] px-3 py-1 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 ${
+                    logStatusFilter === tab.id
+                      ? 'bg-[#445D84] text-white'
+                      : 'bg-white text-slate-600 border border-slate-200'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+              {filteredLogs.length === 0 ? (
+                <div className="py-12 text-center text-xs text-slate-400">
+                  لاگی برای نمایش وجود ندارد.
+                </div>
+              ) : (
+                filteredLogs.map((log) => (
+                  <div
+                    key={log.id}
+                    className="p-3.5 rounded-2xl border border-slate-200/80 bg-white space-y-1.5 text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-slate-800">
+                        {log.student_name || `دانش‌آموز #${log.student_id}`}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          log.status === 'sent'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : log.status === 'failed'
+                            ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                            : 'bg-orange-50 text-orange-700 border border-orange-200'
+                        }`}
+                      >
+                        {log.status === 'sent'
+                          ? 'موفق'
+                          : log.status === 'failed'
+                          ? 'ناموفق'
+                          : 'بدون شماره'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-slate-500">
+                      <span dir="ltr" className="font-mono">
+                        {toPersianDigits(log.mobile_mask || log.mobile || '—')}
+                      </span>
+                      <span>
+                        {log.sent_at
+                          ? toPersianDigits(
+                              formatGregorianToJalali(log.sent_at.slice(0, 10))
+                            )
+                          : ''}
+                      </span>
+                    </div>
+                    {log.last_error && (
+                      <div className="text-[11px] text-rose-600 bg-rose-50 p-2 rounded-lg">
+                        {log.last_error}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Week Date Picker Modal */}
+      {isNewWeekModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="تغییر تاریخ هفته"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsNewWeekModalOpen(false);
+          }}
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
+          <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-800">انتخاب هفته</h3>
+              <button
+                type="button"
+                onClick={() => setIsNewWeekModalOpen(false)}
+                className="min-w-[44px] min-h-[44px] rounded-full inline-flex items-center justify-center bg-slate-100 text-slate-500 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
             <form
               noValidate
               onSubmit={handleCreateNewWeek}
-              className="flex-1 overflow-y-auto p-5 space-y-4"
+              className="p-5 space-y-4"
             >
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  انتخاب تاریخ در هفته مورد نظر
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  تاریخ یکی از روزهای هفته *
                 </label>
                 <input
                   type="date"
                   value={newWeekForm.week_date}
                   onChange={(e) => {
-                    const picked = e.target.value;
-                    const sat = getSaturdayOfWeek(picked);
+                    const iso = e.target.value;
+                    const sat = getSaturdayOfWeek(iso);
                     const fri = addDaysIso(sat, 6);
                     const sJal = formatGregorianToJalali(sat);
                     const eJal = formatGregorianToJalali(fri);
-                    setNewWeekForm((prev) => ({
-                      ...prev,
+                    setNewWeekForm({
+                      title: `${toPersianDigits(sJal)} تا ${toPersianDigits(eJal)}`,
                       week_date: sat,
-                      title: prev.title || `هفته ${toPersianDigits(sJal)}`,
                       start_date_jalali: sJal,
                       end_date_jalali: eJal,
-                    }));
+                    });
                   }}
                   className={MOBILE_INPUT_CLASS(false)}
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  عنوان هفته *
-                </label>
-                <input
-                  type="text"
-                  value={newWeekForm.title}
-                  onChange={(e) => {
-                    setNewWeekForm((prev) => ({ ...prev, title: e.target.value }));
-                    if (newWeekErrors.title) {
-                      setNewWeekErrors((prev) => ({ ...prev, title: undefined }));
-                    }
-                  }}
-                  placeholder="مثال: هفته اول خرداد"
-                  className={MOBILE_INPUT_CLASS(Boolean(newWeekErrors.title))}
-                />
-                <FieldError message={newWeekErrors.title} />
+              <div className="grid grid-cols-2 gap-3 text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                <div>
+                  شروع هفته:{' '}
+                  <strong className="text-slate-800">
+                    {toPersianDigits(newWeekForm.start_date_jalali)}
+                  </strong>
+                </div>
+                <div>
+                  پایان هفته:{' '}
+                  <strong className="text-slate-800">
+                    {toPersianDigits(newWeekForm.end_date_jalali)}
+                  </strong>
+                </div>
               </div>
 
-              <div className="sticky bottom-0 bg-white pt-3 border-t border-slate-100">
-                <button
-                  type="submit"
-                  className="w-full min-h-[48px] h-12 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-base inline-flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>مشاهده این هفته</span>
-                </button>
-              </div>
+              <button
+                type="submit"
+                className="w-full min-h-[48px] h-12 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-base cursor-pointer"
+              >
+                مشاهده این هفته
+              </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* Add Remedial Class Bottom-Sheet Modal */}
+      {/* Add Remedial Class Modal */}
       {isAddClassModalOpen && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label={`افزودن کلاس رفع اشکال ${remedialFieldTab}`}
+          aria-label="افزودن ستون کلاس رفع اشکال"
           onClick={(e) => {
             if (e.target === e.currentTarget) setIsAddClassModalOpen(false);
           }}
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
         >
-          <div className="w-full sm:max-w-md max-h-[90vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between">
+          <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
               <h3 className="text-base font-bold text-slate-800">
                 افزودن کلاس رفع اشکال ({remedialFieldTab})
               </h3>
               <button
                 type="button"
                 onClick={() => setIsAddClassModalOpen(false)}
-                aria-label="بستن"
                 className="min-w-[44px] min-h-[44px] rounded-full inline-flex items-center justify-center bg-slate-100 text-slate-500 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-
             <form
               noValidate
               onSubmit={handleAddRemedialClass}
-              className="flex-1 overflow-y-auto p-5 space-y-4"
+              className="p-5 space-y-4"
             >
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  عنوان کلاس *
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  نام کلاس / درس *
                 </label>
                 <input
                   type="text"
@@ -3311,17 +2955,17 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                       class_name: e.target.value,
                     }));
                     if (newClassErrors.class_name) {
-                      setNewClassErrors({ class_name: undefined });
+                      setNewClassErrors({});
                     }
                   }}
-                  placeholder="مثال: کارگاه حل تست دینامیک"
+                  placeholder="مثال: رفع اشکال زیست‌شناسی"
                   className={MOBILE_INPUT_CLASS(Boolean(newClassErrors.class_name))}
                 />
                 <FieldError message={newClassErrors.class_name} />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
                   نام استاد (اختیاری)
                 </label>
                 <input
@@ -3333,61 +2977,54 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                       teacher_name: e.target.value,
                     }))
                   }
-                  placeholder="مثال: استاد بهرامی"
+                  placeholder="مثال: دکتر علوی"
                   className={MOBILE_INPUT_CLASS(false)}
                 />
               </div>
 
-              <div className="sticky bottom-0 bg-white pt-3 border-t border-slate-100">
-                <button
-                  type="submit"
-                  className="w-full min-h-[48px] h-12 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-base inline-flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>افزودن کلاس</span>
-                </button>
-              </div>
+              <button
+                type="submit"
+                className="w-full min-h-[48px] h-12 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-base cursor-pointer"
+              >
+                ثبت ستون کلاس
+              </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* Add Guest Student Bottom-Sheet Modal (POST /api/v1/attendance/guests) */}
+      {/* Add Guest Student Modal (POST /api/v1/attendance/guests) */}
       {isAddGuestModalOpen && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="ثبت دانش‌آموز مهمان در لیست حضور"
+          aria-label="ثبت دانش‌آموز مهمان در حضور روزانه"
           onClick={(e) => {
-            if (e.target === e.currentTarget && !isSavingGuest) {
-              setIsAddGuestModalOpen(false);
-            }
+            if (e.target === e.currentTarget) setIsAddGuestModalOpen(false);
           }}
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
         >
-          <div className="w-full sm:max-w-md max-h-[90vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between">
+          <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
               <h3 className="text-base font-bold text-slate-800">
                 ثبت دانش‌آموز مهمان ({toPersianDigits(formatGregorianToJalali(remedialDate))})
               </h3>
               <button
                 type="button"
                 onClick={() => setIsAddGuestModalOpen(false)}
-                aria-label="بستن"
                 className="min-w-[44px] min-h-[44px] rounded-full inline-flex items-center justify-center bg-slate-100 text-slate-500 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-
             <form
               noValidate
               onSubmit={handleAddAttendanceGuest}
-              className="flex-1 overflow-y-auto p-5 space-y-4"
+              className="p-5 space-y-4"
             >
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  نام و نام خانوادگی مهمان *
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  نام و نام خانوادگی دانش‌آموز مهمان *
                 </label>
                 <input
                   type="text"
@@ -3399,14 +3036,14 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                     }));
                     if (guestError) setGuestError(undefined);
                   }}
-                  placeholder="مثال: آرش محمدی"
+                  placeholder="مثال: علی احمدی"
                   className={MOBILE_INPUT_CLASS(Boolean(guestError))}
                 />
                 <FieldError message={guestError} />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
                   رشته تحصیلی *
                 </label>
                 <select
@@ -3425,154 +3062,15 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                 </select>
               </div>
 
-              <div className="sticky bottom-0 bg-white pt-3 border-t border-slate-100">
-                <button
-                  type="submit"
-                  disabled={isSavingGuest}
-                  className="w-full min-h-[48px] h-12 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-base inline-flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
-                >
-                  {isSavingGuest ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <UserPlus className="w-4 h-4" />
-                  )}
-                  <span>ثبت در لیست حضور امروز</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Cancel Appointment Confirmation Modal */}
-      <ConfirmModal
-        isOpen={Boolean(cancelingItem)}
-        title="لغو نوبت هفتگی"
-        message={
-          cancelingItem
-            ? `آیا از لغو نوبت هفتگی «${cancelingItem.student_name}» اطمینان دارید؟`
-            : ''
-        }
-        confirmText="بله، لغو نوبت"
-        variant="danger"
-        onConfirm={handleConfirmCancelAppointment}
-        onCancel={() => setCancelingItem(null)}
-      />
-
-      {/* SMS Log Slide-Over Drawer (GET /api/v1/appointments/sms/log) */}
-      {isLogDrawerOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="تاریخچه ارسال پیامک نوبت‌ها"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsLogDrawerOpen(false);
-          }}
-          className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 backdrop-blur-xs"
-        >
-          <div className="w-full max-w-xl bg-white h-full shadow-2xl border-r border-slate-200 flex flex-col justify-between">
-            <div className="p-4 sm:p-5 bg-[#344868] text-white flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <History className="w-5 h-5" />
-                <h3 className="text-base font-black">تاریخچه ارسال پیامک نوبت‌ها</h3>
-              </div>
               <button
-                type="button"
-                onClick={() => setIsLogDrawerOpen(false)}
-                aria-label="بستن کشوی لاگ"
-                className="min-w-[44px] min-h-[44px] rounded-xl text-white/80 hover:text-white hover:bg-white/10 inline-flex items-center justify-center cursor-pointer"
+                type="submit"
+                disabled={isSavingGuest}
+                className="w-full min-h-[48px] h-12 rounded-xl bg-[#445D84] hover:bg-[#344868] text-white font-bold text-base inline-flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                <X className="w-5 h-5" />
+                {isSavingGuest && <RefreshCw className="w-4 h-4 animate-spin" />}
+                <span>ثبت حضور مهمان</span>
               </button>
-            </div>
-
-            <div className="p-3 border-b border-slate-100 bg-slate-50/70 flex items-center justify-between gap-2 overflow-x-auto">
-              <div className="inline-flex p-1 rounded-xl bg-white border border-slate-200">
-                {[
-                  { id: 'all', label: `همه (${toPersianDigits(smsLogs.length)})` },
-                  {
-                    id: 'sent',
-                    label: `موفق (${toPersianDigits(
-                      smsLogs.filter((l) => l.status === 'sent').length
-                    )})`,
-                  },
-                  {
-                    id: 'failed',
-                    label: `ناموفق (${toPersianDigits(
-                      smsLogs.filter((l) => l.status === 'failed').length
-                    )})`,
-                  },
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() =>
-                      setLogStatusFilter(tab.id as 'all' | AppointmentSmsLogStatus)
-                    }
-                    className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      logStatusFilter === tab.id
-                        ? 'bg-[#445D84] text-white'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {filteredLogs.length === 0 ? (
-                <div className="py-16 text-center text-slate-400 text-xs font-bold">
-                  هیچ رکوردی در تاریخچه پیامک این هفته یافت نشد
-                </div>
-              ) : (
-                filteredLogs.map((log) => (
-                  <div
-                    key={log.id}
-                    className="p-3.5 rounded-xl border border-slate-200/90 bg-white space-y-2"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="font-bold text-slate-800 text-sm">
-                          {log.student_name || `دانش‌آموز #${log.student_id}`}
-                        </div>
-                        <div
-                          dir="ltr"
-                          className="text-xs font-mono text-slate-500 text-right mt-0.5"
-                        >
-                          {log.mobile_mask || log.mobile
-                            ? toPersianDigits(log.mobile_mask || log.mobile || '')
-                            : 'بدون شماره'}
-                        </div>
-                      </div>
-
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-                          log.status === 'sent'
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : log.status === 'skipped_no_phone'
-                            ? 'bg-orange-50 text-orange-700 border-orange-200'
-                            : 'bg-rose-50 text-rose-700 border-rose-200'
-                        }`}
-                      >
-                        {log.status === 'sent'
-                          ? 'ارسال موفق'
-                          : log.status === 'skipped_no_phone'
-                          ? 'فاقد شماره'
-                          : 'خطا در ارسال'}
-                      </span>
-                    </div>
-
-                    {log.last_error && (
-                      <div className="text-[11px] text-rose-600 font-bold">
-                        علت خطا: {log.last_error}
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
+            </form>
           </div>
         </div>
       )}
