@@ -28,6 +28,7 @@ import {
 import type { BlogPost, ToastType } from '../types';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
+import { DataTable, type Column } from '../components/DataTable';
 
 interface BlogPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -265,7 +266,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
                   setFormState({ ...formState, slug: e.target.value });
                   if (errors.slug) setErrors((prev) => ({ ...prev, slug: undefined }));
                 }}
-                className={getFieldClass(Boolean(errors.slug), 'text-left')}
+                className={getFieldClass(Boolean(errors.slug), 'text-start')}
               />
               <FieldError message={errors.slug} />
             </div>
@@ -309,7 +310,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
                   if (errors.cover_image)
                     setErrors((prev) => ({ ...prev, cover_image: undefined }));
                 }}
-                className={getFieldClass(Boolean(errors.cover_image), 'text-left')}
+                className={getFieldClass(Boolean(errors.cover_image), 'text-start')}
               />
               <FieldError message={errors.cover_image} />
             </div>
@@ -505,6 +506,77 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
     );
   }
 
+  const blogColumns: Column<BlogPost>[] = [
+    {
+      key: 'title',
+      header: 'عنوان',
+      priority: 'primary',
+      headerClassName: 'min-w-[220px]',
+      cell: (p) => (
+        <div>
+          <div className="font-semibold text-slate-800 break-words">{p.title}</div>
+          {p.excerpt && (
+            <div className="text-xs text-slate-500 line-clamp-1 mt-0.5">{p.excerpt}</div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'category',
+      header: 'دسته‌بندی',
+      priority: 'secondary',
+      mobileLabel: 'دسته‌بندی',
+      cellClassName: 'text-slate-600 font-medium',
+      value: (p) => p.category,
+      cell: (p) => p.category || '-',
+    },
+    {
+      key: 'slug',
+      header: 'اسلاگ',
+      priority: 'desktop-only',
+      cell: (p) => (
+        <div dir="ltr">
+          <code className="text-xs text-slate-600 bg-slate-100 px-2 py-1 rounded">
+            {p.slug}
+          </code>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'وضعیت',
+      priority: 'secondary',
+      mobileLabel: 'وضعیت',
+      cell: (p) => (
+        <span
+          className={`text-xs font-semibold ${
+            (p.published ?? p.is_published) ? 'text-emerald-700' : 'text-slate-500'
+          }`}
+        >
+          {(p.published ?? p.is_published) ? 'منتشر شده' : 'پیش‌نویس'}
+        </span>
+      ),
+    },
+    {
+      key: 'views',
+      header: 'بازدیدها',
+      priority: 'desktop-only',
+      headerClassName: 'text-center',
+      cellClassName: 'text-center tabular-nums font-medium text-slate-600',
+      cell: (p) => p.views || 0,
+    },
+    {
+      key: 'published_at',
+      header: 'تاریخ انتشار',
+      priority: 'secondary',
+      mobileLabel: 'تاریخ انتشار',
+      headerClassName: 'text-center',
+      cellClassName: 'text-center tabular-nums text-slate-500 text-xs',
+      value: (p) => formatGregorianToJalali(p.published_at),
+      cell: (p) => formatGregorianToJalali(p.published_at),
+    },
+  ];
+
   return (
     <div id="page-blog" className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -546,82 +618,37 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-[#344868] text-white text-xs">
-                <tr>
-                  <th className="px-5 py-3.5 text-right font-semibold">عنوان</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">دسته‌بندی</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">اسلاگ</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">وضعیت</th>
-                  <th className="px-5 py-3.5 text-center font-semibold">بازدیدها</th>
-                  <th className="px-5 py-3.5 text-center font-semibold">تاریخ انتشار</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">عملیات</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {posts.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-5 py-4">
-                      <div className="font-semibold text-slate-800 max-w-xs truncate">
-                        {p.title}
-                      </div>
-                      {p.excerpt && (
-                        <div className="text-xs text-slate-500 max-w-xs truncate mt-0.5">
-                          {p.excerpt}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-5 py-4 text-slate-600 font-medium">{p.category}</td>
-                    <td className="px-5 py-4" dir="ltr">
-                      <code className="text-xs text-slate-600 bg-slate-100 px-2 py-1 rounded">
-                        {p.slug}
-                      </code>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span
-                        className={`text-xs font-semibold ${
-                          (p.published ?? p.is_published) ? 'text-emerald-700' : 'text-slate-500'
-                        }`}
-                      >
-                        {(p.published ?? p.is_published) ? 'منتشر شده' : 'پیش‌نویس'}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4 text-center tabular-nums font-medium text-slate-600">
-                      {p.views || 0}
-                    </td>
-                    <td className="px-5 py-4 text-center tabular-nums text-slate-500 text-xs">
-                      {formatGregorianToJalali(p.published_at)}
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-1">
-                        <ActionButton
-                          type="button"
-                          variant="ghost"
-                          onClick={() => openEditor(p)}
-                          className="p-2 rounded-lg text-blue-600 hover:bg-blue-50"
-                          title="ویرایش"
-                          aria-label={`ویرایش پست ${p.title}`}
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </ActionButton>
-                        <ActionButton
-                          type="button"
-                          variant="ghost"
-                          onClick={() => setDeleteTarget(p)}
-                          className="p-2 rounded-lg text-red-600 hover:bg-red-50"
-                          title="حذف"
-                          aria-label={`حذف پست ${p.title}`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </ActionButton>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={blogColumns}
+            data={posts}
+            rowKey={(p) => p.id}
+            ariaLabel="جدول مقالات وبلاگ"
+            actionsHeader="عملیات"
+            renderActions={(p) => (
+              <div className="flex items-center gap-1">
+                <ActionButton
+                  type="button"
+                  variant="ghost"
+                  onClick={() => openEditor(p)}
+                  className="min-w-11 min-h-11 p-2.5 rounded-xl text-blue-600 hover:bg-blue-50"
+                  title="ویرایش"
+                  aria-label={`ویرایش پست ${p.title}`}
+                >
+                  <Pencil className="w-4 h-4" />
+                </ActionButton>
+                <ActionButton
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setDeleteTarget(p)}
+                  className="min-w-11 min-h-11 p-2.5 rounded-xl text-red-600 hover:bg-red-50"
+                  title="حذف"
+                  aria-label={`حذف پست ${p.title}`}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </ActionButton>
+              </div>
+            )}
+          />
         </div>
       )}
 

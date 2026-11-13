@@ -112,49 +112,42 @@ export function validateInstructorForm(
 
 export interface SupporterFormInput {
   name: string;
-  phone: string | number;
+  phone?: string | number | null;
   grade: string | number;
   field: string;
   chat_id?: string | number | null;
-  username: string;
-  password: string;
+  is_active?: number | boolean;
+  password?: string;
 }
 
 export function validateSupporterForm(
   input: SupporterFormInput,
-  isEditing: boolean
-): FieldErrors<'name' | 'phone' | 'grade' | 'field' | 'username' | 'password'> {
-  const errors: FieldErrors<'name' | 'phone' | 'grade' | 'field' | 'username' | 'password'> = {};
+  isEditing = false
+): FieldErrors<'name' | 'phone' | 'grade' | 'field' | 'password'> {
+  const errors: FieldErrors<'name' | 'phone' | 'grade' | 'field' | 'password'> = {};
 
   if (!safeTrim(input.name)) {
     errors.name = 'نام و نام خانوادگی پشتیبان الزامی است';
   }
 
-  if (!isEditing) {
-    const phone = safeTrim(input.phone);
-    if (!phone) {
-      errors.phone = 'شماره موبایل الزامی است';
-    } else if (!isValidIranianPhone(phone)) {
-      errors.phone = 'فرمت شماره موبایل معتبر نیست (مثال: 09123456789)';
-    }
+  const phone = safeTrim(input.phone);
+  if (!isEditing && !phone) {
+    errors.phone = 'شماره موبایل الزامی است';
+  } else if (phone && !isValidIranianPhone(phone)) {
+    errors.phone = 'فرمت شماره موبایل معتبر نیست (مثال: 09123456789)';
   }
 
-  if (!safeTrim(input.grade)) {
-    errors.grade = 'انتخاب پایه تحصیلی الزامی است';
+  const gradeNum = Number(safeTrim(input.grade));
+  if (!safeTrim(input.grade) || Number.isNaN(gradeNum) || gradeNum < 7 || gradeNum > 12) {
+    errors.grade = 'انتخاب پایه تحصیلی (۷ تا ۱۲) الزامی است';
   }
 
   if (!safeTrim(input.field)) {
-    errors.field = 'انتخاب رشته یا درس الزامی است';
-  }
-
-  if (!isEditing && !safeTrim(input.username)) {
-    errors.username = 'نام کاربری برای ورود به پنل الزامی است';
+    errors.field = 'انتخاب رشته الزامی است';
   }
 
   const pwd = String(input.password ?? '');
-  if (!isEditing && !pwd) {
-    errors.password = 'وارد کردن رمز عبور الزامی است';
-  } else if (pwd && pwd.length < 4) {
+  if (pwd && pwd.length < 4) {
     errors.password = 'رمز عبور باید حداقل ۴ کاراکتر باشد';
   }
 

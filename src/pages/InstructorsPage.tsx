@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { School, Plus, Pencil, Trash2 } from 'lucide-react';
+import { School, Plus, Pencil, Trash2, Upload, X } from 'lucide-react';
 import API from '../lib/api';
 import { validateInstructorForm, type FieldErrors } from '../lib/form-validation';
+import { fileToAvatarDataUrl, resolveEntityImageUrl } from '../lib/image-upload';
 import type { Instructor, ToastType } from '../types';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
+import { DataTable, type Column } from '../components/DataTable';
 
 interface InstructorsPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -18,12 +20,13 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingInstructor, setEditingInstructor] = useState<Instructor | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Instructor | null>(null);
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
 
   const [formState, setFormState] = useState({
     name: '',
     title: '',
     description: '',
-    initial_letter: '',
+    image_url: '',
     display_order: '0',
   });
   const [errors, setErrors] = useState<FieldErrors<'name' | 'title' | 'display_order'>>({});
@@ -46,11 +49,12 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
 
   const openAdd = () => {
     setErrors({});
+    setSelectedImageFile(null);
     setFormState({
       name: '',
       title: '',
       description: '',
-      initial_letter: '',
+      image_url: '',
       display_order: String(instructors.length + 1),
     });
     setIsAddOpen(true);
@@ -58,14 +62,27 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
 
   const openEdit = (inst: Instructor) => {
     setErrors({});
+    setSelectedImageFile(null);
     setEditingInstructor(inst);
     setFormState({
       name: String(inst.name ?? ''),
       title: String(inst.title ?? ''),
       description: String(inst.description ?? ''),
-      initial_letter: String(inst.initial_letter ?? ''),
+      image_url: String(inst.image_url ?? ''),
       display_order: String(inst.display_order ?? 0),
     });
+  };
+
+  const handleImageFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file);
+      setSelectedImageFile(file);
+      setFormState((prev) => ({ ...prev, image_url: dataUrl }));
+    } catch (err) {
+      showToast((err as Error).message || 'خطا در بارگذاری تصویر', 'error');
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -80,8 +97,6 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
     }
 
     const nameTrimmed = String(formState.name ?? '').trim();
-    const initial =
-      String(formState.initial_letter ?? '').trim() || nameTrimmed.charAt(0) || 'ا';
 
     setSubmitting(true);
     try {
@@ -90,20 +105,22 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
           name: nameTrimmed,
           title: String(formState.title ?? '').trim(),
           description: String(formState.description ?? '').trim(),
-          initial_letter: initial,
           display_order: Number(formState.display_order) || 0,
+          image: selectedImageFile,
         });
         setEditingInstructor(null);
+        setSelectedImageFile(null);
         showToast('اطلاعات استاد به‌روزرسانی شد', 'success');
       } else {
         await API.addInstructor({
           name: nameTrimmed,
           title: String(formState.title ?? '').trim(),
           description: String(formState.description ?? '').trim(),
-          initial_letter: initial,
           display_order: Number(formState.display_order) || 0,
+          image: selectedImageFile,
         });
         setIsAddOpen(false);
+        setSelectedImageFile(null);
         showToast('استاد جدید اضافه شد', 'success');
       }
       setErrors({});
@@ -126,6 +143,65 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
       showToast((err as Error).message || 'خطا در حذف استاد', 'error');
     }
   };
+
+  const instructorColumns: Column<Instructor>[] = [
+    {
+      key: 'display_order',
+      header: 'ترتیب',
+      priority: 'desktop-only',
+      headerClassName: 'w-20',
+      cellClassName: 'tabular-nums font-medium text-slate-600',
+      cell: (i) => i.display_order,
+    },
+    {
+      key: 'name',
+      header: 'نام',
+      priority: 'primary',
+      headerClassName: 'min-w-[180px]',
+      cellClassName: 'font-semibold text-slate-800 whitespace-nowrap',
+      cell: (i) => (
+        <div>
+          <div className="font-semibold text-slate-800">{i.name}</div>
+          {i.description && (
+            <div className="text-xs font-normal text-slate-500 mt-0.5 line-clamp-1">
+              {i.description}
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'title',
+      header: 'عنوان / سمت',
+      priority: 'secondary',
+      cellClassName: 'text-slate-600',
+      value: (i) => i.title,
+      cell: (i) => i.title,
+    },
+    {
+      key: 'initial_letter',
+      header: 'حرف اول / تصویر',
+      priority: 'desktop-only',
+      headerClassName: 'w-28',
+      cell: (i) => {
+        const imgSrc = resolveEntityImageUrl(i.image_url);
+        return imgSrc ? (
+          <img
+            src={imgSrc}
+            alt={i.name}
+            className="w-10 h-10 rounded-full object-cover border border-slate-200 bg-slate-100"
+          />
+        ) : (
+          <div className="w-10 h-10 rounded-full bg-[#E2D9C6] flex items-center justify-center text-[#445D84] font-bold text-sm">
+            {i.initial_letter || i.name.charAt(0)}
+          </div>
+        );
+      },
+    },
+  ];
+
+  const previewImgUrl = resolveEntityImageUrl(formState.image_url);
+  const previewInitial = String(formState.name ?? '').trim().charAt(0) || 'ا';
 
   return (
     <div id="page-instructors" className="space-y-6">
@@ -170,59 +246,76 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-[#344868] text-white text-xs">
-                <tr>
-                  <th className="px-5 py-3.5 text-right font-semibold">ترتیب</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">نام</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">عنوان / سمت</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">حرف اول</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">عملیات</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {instructors.map((i) => (
-                  <tr key={i.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-5 py-4 tabular-nums font-medium text-slate-600">
-                      {i.display_order}
-                    </td>
-                    <td className="px-5 py-4 font-semibold text-slate-800">{i.name}</td>
-                    <td className="px-5 py-4 text-slate-600">{i.title}</td>
-                    <td className="px-5 py-4">
-                      <div className="w-10 h-10 rounded-full bg-[#E2D9C6] flex items-center justify-center text-[#445D84] font-bold text-sm">
-                        {i.initial_letter || i.name.charAt(0)}
-                      </div>
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-1">
-                        <ActionButton
-                          type="button"
-                          variant="ghost"
-                          onClick={() => openEdit(i)}
-                          className="p-2 rounded-lg text-blue-600 hover:bg-blue-50"
-                          title="ویرایش"
-                          aria-label={`ویرایش استاد ${i.name}`}
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </ActionButton>
-                        <ActionButton
-                          type="button"
-                          variant="ghost"
-                          onClick={() => setDeleteTarget(i)}
-                          className="p-2 rounded-lg text-red-600 hover:bg-red-50"
-                          title="حذف"
-                          aria-label={`حذف استاد ${i.name}`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </ActionButton>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={instructorColumns}
+            data={instructors}
+            rowKey={(i) => i.id}
+            ariaLabel="جدول اساتید"
+            actionsHeader="عملیات"
+            renderActions={(i) => (
+              <div className="flex items-center gap-1">
+                <ActionButton
+                  type="button"
+                  variant="ghost"
+                  onClick={() => openEdit(i)}
+                  className="min-w-11 min-h-11 p-2.5 rounded-xl text-blue-600 hover:bg-blue-50"
+                  title="ویرایش"
+                  aria-label={`ویرایش استاد ${i.name}`}
+                >
+                  <Pencil className="w-4 h-4" />
+                </ActionButton>
+                <ActionButton
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setDeleteTarget(i)}
+                  className="min-w-11 min-h-11 p-2.5 rounded-xl text-red-600 hover:bg-red-50"
+                  title="حذف"
+                  aria-label={`حذف استاد ${i.name}`}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </ActionButton>
+              </div>
+            )}
+            renderMobileCard={(i) => (
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-extrabold text-slate-900 leading-snug break-words">
+                    {i.name}
+                  </div>
+                  {i.title && (
+                    <div className="text-xs text-slate-500 mt-1 break-words">{i.title}</div>
+                  )}
+                  {i.description && (
+                    <div className="text-xs text-slate-400 mt-1 line-clamp-2 break-words">
+                      {i.description}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <ActionButton
+                    type="button"
+                    variant="ghost"
+                    onClick={() => openEdit(i)}
+                    className="min-w-11 min-h-11 p-2.5 rounded-xl text-blue-600 hover:bg-blue-50"
+                    title="ویرایش"
+                    aria-label={`ویرایش استاد ${i.name}`}
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </ActionButton>
+                  <ActionButton
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setDeleteTarget(i)}
+                    className="min-w-11 min-h-11 p-2.5 rounded-xl text-red-600 hover:bg-red-50"
+                    title="حذف"
+                    aria-label={`حذف استاد ${i.name}`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </ActionButton>
+                </div>
+              </div>
+            )}
+          />
         </div>
       )}
 
@@ -232,6 +325,7 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
           if (!submitting) {
             setIsAddOpen(false);
             setEditingInstructor(null);
+            setSelectedImageFile(null);
             setErrors({});
           }
         }}
@@ -256,6 +350,7 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
               onClick={() => {
                 setIsAddOpen(false);
                 setEditingInstructor(null);
+                setSelectedImageFile(null);
                 setErrors({});
               }}
               className="py-2.5 px-5"
@@ -266,6 +361,49 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
         }
       >
         <form id="instructorModalForm" noValidate onSubmit={handleSave} className="space-y-4">
+          {/* Profile Image Upload */}
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5">
+            {previewImgUrl ? (
+              <img
+                src={previewImgUrl}
+                alt="پیش‌نمایش تصویر استاد"
+                className="w-14 h-14 rounded-full object-cover border-2 border-white shadow-xs shrink-0 bg-slate-100"
+              />
+            ) : (
+              <div className="w-14 h-14 rounded-full bg-[#E2D9C6] flex items-center justify-center text-[#445D84] font-bold text-lg shrink-0">
+                {previewInitial}
+              </div>
+            )}
+            <div className="flex-1 min-w-0 space-y-1.5">
+              <div className="text-xs font-bold text-slate-700">تصویر پروفایل استاد (اختیاری)</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#445D84] hover:bg-[#344868] text-white text-xs font-semibold cursor-pointer transition-colors">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>انتخاب تصویر</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageFileSelect}
+                    className="hidden"
+                  />
+                </label>
+                {formState.image_url && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedImageFile(null);
+                      setFormState((prev) => ({ ...prev, image_url: '' }));
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-rose-600 hover:bg-rose-50 text-xs font-semibold cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>حذف تصویر</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">
               نام و نام خانوادگی <span className="text-red-500">*</span>
@@ -304,39 +442,27 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
             <label className="block text-xs font-medium text-slate-600 mb-1">توضیحات</label>
             <textarea
               rows={3}
+              placeholder="سوابق علمی، رزومه یا توضیحات تکمیلی استاد..."
               value={formState.description}
               onChange={(e) => setFormState({ ...formState, description: e.target.value })}
               className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm resize-none focus:outline-none focus:border-[#445D84]"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">حرف اول</label>
-              <input
-                type="text"
-                maxLength={1}
-                placeholder="م"
-                value={formState.initial_letter}
-                onChange={(e) => setFormState({ ...formState, initial_letter: e.target.value })}
-                className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm text-center focus:outline-none focus:border-[#445D84]"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">ترتیب نمایش</label>
-              <input
-                type="number"
-                min={0}
-                aria-invalid={Boolean(errors.display_order)}
-                value={formState.display_order}
-                onChange={(e) => {
-                  setFormState({ ...formState, display_order: e.target.value });
-                  if (errors.display_order)
-                    setErrors((prev) => ({ ...prev, display_order: undefined }));
-                }}
-                className={getFieldClass(Boolean(errors.display_order), 'text-center')}
-              />
-              <FieldError message={errors.display_order} />
-            </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">ترتیب نمایش</label>
+            <input
+              type="number"
+              min={0}
+              aria-invalid={Boolean(errors.display_order)}
+              value={formState.display_order}
+              onChange={(e) => {
+                setFormState({ ...formState, display_order: e.target.value });
+                if (errors.display_order)
+                  setErrors((prev) => ({ ...prev, display_order: undefined }));
+              }}
+              className={getFieldClass(Boolean(errors.display_order), 'text-center')}
+            />
+            <FieldError message={errors.display_order} />
           </div>
         </form>
       </Modal>

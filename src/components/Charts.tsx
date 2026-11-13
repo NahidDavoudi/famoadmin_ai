@@ -136,7 +136,7 @@ export const DailyReportsAreaChart: React.FC<{ data: ReportDayStat[] }> = ({ dat
         </div>
       </div>
 
-      <div className="w-full overflow-x-auto">
+      <div className="w-full overflow-hidden">
         <svg
           viewBox={`0 0 ${width} ${height + 30}`}
           className="w-full h-[260px] overflow-visible"

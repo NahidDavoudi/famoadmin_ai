@@ -6,6 +6,7 @@ import type { Course, ToastType } from '../types';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
+import { DataTable, type Column } from '../components/DataTable';
 
 interface CoursesPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -129,6 +130,54 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
     }
   };
 
+  const courseColumns: Column<Course>[] = [
+    {
+      key: 'display_order',
+      header: 'ترتیب',
+      priority: 'desktop-only',
+      headerClassName: 'w-20',
+      cellClassName: 'tabular-nums font-medium text-slate-600',
+      cell: (c) => c.display_order,
+    },
+    {
+      key: 'name',
+      header: 'نام دوره',
+      priority: 'primary',
+      headerClassName: 'min-w-[200px]',
+      cell: (c) => (
+        <div>
+          <div className="font-semibold text-slate-800">{c.name}</div>
+          {c.description && (
+            <div className="text-xs text-slate-500 mt-0.5 line-clamp-1">{c.description}</div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'price',
+      header: 'قیمت',
+      priority: 'secondary',
+      mobileLabel: 'قیمت',
+      cellClassName: 'text-slate-600 tabular-nums',
+      value: (c) => c.price || '-',
+      cell: (c) => c.price || '-',
+    },
+    {
+      key: 'colors',
+      header: 'رنگ‌بندی',
+      priority: 'desktop-only',
+      headerClassName: 'w-24',
+      cell: (c) => (
+        <div
+          className="w-10 h-10 rounded-xl shadow-xs border border-slate-200"
+          style={{
+            background: `linear-gradient(135deg, ${c.gradient_color_from || '#445D84'}, ${c.gradient_color_to || '#E2D9C6'})`,
+          }}
+        />
+      ),
+    },
+  ];
+
   return (
     <div id="page-courses" className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -172,69 +221,37 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-[#344868] text-white text-xs">
-                <tr>
-                  <th className="px-5 py-3.5 text-right font-semibold">ترتیب</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">نام دوره</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">قیمت</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">رنگ‌بندی</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">عملیات</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {courses.map((c) => (
-                  <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-5 py-4 tabular-nums font-medium text-slate-600">
-                      {c.display_order}
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="font-semibold text-slate-800">{c.name}</div>
-                      {c.description && (
-                        <div className="text-xs text-slate-500 mt-0.5 line-clamp-1">
-                          {c.description}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-5 py-4 text-slate-600 tabular-nums">{c.price || '-'}</td>
-                    <td className="px-5 py-4">
-                      <div
-                        className="w-10 h-10 rounded-xl shadow-xs border border-slate-200"
-                        style={{
-                          background: `linear-gradient(135deg, ${c.gradient_color_from || '#445D84'}, ${c.gradient_color_to || '#E2D9C6'})`,
-                        }}
-                      />
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-1">
-                        <ActionButton
-                          type="button"
-                          variant="ghost"
-                          onClick={() => openEdit(c)}
-                          className="p-2 rounded-lg text-blue-600 hover:bg-blue-50"
-                          title="ویرایش"
-                          aria-label={`ویرایش دوره ${c.name}`}
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </ActionButton>
-                        <ActionButton
-                          type="button"
-                          variant="ghost"
-                          onClick={() => setDeleteTarget(c)}
-                          className="p-2 rounded-lg text-red-600 hover:bg-red-50"
-                          title="حذف"
-                          aria-label={`حذف دوره ${c.name}`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </ActionButton>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={courseColumns}
+            data={courses}
+            rowKey={(c) => c.id}
+            ariaLabel="جدول دوره‌های آموزشی"
+            actionsHeader="عملیات"
+            renderActions={(c) => (
+              <div className="flex items-center gap-1">
+                <ActionButton
+                  type="button"
+                  variant="ghost"
+                  onClick={() => openEdit(c)}
+                  className="min-w-11 min-h-11 p-2.5 rounded-xl text-blue-600 hover:bg-blue-50"
+                  title="ویرایش"
+                  aria-label={`ویرایش دوره ${c.name}`}
+                >
+                  <Pencil className="w-4 h-4" />
+                </ActionButton>
+                <ActionButton
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setDeleteTarget(c)}
+                  className="min-w-11 min-h-11 p-2.5 rounded-xl text-red-600 hover:bg-red-50"
+                  title="حذف"
+                  aria-label={`حذف دوره ${c.name}`}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </ActionButton>
+              </div>
+            )}
+          />
         </div>
       )}
 

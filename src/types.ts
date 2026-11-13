@@ -80,9 +80,12 @@ export interface Supporter {
   field: AcademicField;
   is_active?: boolean | number;
   chat_id: string | number | null;
-  username?: string;
+  created_at?: string;
+  /** Enriched from GET /api/v1/public/supporters if available */
   avatar?: string | null;
   avatar_url?: string | null;
+  /** Enriched from GET /api/v1/admin/stats/supporters/performance if available */
+  assigned_students?: number;
   replied_count?: number;
   pending_count?: number;
   avg_response_hours?: number | null;
@@ -91,10 +94,27 @@ export interface Supporter {
 export interface PublicSupporter {
   id: number;
   name: string;
-  grade: number;
-  field: AcademicField;
+  grade: number | null;
+  field: AcademicField | null;
   avatar?: string | null;
-  avatar_url?: string | null;
+  avatar_url: string | null;
+}
+
+export interface AdminSupporterPerformance {
+  supporter_id: number;
+  supporter_name: string | null;
+  assigned_students: number;
+  report_count: number;
+  threads_with_reports: number;
+  threads_with_reply: number;
+  reply_rate: number;
+  unanswered_threads: number;
+  oldest_unanswered_day: string | null;
+  avg_first_reply_seconds: number | null;
+  median_first_reply_seconds: number | null;
+  messages_sent: number;
+  broadcasts_sent: number;
+  unread_backlog: number;
 }
 
 export interface BlogCategory {
@@ -141,6 +161,18 @@ export interface ExamStudentSummary {
   avg_percentage: number;
 }
 
+export interface ExamComment {
+  id: number;
+  student_id: number;
+  exam_date: string;
+  teacher_user_id: number;
+  author_name?: string;
+  author_role?: 'teacher' | 'supporter' | 'admin';
+  body: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ExamDetailsResponse {
   student: {
     id: number;
@@ -151,6 +183,7 @@ export interface ExamDetailsResponse {
   exam_date?: string;
   avg_percentage: number;
   subjects: SubjectResult[];
+  comments?: ExamComment[];
 }
 
 export interface ExamFile {

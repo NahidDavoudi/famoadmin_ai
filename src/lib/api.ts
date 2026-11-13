@@ -698,16 +698,23 @@ class FamoApiClient {
     return this.requestJson<Course[]>('/courses?per_page=100', {}, 'خطا در بارگذاری دوره‌ها');
   }
 
-  async addCourse(payload: Omit<Course, 'id'>): Promise<ApiEnvelope<Course>> {
+  async addCourse(
+    payload: Omit<Course, 'id'> & { background_image_file?: File | null }
+  ): Promise<ApiEnvelope<Course>> {
     const formData = new FormData();
     formData.append('name', safeTrim(payload.name));
     if (payload.icon) formData.append('icon', String(payload.icon));
-    if (payload.gradient_color_from) formData.append('gradient_color_from', String(payload.gradient_color_from));
-    if (payload.gradient_color_to) formData.append('gradient_color_to', String(payload.gradient_color_to));
+    if (payload.gradient_color_from)
+      formData.append('gradient_color_from', String(payload.gradient_color_from));
+    if (payload.gradient_color_to)
+      formData.append('gradient_color_to', String(payload.gradient_color_to));
     if (payload.description) formData.append('description', String(payload.description));
     const numericPrice = Number(String(payload.price ?? '').replace(/[^\d]/g, '')) || 0;
     formData.append('price', String(numericPrice));
     formData.append('display_order', String(payload.display_order || 0));
+    if (payload.background_image_file) {
+      formData.append('background_image', payload.background_image_file);
+    }
 
     return this.requestJson<Course>(
       '/courses',
@@ -719,12 +726,17 @@ class FamoApiClient {
     );
   }
 
-  async updateCourse(id: number, payload: Partial<Omit<Course, 'id'>>): Promise<ApiEnvelope<Course>> {
+  async updateCourse(
+    id: number,
+    payload: Partial<Omit<Course, 'id'>> & { background_image_file?: File | null }
+  ): Promise<ApiEnvelope<Course>> {
     const formData = new FormData();
     if (payload.name !== undefined) formData.append('name', safeTrim(payload.name));
     if (payload.icon) formData.append('icon', String(payload.icon));
-    if (payload.gradient_color_from) formData.append('gradient_color_from', String(payload.gradient_color_from));
-    if (payload.gradient_color_to) formData.append('gradient_color_to', String(payload.gradient_color_to));
+    if (payload.gradient_color_from)
+      formData.append('gradient_color_from', String(payload.gradient_color_from));
+    if (payload.gradient_color_to)
+      formData.append('gradient_color_to', String(payload.gradient_color_to));
     if (payload.description !== undefined && payload.description !== null) {
       formData.append('description', String(payload.description));
     }
@@ -734,6 +746,9 @@ class FamoApiClient {
     }
     if (payload.display_order !== undefined) {
       formData.append('display_order', String(payload.display_order));
+    }
+    if (payload.background_image_file) {
+      formData.append('background_image_url', payload.background_image_file);
     }
 
     return this.requestJson<Course>(
@@ -752,16 +767,40 @@ class FamoApiClient {
 
   // Instructors (/api/v1/instructors*)
   async getInstructors(): Promise<ApiEnvelope<Instructor[]>> {
-    return this.requestJson<Instructor[]>('/instructors?per_page=100', {}, 'خطا در بارگذاری اساتید');
+    return this.requestJson<Instructor[]>(
+      '/instructors?per_page=100',
+      {},
+      'خطا در بارگذاری اساتید'
+    );
   }
 
-  async addInstructor(payload: Omit<Instructor, 'id'>): Promise<ApiEnvelope<Instructor>> {
+  /**
+   * POST /api/v1/instructors (multipart/form-data)
+   * OpenAPI schema: { name (required), title, description, display_order, image (binary) }
+   */
+  async addInstructor(payload: {
+    name: string;
+    title?: string | null;
+    description?: string | null;
+    display_order?: number;
+    image?: File | null;
+  }): Promise<ApiEnvelope<Instructor>> {
     const formData = new FormData();
     formData.append('name', safeTrim(payload.name));
-    if (payload.title) formData.append('title', String(payload.title));
-    if (payload.description) formData.append('description', String(payload.description));
-    if (payload.initial_letter) formData.append('initial_letter', String(payload.initial_letter));
-    formData.append('display_order', String(payload.display_order || 0));
+    if (payload.title !== undefined && payload.title !== null && safeTrim(payload.title) !== '') {
+      formData.append('title', safeTrim(payload.title));
+    }
+    if (
+      payload.description !== undefined &&
+      payload.description !== null &&
+      safeTrim(payload.description) !== ''
+    ) {
+      formData.append('description', safeTrim(payload.description));
+    }
+    formData.append('display_order', String(Number(payload.display_order) || 0));
+    if (payload.image instanceof File) {
+      formData.append('image', payload.image);
+    }
 
     return this.requestJson<Instructor>(
       '/instructors',
@@ -773,19 +812,35 @@ class FamoApiClient {
     );
   }
 
+  /**
+   * PUT /api/v1/instructors/{id} (multipart/form-data)
+   * OpenAPI schema: { name, title, description, display_order, image (binary) }
+   */
   async updateInstructor(
     id: number,
-    payload: Partial<Omit<Instructor, 'id'>>
+    payload: {
+      name?: string;
+      title?: string | null;
+      description?: string | null;
+      display_order?: number;
+      image?: File | null;
+    }
   ): Promise<ApiEnvelope<Instructor>> {
     const formData = new FormData();
-    if (payload.name !== undefined) formData.append('name', safeTrim(payload.name));
-    if (payload.title !== undefined && payload.title !== null) formData.append('title', String(payload.title));
-    if (payload.description !== undefined && payload.description !== null) {
-      formData.append('description', String(payload.description));
+    if (payload.name !== undefined) {
+      formData.append('name', safeTrim(payload.name));
     }
-    if (payload.initial_letter) formData.append('initial_letter', String(payload.initial_letter));
+    if (payload.title !== undefined && payload.title !== null) {
+      formData.append('title', safeTrim(payload.title));
+    }
+    if (payload.description !== undefined && payload.description !== null) {
+      formData.append('description', safeTrim(payload.description));
+    }
     if (payload.display_order !== undefined) {
-      formData.append('display_order', String(payload.display_order));
+      formData.append('display_order', String(Number(payload.display_order) || 0));
+    }
+    if (payload.image instanceof File) {
+      formData.append('image', payload.image);
     }
 
     return this.requestJson<Instructor>(
@@ -808,62 +863,139 @@ class FamoApiClient {
 
   // Supporters (/api/v1/supporters*)
   async getSupporters(): Promise<ApiEnvelope<Supporter[]>> {
-    return this.requestJson<Supporter[]>(
-      '/supporters?per_page=100',
-      {},
-      'خطا در بارگذاری پشتیبان‌ها'
-    );
+    const [supportersRes, publicRes, perfRes] = await Promise.allSettled([
+      this.requestJson<Supporter[]>('/supporters?per_page=100', {}, 'خطا در بارگذاری پشتیبان‌ها'),
+      this.requestJson<PublicSupporter[]>('/public/supporters', {}, ''),
+      this.requestJson<{
+        items?: Array<{
+          supporter_id: number;
+          assigned_students?: number;
+          threads_with_reply?: number;
+          unanswered_threads?: number;
+          avg_first_reply_seconds?: number | null;
+        }>;
+      }>('/admin/stats/supporters/performance', {}, ''),
+    ]);
+
+    if (supportersRes.status === 'rejected') {
+      throw supportersRes.reason;
+    }
+
+    const baseList = supportersRes.value.data || [];
+    const publicById = new Map<number, PublicSupporter>();
+    if (publicRes.status === 'fulfilled' && Array.isArray(publicRes.value.data)) {
+      for (const pub of publicRes.value.data) {
+        publicById.set(Number(pub.id), pub);
+      }
+    }
+
+    const perfById = new Map<
+      number,
+      {
+        assigned_students?: number;
+        threads_with_reply?: number;
+        unanswered_threads?: number;
+        avg_first_reply_seconds?: number | null;
+      }
+    >();
+    if (perfRes.status === 'fulfilled' && Array.isArray(perfRes.value.data?.items)) {
+      for (const p of perfRes.value.data.items) {
+        perfById.set(Number(p.supporter_id), p);
+      }
+    }
+
+    const enriched: Supporter[] = baseList.map((sup) => {
+      const pub = publicById.get(Number(sup.id));
+      const perf = perfById.get(Number(sup.id));
+      const avgHours =
+        perf?.avg_first_reply_seconds !== undefined && perf?.avg_first_reply_seconds !== null
+          ? Number(perf.avg_first_reply_seconds) / 3600
+          : sup.avg_response_hours ?? null;
+      return {
+        ...sup,
+        avatar: sup.avatar ?? pub?.avatar ?? null,
+        avatar_url: sup.avatar_url ?? pub?.avatar_url ?? null,
+        assigned_students: perf?.assigned_students ?? sup.assigned_students,
+        replied_count: perf?.threads_with_reply ?? sup.replied_count ?? 0,
+        pending_count: perf?.unanswered_threads ?? sup.pending_count ?? 0,
+        avg_response_hours: avgHours,
+      };
+    });
+
+    return {
+      ...supportersRes.value,
+      data: enriched,
+    };
   }
 
+  /**
+   * POST /api/v1/supporters (application/json)
+   * OpenAPI schema: { name, grade, field, phone, chat_id } — required: [name, grade, field, phone]
+   */
   async addSupporter(payload: {
     name: string;
     phone: string | number;
     grade: number;
     field: AcademicField;
-    chat_id: string | number | null;
-    username?: string;
-    password?: string;
+    chat_id?: string | number | null;
   }): Promise<ApiEnvelope<Supporter>> {
+    const body: Record<string, unknown> = {
+      name: safeTrim(payload.name),
+      phone: safeTrim(payload.phone),
+      grade: Number(payload.grade),
+      field: payload.field,
+    };
     const chatIdStr = safeTrim(payload.chat_id);
-    const usernameStr = safeTrim(payload.username);
+    if (chatIdStr) {
+      body.chat_id = chatIdStr;
+    }
+
     return this.requestJson<Supporter>(
       '/supporters',
       {
         method: 'POST',
-        body: JSON.stringify({
-          name: safeTrim(payload.name),
-          phone: safeTrim(payload.phone),
-          grade: Number(payload.grade),
-          field: payload.field,
-          chat_id: chatIdStr || undefined,
-          username: usernameStr || undefined,
-          password: payload.password || undefined,
-        }),
+        body: JSON.stringify(body),
       },
       'خطا در افزودن پشتیبان'
     );
   }
 
+  /**
+   * PUT /api/v1/supporters/{id} (application/json)
+   * OpenAPI schema: { name, grade, field, phone (nullable), is_active (0|1), chat_id, password }
+   */
   async updateSupporter(
     id: number,
     payload: {
       name: string;
       grade: number;
       field: AcademicField;
-      chat_id: string | number | null;
+      phone?: string | number | null;
+      is_active?: number | boolean;
+      chat_id?: string | number | null;
       password?: string;
     }
   ): Promise<ApiEnvelope<Supporter>> {
-    const chatIdStr = safeTrim(payload.chat_id);
     const body: Record<string, unknown> = {
       name: safeTrim(payload.name),
       grade: Number(payload.grade),
       field: payload.field,
-      chat_id: chatIdStr || undefined,
     };
+    if (payload.phone !== undefined) {
+      const phoneStr = safeTrim(payload.phone);
+      body.phone = phoneStr || null;
+    }
+    if (payload.is_active !== undefined) {
+      body.is_active = payload.is_active ? 1 : 0;
+    }
+    if (payload.chat_id !== undefined) {
+      const chatIdStr = safeTrim(payload.chat_id);
+      body.chat_id = chatIdStr || '';
+    }
     if (payload.password) {
       body.password = payload.password;
     }
+
     return this.requestJson<Supporter>(
       `/supporters/${id}`,
       {
@@ -939,8 +1071,39 @@ class FamoApiClient {
     );
     return {
       ...res,
-      data: normalizeExamDetails(res.data),
+      data: {
+        ...normalizeExamDetails(res.data),
+        comments: Array.isArray(res.data?.comments) ? res.data.comments : [],
+      },
     };
+  }
+
+  /**
+   * PUT /api/v1/exams/comments
+   * OpenAPI schema: ExamCommentUpsertRequest { student_id, exam_date, body }
+   */
+  async upsertExamComment(payload: {
+    student_id: number;
+    exam_date: string;
+    body: string;
+  }): Promise<
+    ApiEnvelope<{
+      comment: import('../types').ExamComment;
+      comments: import('../types').ExamComment[];
+    }>
+  > {
+    return this.requestJson(
+      '/exams/comments',
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          student_id: Number(payload.student_id),
+          exam_date: safeTrim(payload.exam_date),
+          body: safeTrim(payload.body),
+        }),
+      },
+      'خطا در ثبت نظر روی کارنامه'
+    );
   }
 
   async getStudentExamTrend(

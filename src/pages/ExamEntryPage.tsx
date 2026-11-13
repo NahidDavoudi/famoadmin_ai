@@ -289,7 +289,7 @@ export const ExamEntryPage: React.FC<ExamEntryPageProps> = ({ showToast }) => {
                         setShowSuggestions(false);
                         setStudentError(undefined);
                       }}
-                      className="w-full text-right px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center justify-between cursor-pointer"
+                      className="w-full text-start px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center justify-between cursor-pointer"
                     >
                       <span className="font-semibold text-slate-800">{s.name}</span>
                       <span className="text-xs text-slate-500">

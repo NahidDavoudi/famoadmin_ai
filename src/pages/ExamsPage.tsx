@@ -26,6 +26,7 @@ import type {
   ExamDetailsResponse,
   ExamStudentSummary,
   PageId,
+  SubjectResult,
   ToastType,
 } from '../types';
 import {
@@ -34,6 +35,7 @@ import {
   PrintableStudentTrendChart,
 } from '../components/Charts';
 import { ActionButton } from '../components/FormControls';
+import { DataTable, type Column } from '../components/DataTable';
 
 interface ExamsPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -315,153 +317,198 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
           ))}
         </div>
       ) : view === 'dates' ? (
-        dates.length === 0 ? (
-          <div className="bg-white rounded-2xl p-12 text-center border border-slate-200/80 shadow-xs">
-            <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4 text-slate-400">
-              <ClipboardList className="w-10 h-10" aria-hidden="true" />
-            </div>
-            <h3 className="text-lg font-bold text-slate-700 mb-2">هنوز آزمونی ثبت نشده</h3>
-            <p className="text-sm text-slate-500 mb-6">
-              برای ثبت نتایج آزمون جدید از بخش «ثبت نتایج» استفاده کنید.
-            </p>
-            <ActionButton
-              type="button"
-              onClick={() => onNavigate('exam_entry')}
-              icon={<Plus className="w-4 h-4" />}
-              className="px-5 py-2.5"
-            >
-              <span>ثبت اولین آزمون</span>
-            </ActionButton>
-          </div>
-        ) : (
-          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-[#344868] text-white text-xs">
-                  <tr>
-                    <th className="px-5 py-3.5 text-right font-semibold">تاریخ آزمون</th>
-                    <th className="px-5 py-3.5 text-right font-semibold">تعداد شرکت‌کنندگان</th>
-                    <th className="px-5 py-3.5 text-right font-semibold">تعداد دروس ثبت‌شده</th>
-                    <th className="px-5 py-3.5 text-right font-semibold">میانگین درصد</th>
-                    <th className="px-5 py-3.5 text-right font-semibold">عملیات</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {dates.map((exam) => (
-                    <tr
-                      key={exam.exam_date}
-                      onClick={() => handleSelectDate(exam.exam_date)}
-                      className="hover:bg-slate-50/80 transition-colors cursor-pointer"
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+          <DataTable<ExamDateSummary>
+            tableAriaLabel="جدول آزمون‌های برگزار شده"
+            data={dates}
+            rowKey={(exam) => exam.exam_date}
+            onRowClick={(exam) => handleSelectDate(exam.exam_date)}
+            emptyState={
+              <div className="p-12 text-center">
+                <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4 text-slate-400">
+                  <ClipboardList className="w-10 h-10" aria-hidden="true" />
+                </div>
+                <h3 className="text-lg font-bold text-slate-700 mb-2">هنوز آزمونی ثبت نشده</h3>
+                <p className="text-sm text-slate-500 mb-6">
+                  برای ثبت نتایج آزمون جدید از بخش «ثبت نتایج» استفاده کنید.
+                </p>
+                <ActionButton
+                  type="button"
+                  onClick={() => onNavigate('exam_entry')}
+                  icon={<Plus className="w-4 h-4" />}
+                  className="px-5 py-2.5"
+                >
+                  <span>ثبت اولین آزمون</span>
+                </ActionButton>
+              </div>
+            }
+            columns={
+              [
+                {
+                  key: 'exam_date',
+                  header: 'تاریخ آزمون',
+                  priority: 'primary',
+                  cell: (exam) => (
+                    <div className="flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-[#445D84] shrink-0" aria-hidden="true" />
+                      <span>{formatJalaliLong(exam.exam_date)}</span>
+                    </div>
+                  ),
+                },
+                {
+                  key: 'student_count',
+                  header: 'تعداد شرکت‌کنندگان',
+                  mobileLabel: 'شرکت‌کنندگان',
+                  priority: 'secondary',
+                  cellClassName: 'tabular-nums text-slate-700 font-medium',
+                  cell: (exam) => `${exam.student_count} نفر`,
+                },
+                {
+                  key: 'subject_count',
+                  header: 'تعداد دروس ثبت‌شده',
+                  priority: 'desktop-only',
+                  cellClassName: 'tabular-nums text-slate-600',
+                  cell: (exam) => `${exam.subject_count} درس`,
+                },
+                {
+                  key: 'avg_percentage',
+                  header: 'میانگین درصد',
+                  mobileLabel: 'میانگین درصد',
+                  priority: 'secondary',
+                  cellClassName: 'tabular-nums',
+                  cell: (exam) => (
+                    <span
+                      dir="ltr"
+                      className={`inline-block font-bold tabular-nums ${
+                        safeNumber(exam.avg_percentage) >= 50 ? 'text-emerald-600' : 'text-red-600'
+                      }`}
                     >
-                      <td className="px-5 py-4 font-semibold text-slate-800">
-                        <div className="flex items-center gap-2">
-                          <Calendar className="w-4 h-4 text-[#445D84]" aria-hidden="true" />
-                          <span>{formatJalaliLong(exam.exam_date)}</span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 tabular-nums text-slate-700 font-medium">
-                        {exam.student_count} نفر
-                      </td>
-                      <td className="px-5 py-4 tabular-nums text-slate-600">
-                        {exam.subject_count} درس
-                      </td>
-                      <td className="px-5 py-4 tabular-nums">
-                        <span
-                          dir="ltr"
-                          className={`inline-block font-bold ${
-                            safeNumber(exam.avg_percentage) >= 50 ? 'text-emerald-600' : 'text-red-600'
-                          }`}
-                        >
-                          {formatFixed(exam.avg_percentage, 1)}%
-                        </span>
-                      </td>
-                      <td className="px-5 py-4">
-                        <ActionButton
-                          type="button"
-                          variant="ghost"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            return handleSelectDate(exam.exam_date);
-                          }}
-                          icon={<Users className="w-4 h-4" />}
-                          className="px-3 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs"
-                        >
-                          <span>مشاهده شرکت‌کنندگان</span>
-                        </ActionButton>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )
+                      {formatFixed(exam.avg_percentage, 1)}%
+                    </span>
+                  ),
+                },
+                {
+                  key: 'actions',
+                  header: 'عملیات',
+                  priority: 'secondary',
+                  isAction: true,
+                  cell: (exam) => (
+                    <ActionButton
+                      type="button"
+                      variant="ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        return handleSelectDate(exam.exam_date);
+                      }}
+                      icon={<Users className="w-4 h-4" />}
+                      className="px-3 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs"
+                    >
+                      <span>مشاهده شرکت‌کنندگان</span>
+                    </ActionButton>
+                  ),
+                },
+              ] satisfies Column<ExamDateSummary>[]
+            }
+          />
+        </div>
       ) : view === 'students' ? (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-[#344868] text-white text-xs">
-                <tr>
-                  <th className="px-5 py-3.5 text-right font-semibold">دانش‌آموز</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">پایه</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">رشته</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">تعداد دروس</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">میانگین درصد</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">عملیات</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {students.map((s) => (
-                  <tr key={s.student_id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-5 py-4 font-semibold text-slate-800">{s.name}</td>
-                    <td className="px-5 py-4 tabular-nums text-slate-600">{s.grade}</td>
-                    <td className="px-5 py-4 text-slate-600">{s.field}</td>
-                    <td className="px-5 py-4 tabular-nums text-slate-600">{s.subject_count}</td>
-                    <td className="px-5 py-4 tabular-nums">
-                      <span
-                        dir="ltr"
-                        className={`inline-block font-bold ${
-                          safeNumber(s.avg_percentage) >= 50 ? 'text-emerald-600' : 'text-red-600'
-                        }`}
+          <DataTable<ExamStudentSummary>
+            tableAriaLabel="جدول شرکت‌کنندگان آزمون"
+            data={students}
+            rowKey={(s) => s.student_id}
+            columns={
+              [
+                {
+                  key: 'name',
+                  header: 'دانش‌آموز',
+                  priority: 'primary',
+                  cell: (s) => <span className="font-semibold text-slate-800">{s.name}</span>,
+                },
+                {
+                  key: 'grade',
+                  header: 'پایه',
+                  priority: 'desktop-only',
+                  cellClassName: 'tabular-nums text-slate-600',
+                  cell: (s) => `پایه ${s.grade}`,
+                },
+                {
+                  key: 'field',
+                  header: 'رشته',
+                  mobileLabel: 'پایه و رشته',
+                  priority: 'secondary',
+                  cellClassName: 'text-slate-600',
+                  cell: (s) => (
+                    <span>
+                      <span className="md:hidden tabular-nums">پایه {s.grade} · </span>
+                      <span>{s.field}</span>
+                    </span>
+                  ),
+                },
+                {
+                  key: 'subject_count',
+                  header: 'تعداد دروس',
+                  priority: 'desktop-only',
+                  cellClassName: 'tabular-nums text-slate-600',
+                  cell: (s) => `${s.subject_count} درس`,
+                },
+                {
+                  key: 'avg_percentage',
+                  header: 'میانگین درصد',
+                  mobileLabel: 'میانگین کل',
+                  priority: 'secondary',
+                  cellClassName: 'tabular-nums',
+                  cell: (s) => (
+                    <span
+                      dir="ltr"
+                      className={`inline-block font-bold tabular-nums ${
+                        safeNumber(s.avg_percentage) >= 50 ? 'text-emerald-600' : 'text-red-600'
+                      }`}
+                    >
+                      {formatFixed(s.avg_percentage, 1)}%
+                    </span>
+                  ),
+                },
+                {
+                  key: 'actions',
+                  header: 'عملیات',
+                  priority: 'secondary',
+                  isAction: true,
+                  cell: (s) => (
+                    <div className="flex items-center gap-1.5">
+                      <ActionButton
+                        type="button"
+                        variant="ghost"
+                        onClick={() =>
+                          selectedDate
+                            ? handleSelectStudentDetails(selectedDate, s.student_id, false)
+                            : undefined
+                        }
+                        icon={<Eye className="w-4 h-4" />}
+                        className="px-2.5 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs"
                       >
-                        {formatFixed(s.avg_percentage, 1)}%
-                      </span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-1.5">
-                        <ActionButton
-                          type="button"
-                          variant="ghost"
-                          onClick={() =>
-                            selectedDate
-                              ? handleSelectStudentDetails(selectedDate, s.student_id, false)
-                              : undefined
-                          }
-                          icon={<Eye className="w-4 h-4" />}
-                          className="px-3 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs"
-                        >
-                          <span>جزئیات کارنامه</span>
-                        </ActionButton>
-                        <ActionButton
-                          type="button"
-                          variant="ghost"
-                          onClick={() =>
-                            selectedDate
-                              ? handleSelectStudentDetails(selectedDate, s.student_id, true)
-                              : undefined
-                          }
-                          icon={<Printer className="w-4 h-4" />}
-                          className="px-3 py-1.5 rounded-lg text-emerald-700 hover:bg-emerald-50 font-medium text-xs"
-                        >
-                          <span>چاپ کارنامه</span>
-                        </ActionButton>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                        <span>کارنامه</span>
+                      </ActionButton>
+                      <ActionButton
+                        type="button"
+                        variant="ghost"
+                        onClick={() =>
+                          selectedDate
+                            ? handleSelectStudentDetails(selectedDate, s.student_id, true)
+                            : undefined
+                        }
+                        icon={<Printer className="w-4 h-4" />}
+                        className="px-2.5 py-1.5 rounded-lg text-emerald-700 hover:bg-emerald-50 font-medium text-xs"
+                      >
+                        <span className="hidden sm:inline">چاپ کارنامه</span>
+                        <span className="sm:hidden">چاپ</span>
+                      </ActionButton>
+                    </div>
+                  ),
+                },
+              ] satisfies Column<ExamStudentSummary>[]
+            }
+          />
         </div>
       ) : (
         details && (
@@ -469,7 +516,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
             {/* =====================================================================
                 1. INTERACTIVE SCREEN VIEW (Hidden during window.print())
                ===================================================================== */}
-            <div className="no-print bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-6">
+            <div className="no-print bg-white rounded-2xl p-4 sm:p-6 border border-slate-200/80 shadow-xs space-y-6">
               {/* Screen Banner */}
               <div className="border-b-2 border-[#344868] pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
@@ -498,7 +545,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 text-center">
                   <p className="text-slate-500 text-xs mb-1">نام دانش‌آموز</p>
-                  <p className="font-bold text-sm text-slate-800 truncate">
+                  <p className="font-bold text-sm text-slate-800 break-words">
                     {details.student?.name || '-'}
                   </p>
                 </div>
@@ -533,49 +580,83 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                 </div>
               </div>
 
-              {/* Subject-by-Subject Percentages Table */}
+              {/* Subject-by-Subject Percentages Table (Desktop Table + Mobile Cards) */}
               <div>
                 <h3 className="font-bold text-sm sm:text-base mb-2.5 text-[#344868]">
                   ۱. جدول جزئیات درصدهای دروس آزمون:
                 </h3>
-                <div className="overflow-x-auto rounded-xl border border-slate-300">
-                  <table className="w-full text-sm">
-                    <thead className="bg-[#344868] text-white text-xs">
-                      <tr>
-                        <th className="px-3 py-2.5 text-center font-semibold w-10">ردیف</th>
-                        <th className="px-4 py-2.5 text-right font-semibold">نام درس</th>
-                        <th className="px-4 py-2.5 text-right font-semibold">مبحث</th>
-                        <th className="px-3 py-2.5 text-center font-semibold">کل سوالات</th>
-                        <th className="px-3 py-2.5 text-center font-semibold">صحیح</th>
-                        <th className="px-3 py-2.5 text-center font-semibold">غلط</th>
-                        <th className="px-3 py-2.5 text-center font-semibold">نزده</th>
-                        <th className="px-3 py-2.5 text-center font-semibold">درصد (با نمره منفی)</th>
-                        <th className="px-3 py-2.5 text-center font-semibold">نمودار</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {(details.subjects || []).map((sub, idx) => {
-                        const pct = safeNumber(sub.percentage);
-                        return (
-                          <tr key={idx} className="hover:bg-slate-50/80">
-                            <td className="px-3 py-2.5 text-center tabular-nums text-slate-500 text-xs">
-                              {idx + 1}
-                            </td>
-                            <td className="px-4 py-2.5 font-bold text-slate-800">{sub.subject}</td>
-                            <td className="px-4 py-2.5 text-slate-600">{sub.chapter || '-'}</td>
-                            <td className="px-3 py-2.5 text-center tabular-nums font-medium">
-                              {sub.total_q}
-                            </td>
-                            <td className="px-3 py-2.5 text-center tabular-nums text-emerald-700 font-bold">
-                              {sub.correct}
-                            </td>
-                            <td className="px-3 py-2.5 text-center tabular-nums text-red-600 font-bold">
-                              {sub.wrong}
-                            </td>
-                            <td className="px-3 py-2.5 text-center tabular-nums text-slate-600">
-                              {sub.skipped}
-                            </td>
-                            <td className="px-3 py-2.5 text-center tabular-nums">
+                <div className="rounded-xl border border-slate-300 overflow-hidden bg-slate-50/30 md:bg-white">
+                  <DataTable<SubjectResult>
+                    tableAriaLabel="جدول جزئیات درصدهای دروس آزمون"
+                    data={details.subjects || []}
+                    rowKey={(sub, idx) => `${sub.subject}-${idx}`}
+                    columns={
+                      [
+                        {
+                          key: 'row_num',
+                          header: 'ردیف',
+                          priority: 'desktop-only',
+                          headerClassName: 'text-center w-12',
+                          cellClassName: 'text-center tabular-nums text-slate-500 text-xs',
+                          cell: (_sub, idx) => idx + 1,
+                        },
+                        {
+                          key: 'subject',
+                          header: 'نام درس',
+                          priority: 'primary',
+                          cellClassName: 'font-bold text-slate-800',
+                          cell: (sub) => sub.subject,
+                        },
+                        {
+                          key: 'chapter',
+                          header: 'مبحث',
+                          priority: 'secondary',
+                          hideWhenEmpty: true,
+                          rawValue: (sub) => sub.chapter,
+                          cellClassName: 'text-slate-600',
+                          cell: (sub) => sub.chapter || '-',
+                        },
+                        {
+                          key: 'total_q',
+                          header: 'کل سوالات',
+                          priority: 'secondary',
+                          headerClassName: 'text-center',
+                          cellClassName: 'text-center tabular-nums font-medium',
+                          cell: (sub) => sub.total_q,
+                        },
+                        {
+                          key: 'correct',
+                          header: 'صحیح',
+                          priority: 'secondary',
+                          headerClassName: 'text-center',
+                          cellClassName: 'text-center tabular-nums text-emerald-700 font-bold',
+                          cell: (sub) => sub.correct,
+                        },
+                        {
+                          key: 'wrong',
+                          header: 'غلط',
+                          priority: 'secondary',
+                          headerClassName: 'text-center',
+                          cellClassName: 'text-center tabular-nums text-red-600 font-bold',
+                          cell: (sub) => sub.wrong,
+                        },
+                        {
+                          key: 'skipped',
+                          header: 'نزده',
+                          priority: 'secondary',
+                          headerClassName: 'text-center',
+                          cellClassName: 'text-center tabular-nums text-slate-600',
+                          cell: (sub) => sub.skipped,
+                        },
+                        {
+                          key: 'percentage',
+                          header: 'درصد (با نمره منفی)',
+                          priority: 'secondary',
+                          headerClassName: 'text-center',
+                          cellClassName: 'text-center tabular-nums',
+                          cell: (sub) => {
+                            const pct = safeNumber(sub.percentage);
+                            return (
                               <span
                                 dir="ltr"
                                 className={`inline-block px-2.5 py-1 rounded-lg font-extrabold text-xs ${
@@ -586,15 +667,72 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                               >
                                 {pct.toFixed(1)}%
                               </span>
-                            </td>
-                            <td className="px-3 py-1.5 text-center">
-                              <RadialGauge percentage={pct} />
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                            );
+                          },
+                        },
+                        {
+                          key: 'chart',
+                          header: 'نمودار',
+                          priority: 'desktop-only',
+                          headerClassName: 'text-center',
+                          cellClassName: 'py-1.5 text-center',
+                          cell: (sub) => <RadialGauge percentage={safeNumber(sub.percentage)} />,
+                        },
+                      ] satisfies Column<SubjectResult>[]
+                    }
+                    mobileCardRender={(sub) => {
+                      const pct = safeNumber(sub.percentage);
+                      const cleanChapter =
+                        sub.chapter && sub.chapter.trim() !== '' && sub.chapter.trim() !== '-'
+                          ? sub.chapter.trim()
+                          : '';
+                      return (
+                        <div className="space-y-2.5">
+                          {/* ردیف بالا: نام درس (عنوان بزرگ، بدون بریده شدن) + badge درصد در گوشه کارت */}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-base font-extrabold text-slate-800 break-words leading-snug">
+                                {sub.subject}
+                              </div>
+                              {cleanChapter && (
+                                <div className="text-xs text-slate-500 mt-0.5 break-words">
+                                  مبحث: {cleanChapter}
+                                </div>
+                              )}
+                            </div>
+                            <span
+                              dir="ltr"
+                              className={`shrink-0 inline-block px-2.5 py-1 rounded-lg font-extrabold text-xs tabular-nums ${
+                                pct >= 50
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : 'bg-red-50 text-red-700 border border-red-200'
+                              }`}
+                            >
+                              {pct.toFixed(1)}%
+                            </span>
+                          </div>
+
+                          {/* ردیف پایین: سه chip (صحیح سبز، غلط قرمز، نزده خاکستری) + کل سوالات به صورت متن کوچک کنار آن‌ها */}
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                            <div className="flex flex-wrap items-center gap-1.5 text-xs tabular-nums">
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">
+                                صحیح: {sub.correct}
+                              </span>
+                              <span className="px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-200 font-bold">
+                                غلط: {sub.wrong}
+                              </span>
+                              <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200 font-semibold">
+                                نزده: {sub.skipped}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-slate-500 font-medium tabular-nums">
+                              کل سوالات: {sub.total_q}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    }}
+                  />
                 </div>
               </div>
 
@@ -733,7 +871,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
               <table className="w-full border-collapse mb-2.5">
                 <tbody>
                   <tr>
-                    <td className="border-2 border-slate-700 p-2 bg-slate-100 text-right w-2/3">
+                    <td className="border-2 border-slate-700 p-2 bg-slate-100 text-start w-2/3">
                       <div className="text-[10px] font-bold text-slate-600">
                         آموزشگاه علمی و کنکور فامو
                       </div>
@@ -741,7 +879,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                         کارنامه تحلیلی آزمون هفتگی و برگه‌ی ارزیابی اساتید
                       </div>
                     </td>
-                    <td className="border-2 border-slate-700 p-2 bg-slate-50 text-left w-1/3">
+                    <td className="border-2 border-slate-700 p-2 bg-slate-50 text-end w-1/3">
                       <div className="text-[11px] font-bold text-slate-800">
                         تاریخ آزمون: {formatJalaliLong(activeExamDate)}
                       </div>
@@ -800,8 +938,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   <thead>
                     <tr className="bg-slate-800 text-white text-[10px]">
                       <th className="border border-slate-600 py-1.5 px-1.5 w-8">ردیف</th>
-                      <th className="border border-slate-600 py-1.5 px-2 text-right">نام درس</th>
-                      <th className="border border-slate-600 py-1.5 px-2 text-right">مبحث</th>
+                      <th className="border border-slate-600 py-1.5 px-2 text-start">نام درس</th>
+                      <th className="border border-slate-600 py-1.5 px-2 text-start">مبحث</th>
                       <th className="border border-slate-600 py-1.5 px-1.5 w-14">کل سوالات</th>
                       <th className="border border-slate-600 py-1.5 px-1.5 w-12">صحیح</th>
                       <th className="border border-slate-600 py-1.5 px-1.5 w-12">غلط</th>
@@ -819,10 +957,10 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                           <td className="border border-slate-400 py-1.5 px-1.5 tabular-nums">
                             {idx + 1}
                           </td>
-                          <td className="border border-slate-400 py-1.5 px-2 text-right font-bold">
+                          <td className="border border-slate-400 py-1.5 px-2 text-start font-bold">
                             {sub.subject}
                           </td>
-                          <td className="border border-slate-400 py-1.5 px-2 text-right text-slate-700">
+                          <td className="border border-slate-400 py-1.5 px-2 text-start text-slate-700">
                             {sub.chapter || '-'}
                           </td>
                           <td className="border border-slate-400 py-1.5 px-1.5 tabular-nums font-semibold">
@@ -868,7 +1006,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   <table className="w-full border-collapse text-center text-[10px]">
                     <thead>
                       <tr className="bg-slate-100 text-slate-700">
-                        <th className="border border-slate-400 py-1 px-2 text-right">شاخص</th>
+                        <th className="border border-slate-400 py-1 px-2 text-start">شاخص</th>
                         {effectiveTrendPoints.map((pt, i) => (
                           <th
                             key={pt.exam_date}
@@ -881,7 +1019,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                     </thead>
                     <tbody>
                       <tr>
-                        <td className="border border-slate-400 py-1 px-2 text-right font-bold">
+                        <td className="border border-slate-400 py-1 px-2 text-start font-bold">
                           میانگین درصد
                         </td>
                         {effectiveTrendPoints.map((pt) => (
@@ -896,7 +1034,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                         ))}
                       </tr>
                       <tr>
-                        <td className="border border-slate-400 py-1 px-2 text-right font-semibold text-slate-600">
+                        <td className="border border-slate-400 py-1 px-2 text-start font-semibold text-slate-600">
                           تغییر نسبت به آزمون قبل
                         </td>
                         {effectiveTrendPoints.map((pt) => (
@@ -929,13 +1067,13 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="bg-slate-100 text-slate-800 text-[10px]">
-                      <th className="border border-slate-400 py-1.5 px-2 text-right w-36">
+                      <th className="border border-slate-400 py-1.5 px-2 text-start w-36">
                         نام درس و درصد
                       </th>
-                      <th className="border border-slate-400 py-1.5 px-2 text-right w-28">
+                      <th className="border border-slate-400 py-1.5 px-2 text-start w-28">
                         نام استاد
                       </th>
-                      <th className="border border-slate-400 py-1.5 px-2 text-right">
+                      <th className="border border-slate-400 py-1.5 px-2 text-start">
                         نظر استاد، تحلیل آزمون و تکالیف هفته آینده
                       </th>
                       <th className="border border-slate-400 py-1.5 px-2 text-center w-20">

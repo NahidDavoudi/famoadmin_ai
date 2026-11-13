@@ -11,10 +11,12 @@ import {
 } from 'lucide-react';
 import API from '../lib/api';
 import { validateSupporterForm, type FieldErrors } from '../lib/form-validation';
+import { resolveEntityImageUrl } from '../lib/image-upload';
 import type { AcademicField, Supporter, ToastType } from '../types';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
+import { DataTable, type Column } from '../components/DataTable';
 
 interface SupportersPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -30,7 +32,7 @@ const FIELDS: AcademicField[] = [
   'راهنمایی',
 ];
 
-type SupporterFieldKey = 'name' | 'phone' | 'grade' | 'field' | 'username' | 'password';
+type SupporterFieldKey = 'name' | 'phone' | 'grade' | 'field' | 'password';
 
 export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => {
   const [supporters, setSupporters] = useState<Supporter[]>([]);
@@ -46,8 +48,8 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
     phone: '',
     grade: '12',
     field: '' as AcademicField | '',
+    is_active: 1,
     chat_id: '',
-    username: '',
     password: '',
   });
   const [errors, setErrors] = useState<FieldErrors<SupporterFieldKey>>({});
@@ -78,8 +80,8 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       phone: '',
       grade: '12',
       field: '',
+      is_active: 1,
       chat_id: '',
-      username: '',
       password: '',
     });
     setShowPassword(false);
@@ -94,8 +96,8 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       phone: String(s.phone ?? ''),
       grade: String(s.grade ?? '12'),
       field: (s.field as AcademicField) || '',
+      is_active: s.is_active === false || s.is_active === 0 ? 0 : 1,
       chat_id: s.chat_id !== null && s.chat_id !== undefined ? String(s.chat_id) : '',
-      username: String(s.username ?? ''),
       password: '',
     });
     setShowPassword(false);
@@ -113,14 +115,17 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
     }
 
     const trimmedChatId = String(formState.chat_id ?? '').trim();
+    const trimmedPhone = String(formState.phone ?? '').trim();
 
     setSubmitting(true);
     try {
       if (editingSupporter) {
         await API.updateSupporter(editingSupporter.id, {
           name: String(formState.name ?? '').trim(),
+          phone: trimmedPhone || null,
           grade: Number(formState.grade),
           field: formState.field as AcademicField,
+          is_active: formState.is_active ? 1 : 0,
           chat_id: trimmedChatId || null,
           password: formState.password || undefined,
         });
@@ -129,12 +134,10 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       } else {
         await API.addSupporter({
           name: String(formState.name ?? '').trim(),
-          phone: String(formState.phone ?? '').trim(),
+          phone: trimmedPhone,
           grade: Number(formState.grade),
           field: formState.field as AcademicField,
           chat_id: trimmedChatId || null,
-          username: String(formState.username ?? '').trim(),
-          password: formState.password,
         });
         setIsAddOpen(false);
         showToast('پشتیبان جدید اضافه شد', 'success');
@@ -159,6 +162,111 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       showToast((err as Error).message || 'خطا در حذف پشتیبان', 'error');
     }
   };
+
+  const supporterColumns: Column<Supporter>[] = [
+    {
+      key: 'name',
+      header: 'نام پشتیبان',
+      priority: 'primary',
+      headerClassName: 'min-w-[180px]',
+      cellClassName: 'font-semibold text-slate-800 whitespace-nowrap',
+      cell: (s) => {
+        const imgSrc = resolveEntityImageUrl(s.avatar_url || s.avatar);
+        return (
+          <div className="flex items-center gap-3">
+            {imgSrc ? (
+              <img
+                src={imgSrc}
+                alt={s.name}
+                className="hidden md:block w-9 h-9 rounded-full object-cover border border-slate-200 shrink-0 bg-slate-100"
+              />
+            ) : (
+              <div className="hidden md:flex w-9 h-9 rounded-full bg-[#E2D9C6] items-center justify-center text-[#445D84] font-bold text-xs shrink-0">
+                {s.name.charAt(0)}
+              </div>
+            )}
+            <span>{s.name}</span>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'phone',
+      header: 'شماره تماس',
+      priority: 'secondary',
+      mobileLabel: 'شماره تماس',
+      cellClassName: 'tabular-nums text-slate-600',
+      value: (s) => s.phone || '-',
+      cell: (s) => (
+        <span dir="ltr" className="inline-block">
+          {s.phone || '-'}
+        </span>
+      ),
+    },
+    {
+      key: 'grade',
+      header: 'پایه',
+      priority: 'desktop-only',
+      cellClassName: 'tabular-nums text-slate-600',
+      cell: (s) => `پایه ${s.grade}`,
+    },
+    {
+      key: 'field',
+      header: 'رشته / درس',
+      priority: 'secondary',
+      mobileLabel: 'پایه و رشته',
+      cellClassName: 'text-slate-600',
+      cell: (s) => (
+        <span>
+          <span className="md:hidden">پایه {s.grade} • </span>
+          {s.field}
+        </span>
+      ),
+    },
+    {
+      key: 'is_active',
+      header: 'وضعیت',
+      priority: 'secondary',
+      mobileLabel: 'وضعیت',
+      cell: (s) => {
+        const active = s.is_active !== false && s.is_active !== 0;
+        return (
+          <span
+            className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-semibold ${
+              active ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+            }`}
+          >
+            {active ? 'فعال' : 'غیرفعال'}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'chat_id',
+      header: 'شناسه تلگرام',
+      priority: 'desktop-only',
+      cellClassName: 'tabular-nums',
+      cell: (s) =>
+        s.chat_id ? (
+          <span className="text-emerald-600 font-medium">{s.chat_id}</span>
+        ) : (
+          <span className="text-slate-400">ثبت نشده</span>
+        ),
+    },
+    {
+      key: 'reports',
+      header: 'گزارش‌ها (پاسخ / انتظار)',
+      priority: 'desktop-only',
+      cellClassName: 'tabular-nums',
+      cell: (s) => (
+        <span>
+          <span className="text-emerald-600 font-semibold">{s.replied_count ?? 0}</span>
+          <span className="text-slate-300 mx-1.5">/</span>
+          <span className="text-amber-600 font-semibold">{s.pending_count ?? 0}</span>
+        </span>
+      ),
+    },
+  ];
 
   return (
     <div id="page-supporters" className="space-y-6">
@@ -245,82 +353,37 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-[#344868] text-white text-xs">
-                <tr>
-                  <th className="px-5 py-3.5 text-right font-semibold">نام</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">پایه</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">رشته / درس</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">شناسه تلگرام</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">گزارش‌ها (پاسخ / انتظار)</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">میانگین پاسخگویی</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">عملیات</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {supporters.map((s) => (
-                  <tr key={s.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-5 py-4 font-semibold text-slate-800">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-[#E2D9C6] flex items-center justify-center text-[#445D84] font-bold text-xs shrink-0">
-                          {s.name.charAt(0)}
-                        </div>
-                        <span>{s.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 tabular-nums text-slate-600">پایه {s.grade}</td>
-                    <td className="px-5 py-4 text-slate-600">{s.field}</td>
-                    <td className="px-5 py-4 tabular-nums">
-                      {s.chat_id ? (
-                        <span className="text-emerald-600 font-medium">{s.chat_id}</span>
-                      ) : (
-                        <span className="text-slate-400">ثبت نشده</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-4 tabular-nums">
-                      <span className="text-emerald-600 font-semibold">{s.replied_count}</span>
-                      <span className="text-slate-300 mx-1.5">/</span>
-                      <span className="text-amber-600 font-semibold">{s.pending_count}</span>
-                    </td>
-                    <td className="px-5 py-4 tabular-nums">
-                      {s.avg_response_hours ? (
-                        <span className="text-blue-600 font-medium">
-                          {Number(s.avg_response_hours).toFixed(1)} ساعت
-                        </span>
-                      ) : (
-                        <span className="text-slate-400">-</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-1">
-                        <ActionButton
-                          type="button"
-                          variant="ghost"
-                          onClick={() => openEdit(s)}
-                          className="p-2 rounded-lg text-blue-600 hover:bg-blue-50"
-                          title="ویرایش"
-                          aria-label={`ویرایش پشتیبان ${s.name}`}
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </ActionButton>
-                        <ActionButton
-                          type="button"
-                          variant="ghost"
-                          onClick={() => setDeleteTarget(s)}
-                          className="p-2 rounded-lg text-red-600 hover:bg-red-50"
-                          title="حذف"
-                          aria-label={`حذف پشتیبان ${s.name}`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </ActionButton>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={supporterColumns}
+            data={supporters}
+            rowKey={(s) => s.id}
+            ariaLabel="جدول پشتیبان‌ها"
+            actionsHeader="عملیات"
+            renderActions={(s) => (
+              <div className="flex items-center gap-1">
+                <ActionButton
+                  type="button"
+                  variant="ghost"
+                  onClick={() => openEdit(s)}
+                  className="min-w-11 min-h-11 p-2.5 rounded-xl text-blue-600 hover:bg-blue-50"
+                  title="ویرایش"
+                  aria-label={`ویرایش پشتیبان ${s.name}`}
+                >
+                  <Pencil className="w-4 h-4" />
+                </ActionButton>
+                <ActionButton
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setDeleteTarget(s)}
+                  className="min-w-11 min-h-11 p-2.5 rounded-xl text-red-600 hover:bg-red-50"
+                  title="حذف"
+                  aria-label={`حذف پشتیبان ${s.name}`}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </ActionButton>
+              </div>
+            )}
+          />
         </div>
       )}
 
@@ -335,7 +398,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
           }
         }}
         title={editingSupporter ? 'ویرایش پشتیبان' : 'افزودن پشتیبان جدید'}
-        subtitle="اطلاعات پشتیبان تحصیلی"
+        subtitle="اطلاعات پشتیبان تحصیلی (مطابق API بک‌اند)"
         icon={<Headset className="w-5 h-5" />}
         footer={
           <div className="flex items-center gap-3">
@@ -383,27 +446,25 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
             <FieldError message={errors.name} />
           </div>
 
-          {!editingSupporter && (
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">
-                شماره موبایل <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="tel"
-                maxLength={11}
-                placeholder="09123456789"
-                dir="ltr"
-                aria-invalid={Boolean(errors.phone)}
-                value={formState.phone}
-                onChange={(e) => {
-                  setFormState({ ...formState, phone: e.target.value });
-                  if (errors.phone) setErrors((prev) => ({ ...prev, phone: undefined }));
-                }}
-                className={getFieldClass(Boolean(errors.phone), 'text-left')}
-              />
-              <FieldError message={errors.phone} />
-            </div>
-          )}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              شماره موبایل {!editingSupporter && <span className="text-red-500">*</span>}
+            </label>
+            <input
+              type="tel"
+              maxLength={14}
+              placeholder="09123456789"
+              dir="ltr"
+              aria-invalid={Boolean(errors.phone)}
+              value={formState.phone}
+              onChange={(e) => {
+                setFormState({ ...formState, phone: e.target.value });
+                if (errors.phone) setErrors((prev) => ({ ...prev, phone: undefined }));
+              }}
+              className={getFieldClass(Boolean(errors.phone), 'text-start')}
+            />
+            <FieldError message={errors.phone} />
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -462,63 +523,55 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
               dir="ltr"
               value={formState.chat_id}
               onChange={(e) => setFormState({ ...formState, chat_id: e.target.value })}
-              className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm text-left focus:outline-none focus:border-[#445D84]"
+              className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm text-start focus:outline-none focus:border-[#445D84]"
             />
           </div>
 
-          {!editingSupporter && (
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">
-                نام کاربری <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                placeholder="برای ورود به پنل"
-                aria-invalid={Boolean(errors.username)}
-                value={formState.username}
-                onChange={(e) => {
-                  setFormState({ ...formState, username: e.target.value });
-                  if (errors.username) setErrors((prev) => ({ ...prev, username: undefined }));
-                }}
-                className={getFieldClass(Boolean(errors.username))}
-              />
-              <FieldError message={errors.username} />
-            </div>
-          )}
+          {editingSupporter && (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">وضعیت فعالیت</label>
+                <select
+                  value={String(formState.is_active)}
+                  onChange={(e) =>
+                    setFormState({ ...formState, is_active: Number(e.target.value) })
+                  }
+                  className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#445D84]"
+                >
+                  <option value="1">فعال</option>
+                  <option value="0">غیرفعال</option>
+                </select>
+              </div>
 
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
-              {editingSupporter ? (
-                'رمز عبور جدید (خالی = بدون تغییر)'
-              ) : (
-                <>
-                  رمز عبور <span className="text-red-500">*</span>
-                </>
-              )}
-            </label>
-            <div className="relative">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                placeholder="حداقل ۴ کاراکتر"
-                aria-invalid={Boolean(errors.password)}
-                value={formState.password}
-                onChange={(e) => {
-                  setFormState({ ...formState, password: e.target.value });
-                  if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
-                }}
-                className={getFieldClass(Boolean(errors.password), 'pl-10 pr-3.5')}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                aria-label="نمایش یا مخفی کردن رمز عبور"
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-              >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-            <FieldError message={errors.password} />
-          </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  رمز عبور جدید (خالی = بدون تغییر)
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="حداقل ۴ کاراکتر"
+                    aria-invalid={Boolean(errors.password)}
+                    value={formState.password}
+                    onChange={(e) => {
+                      setFormState({ ...formState, password: e.target.value });
+                      if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
+                    }}
+                    className={getFieldClass(Boolean(errors.password), 'ps-3.5 pe-10')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-label="نمایش یا مخفی کردن رمز عبور"
+                    className="absolute end-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <FieldError message={errors.password} />
+              </div>
+            </>
+          )}
         </form>
       </Modal>
 

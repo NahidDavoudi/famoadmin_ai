@@ -18,6 +18,7 @@ import type { AcademicField, Student, ToastType } from '../types';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
+import { DataTable, type Column } from '../components/DataTable';
 
 interface StudentsPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -307,6 +308,140 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     });
   };
 
+  const studentColumns: Column<Student>[] = [
+    {
+      key: 'name',
+      header: 'نام',
+      priority: 'primary',
+      headerClassName: 'min-w-[180px]',
+      cellClassName: 'font-semibold text-slate-800 whitespace-nowrap',
+      cell: (s) => s.name,
+    },
+    {
+      key: 'contact',
+      header: 'تماس / کد ملی',
+      priority: 'secondary',
+      mobileLabel: 'شماره تماس',
+      headerClassName: 'text-center',
+      cellClassName: 'text-center tabular-nums',
+      value: (s) => s.phone || s.national_id || '-',
+      cell: (s) => (
+        <div className="flex flex-col md:items-center text-xs tabular-nums" dir="ltr">
+          <span className="text-slate-700 font-medium">{s.phone || '-'}</span>
+          <span className="text-slate-400 hidden md:inline">{s.national_id || '-'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'grade',
+      header: 'پایه',
+      priority: 'desktop-only',
+      headerClassName: 'text-center',
+      cellClassName: 'text-center text-slate-600 tabular-nums',
+      cell: (s) => `پایه ${s.grade}`,
+    },
+    {
+      key: 'field',
+      header: 'رشته',
+      priority: 'secondary',
+      mobileLabel: 'پایه و رشته',
+      headerClassName: 'text-center',
+      cellClassName: 'text-center font-medium text-slate-700',
+      cell: (s) => (
+        <span>
+          <span className="md:hidden">پایه {s.grade} • </span>
+          {s.field}
+        </span>
+      ),
+    },
+    {
+      key: 'account',
+      header: 'حساب',
+      priority: 'secondary',
+      mobileLabel: 'وضعیت حساب',
+      headerClassName: 'text-center',
+      cellClassName: 'text-center',
+      cell: (s) => {
+        const isActive = Number(s.status ?? s.is_active ?? 1) === 1;
+        return (
+          <span
+            className={`text-xs font-semibold ${
+              isActive ? 'text-emerald-700' : 'text-slate-500'
+            }`}
+          >
+            {isActive ? 'فعال' : 'غیرفعال'}
+          </span>
+        );
+      },
+    },
+  ];
+
+  const renderStudentActions = (s: Student) => {
+    const isActive = Number(s.status ?? s.is_active ?? 1) === 1;
+    const hasAccount = s.user_id !== undefined ? Boolean(s.user_id) : true;
+    return (
+      <div className="flex items-center justify-center gap-1">
+        <ActionButton
+          type="button"
+          variant="ghost"
+          onClick={() => openEditModal(s)}
+          className="min-w-11 min-h-11 p-2.5 rounded-xl text-blue-600 hover:bg-blue-50"
+          title="ویرایش"
+          aria-label={`ویرایش دانش‌آموز ${s.name}`}
+        >
+          <Pencil className="w-4 h-4" />
+        </ActionButton>
+        {hasAccount ? (
+          <ActionButton
+            type="button"
+            variant="ghost"
+            onClick={() => handleResetPassword(s)}
+            className="min-w-11 min-h-11 p-2.5 rounded-xl text-amber-600 hover:bg-amber-50"
+            title="بازنشانی رمز"
+            aria-label={`بازنشانی رمز دانش‌آموز ${s.name}`}
+          >
+            <KeyRound className="w-4 h-4" />
+          </ActionButton>
+        ) : (
+          <ActionButton
+            type="button"
+            variant="ghost"
+            onClick={() => handleCreateAccount(s)}
+            className="min-w-11 min-h-11 p-2.5 rounded-xl text-emerald-600 hover:bg-emerald-50"
+            title="ایجاد حساب"
+            aria-label={`ایجاد حساب ${s.name}`}
+          >
+            <UserPlus className="w-4 h-4" />
+          </ActionButton>
+        )}
+        <ActionButton
+          type="button"
+          variant="ghost"
+          onClick={() => handleToggleStatus(s)}
+          className={`min-w-11 min-h-11 p-2.5 rounded-xl ${
+            isActive
+              ? 'text-amber-600 hover:bg-amber-50'
+              : 'text-emerald-600 hover:bg-emerald-50'
+          }`}
+          title={isActive ? 'غیرفعال کردن' : 'فعال کردن'}
+          aria-label={`${isActive ? 'غیرفعال کردن' : 'فعال کردن'} دانش‌آموز ${s.name}`}
+        >
+          {isActive ? <Minus className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+        </ActionButton>
+        <ActionButton
+          type="button"
+          variant="ghost"
+          onClick={() => handleDeleteStudent(s)}
+          className="min-w-11 min-h-11 p-2.5 rounded-xl text-red-600 hover:bg-red-50"
+          title="حذف"
+          aria-label={`حذف دانش‌آموز ${s.name}`}
+        >
+          <Trash2 className="w-4 h-4" />
+        </ActionButton>
+      </div>
+    );
+  };
+
   return (
     <div id="page-students" className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -434,117 +569,14 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-[#344868] text-white text-xs">
-                <tr>
-                  <th className="px-4 py-3.5 text-right font-semibold">نام</th>
-                  <th className="px-4 py-3.5 text-center font-semibold">تماس / کد ملی</th>
-                  <th className="px-4 py-3.5 text-center font-semibold">پایه</th>
-                  <th className="px-4 py-3.5 text-center font-semibold">رشته</th>
-                  <th className="px-4 py-3.5 text-center font-semibold">حساب</th>
-                  <th className="px-4 py-3.5 text-center font-semibold">عملیات</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {students.map((s) => {
-                  const isActive = Number(s.status ?? s.is_active ?? 1) === 1;
-                  const hasAccount = s.user_id !== undefined ? Boolean(s.user_id) : true;
-                  return (
-                    <tr key={s.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="px-4 py-3 font-semibold text-slate-800">{s.name}</td>
-                      <td className="px-4 py-3 text-center tabular-nums" dir="ltr">
-                        <div className="flex flex-col items-center text-xs">
-                          <span className="text-slate-700 font-medium">{s.phone || '-'}</span>
-                          <span className="text-slate-400">{s.national_id || '-'}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-center text-slate-600 tabular-nums">
-                        پایه {s.grade}
-                      </td>
-                      <td className="px-4 py-3 text-center font-medium text-slate-700">
-                        {s.field}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span
-                          className={`text-xs font-semibold ${
-                            isActive ? 'text-emerald-700' : 'text-slate-500'
-                          }`}
-                        >
-                          {isActive ? 'فعال' : 'غیرفعال'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          <ActionButton
-                            type="button"
-                            variant="ghost"
-                            onClick={() => openEditModal(s)}
-                            className="p-2 rounded-lg text-blue-600 hover:bg-blue-50"
-                            title="ویرایش"
-                            aria-label={`ویرایش دانش‌آموز ${s.name}`}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </ActionButton>
-                          {hasAccount ? (
-                            <ActionButton
-                              type="button"
-                              variant="ghost"
-                              onClick={() => handleResetPassword(s)}
-                              className="p-2 rounded-lg text-amber-600 hover:bg-amber-50"
-                              title="بازنشانی رمز"
-                              aria-label={`بازنشانی رمز دانش‌آموز ${s.name}`}
-                            >
-                              <KeyRound className="w-4 h-4" />
-                            </ActionButton>
-                          ) : (
-                            <ActionButton
-                              type="button"
-                              variant="ghost"
-                              onClick={() => handleCreateAccount(s)}
-                              className="p-2 rounded-lg text-emerald-600 hover:bg-emerald-50"
-                              title="ایجاد حساب"
-                              aria-label={`ایجاد حساب ${s.name}`}
-                            >
-                              <UserPlus className="w-4 h-4" />
-                            </ActionButton>
-                          )}
-                          <ActionButton
-                            type="button"
-                            variant="ghost"
-                            onClick={() => handleToggleStatus(s)}
-                            className={`p-2 rounded-lg ${
-                              isActive
-                                ? 'text-amber-600 hover:bg-amber-50'
-                                : 'text-emerald-600 hover:bg-emerald-50'
-                            }`}
-                            title={isActive ? 'غیرفعال کردن' : 'فعال کردن'}
-                            aria-label={`${isActive ? 'غیرفعال کردن' : 'فعال کردن'} دانش‌آموز ${s.name}`}
-                          >
-                            {isActive ? (
-                              <Minus className="w-4 h-4" />
-                            ) : (
-                              <Plus className="w-4 h-4" />
-                            )}
-                          </ActionButton>
-                          <ActionButton
-                            type="button"
-                            variant="ghost"
-                            onClick={() => handleDeleteStudent(s)}
-                            className="p-2 rounded-lg text-red-600 hover:bg-red-50"
-                            title="حذف"
-                            aria-label={`حذف دانش‌آموز ${s.name}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </ActionButton>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={studentColumns}
+            data={students}
+            rowKey={(s) => s.id}
+            ariaLabel="جدول دانش‌آموزان"
+            actionsHeader="عملیات"
+            renderActions={renderStudentActions}
+          />
 
           {/* Pagination */}
           {totalPages > 1 && (
@@ -654,7 +686,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
                   setAddForm({ ...addForm, phone: e.target.value });
                   if (addErrors.phone) setAddErrors((prev) => ({ ...prev, phone: undefined }));
                 }}
-                className={getFieldClass(Boolean(addErrors.phone), 'text-left')}
+                className={getFieldClass(Boolean(addErrors.phone), 'text-start')}
               />
               <FieldError message={addErrors.phone} />
             </div>
@@ -675,7 +707,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
                   if (addErrors.national_id)
                     setAddErrors((prev) => ({ ...prev, national_id: undefined }));
                 }}
-                className={getFieldClass(Boolean(addErrors.national_id), 'text-left')}
+                className={getFieldClass(Boolean(addErrors.national_id), 'text-start')}
               />
               <FieldError message={addErrors.national_id} />
             </div>
@@ -804,7 +836,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
                   setEditForm({ ...editForm, phone: e.target.value });
                   if (editErrors.phone) setEditErrors((prev) => ({ ...prev, phone: undefined }));
                 }}
-                className={getFieldClass(Boolean(editErrors.phone), 'text-left')}
+                className={getFieldClass(Boolean(editErrors.phone), 'text-start')}
               />
               <FieldError message={editErrors.phone} />
             </div>
@@ -824,7 +856,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
                   if (editErrors.national_id)
                     setEditErrors((prev) => ({ ...prev, national_id: undefined }));
                 }}
-                className={getFieldClass(Boolean(editErrors.national_id), 'text-left')}
+                className={getFieldClass(Boolean(editErrors.national_id), 'text-start')}
               />
               <FieldError message={editErrors.national_id} />
             </div>

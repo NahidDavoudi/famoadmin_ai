@@ -22,6 +22,7 @@ import {
 } from '../lib/activity-log';
 import type { ToastType } from '../types';
 import { ActionButton } from '../components/FormControls';
+import { DataTable, type Column } from '../components/DataTable';
 
 interface ActivityLogsPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -221,7 +222,7 @@ export const ActivityLogsPage: React.FC<ActivityLogsPageProps> = ({ showToast })
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-center">
           <div className="relative lg:col-span-2">
             <Search
-              className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+              className="w-4 h-4 text-slate-400 absolute start-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
               aria-hidden="true"
             />
             <input
@@ -230,7 +231,7 @@ export const ActivityLogsPage: React.FC<ActivityLogsPageProps> = ({ showToast })
               onChange={(e) => setSearch(e.target.value)}
               placeholder="جستجو در شرح عملیات، نام دانش‌آموز یا نام کاربر..."
               aria-label="جستجو در لاگ فعالیت‌ها"
-              className="w-full pr-10 pl-3.5 py-2 border-2 border-slate-200 rounded-xl text-xs sm:text-sm bg-white focus:outline-none focus:border-[#445D84]"
+              className="w-full ps-10 pe-3.5 py-2 border-2 border-slate-200 rounded-xl text-xs sm:text-sm bg-white focus:outline-none focus:border-[#445D84]"
             />
           </div>
 
@@ -318,69 +319,94 @@ export const ActivityLogsPage: React.FC<ActivityLogsPageProps> = ({ showToast })
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-[#344868] text-white text-xs">
-                <tr>
-                  <th className="px-4 py-3.5 text-right font-semibold">کی انجام داد؟ (کاربر)</th>
-                  <th className="px-4 py-3.5 text-right font-semibold">بخش</th>
-                  <th className="px-4 py-3.5 text-right font-semibold">نوع عملیات</th>
-                  <th className="px-4 py-3.5 text-right font-semibold">چیکار کرد؟ (شرح عملیات)</th>
-                  <th className="px-4 py-3.5 text-right font-semibold">زمان ثبت</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredLogs.map((item) => {
-                  const badge = getActionBadgeStyle(item.action_type);
-                  const roleLabel = ROLE_LABELS[item.actor_role] || item.actor_role;
-                  return (
-                    <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="px-4 py-3.5 whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <span className="w-7 h-7 rounded-lg bg-[#445D84]/10 text-[#445D84] flex items-center justify-center shrink-0">
-                            <UserCheck className="w-4 h-4" />
-                          </span>
-                          <div>
-                            <div className="font-bold text-slate-800 text-xs sm:text-sm">
-                              {item.actor_name}
-                            </div>
-                            <div className="text-[11px] text-slate-400">{roleLabel}</div>
+          <DataTable<ActivityLogItem>
+            columns={
+              [
+                {
+                  key: 'actor',
+                  header: 'کی انجام داد؟ (کاربر)',
+                  priority: 'secondary',
+                  mobileLabel: 'کاربر',
+                  cellClassName: 'whitespace-nowrap',
+                  cell: (item) => {
+                    const roleLabel = ROLE_LABELS[item.actor_role] || item.actor_role;
+                    return (
+                      <div className="flex items-center gap-2">
+                        <span className="hidden md:flex w-7 h-7 rounded-lg bg-[#445D84]/10 text-[#445D84] items-center justify-center shrink-0">
+                          <UserCheck className="w-4 h-4" />
+                        </span>
+                        <div>
+                          <div className="font-bold text-slate-800 text-xs sm:text-sm">
+                            {item.actor_name}
+                          </div>
+                          <div className="text-[11px] text-slate-400 hidden md:block">
+                            {roleLabel}
                           </div>
                         </div>
-                      </td>
-
-                      <td className="px-4 py-3.5 whitespace-nowrap">
-                        <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-md">
-                          {item.category_label}
-                        </span>
-                      </td>
-
-                      <td className="px-4 py-3.5 whitespace-nowrap">
-                        <span
-                          className={`inline-block text-xs font-bold px-2.5 py-0.5 rounded-md border ${badge.bg} ${badge.text}`}
-                        >
-                          {badge.label}
-                        </span>
-                      </td>
-
-                      <td className="px-4 py-3.5">
-                        <div className="font-bold text-slate-800 text-xs sm:text-sm">
-                          {item.title}
+                      </div>
+                    );
+                  },
+                },
+                {
+                  key: 'category',
+                  header: 'بخش',
+                  priority: 'desktop-only',
+                  cellClassName: 'whitespace-nowrap',
+                  cell: (item) => (
+                    <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-md">
+                      {item.category_label}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'action_type',
+                  header: 'نوع عملیات',
+                  priority: 'secondary',
+                  mobileLabel: 'نوع عملیات',
+                  cellClassName: 'whitespace-nowrap',
+                  cell: (item) => {
+                    const badge = getActionBadgeStyle(item.action_type);
+                    return (
+                      <span
+                        className={`inline-block text-xs font-bold px-2.5 py-0.5 rounded-md border ${badge.bg} ${badge.text}`}
+                      >
+                        {badge.label}
+                      </span>
+                    );
+                  },
+                },
+                {
+                  key: 'title',
+                  header: 'چیکار کرد؟ (شرح عملیات)',
+                  priority: 'primary',
+                  headerClassName: 'min-w-[220px]',
+                  cell: (item) => (
+                    <div>
+                      <div className="font-bold text-slate-800 text-xs sm:text-sm break-words">
+                        {item.title}
+                      </div>
+                      {item.description && (
+                        <div className="text-xs text-slate-500 mt-0.5 break-words">
+                          {item.description}
                         </div>
-                        {item.description && (
-                          <div className="text-xs text-slate-500 mt-0.5">{item.description}</div>
-                        )}
-                      </td>
-
-                      <td className="px-4 py-3.5 whitespace-nowrap tabular-nums text-xs text-slate-600 font-medium">
-                        {item.jalali_datetime}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      )}
+                    </div>
+                  ),
+                },
+                {
+                  key: 'datetime',
+                  header: 'زمان ثبت',
+                  priority: 'secondary',
+                  mobileLabel: 'زمان ثبت',
+                  cellClassName: 'whitespace-nowrap tabular-nums text-xs text-slate-600 font-medium',
+                  cell: (item) => item.jalali_datetime,
+                },
+              ] satisfies Column<ActivityLogItem>[]
+            }
+            data={filteredLogs}
+            rowKey={(item) => item.id}
+            ariaLabel="جدول لاگ فعالیت‌ها"
+          />
         )}
       </div>
     </div>

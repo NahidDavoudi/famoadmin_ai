@@ -6,6 +6,7 @@ import { validateFileUploadForm, type FieldErrors } from '../lib/form-validation
 import type { ExamFile, Student, ToastType } from '../types';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
+import { DataTable, type Column } from '../components/DataTable';
 
 interface FilesPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -171,7 +172,7 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
                 }}
                 className={getFieldClass(
                   Boolean(errors.file),
-                  'px-3 py-2 text-xs file:ml-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:bg-slate-100 file:text-slate-700 file:font-semibold'
+                  'px-3 py-2 text-xs file:ms-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:bg-slate-100 file:text-slate-700 file:font-semibold'
                 )}
               />
               <FieldError message={errors.file} />
@@ -214,73 +215,104 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-[#344868] text-white text-xs">
-                <tr>
-                  <th className="px-5 py-3.5 text-right font-semibold">نام فایل</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">دانش‌آموز</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">حجم</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">تاریخ آپلود</th>
-                  <th className="px-5 py-3.5 text-right font-semibold">عملیات</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {files.map((f) => {
-                  const studentObj = students.find((s) => s.id === Number(f.student_id));
-                  const fileSize = f.size ?? f.file_size;
-                  const uploadedDate = f.uploaded_at || f.created_at || f.exam_date;
-                  const fileTitle = f.description || f.original_name || f.file_path || `فایل #${f.id}`;
-
+          <DataTable<ExamFile>
+            columns={[
+              {
+                key: 'file_name',
+                header: 'نام فایل',
+                priority: 'primary',
+                headerClassName: 'min-w-[200px]',
+                cellClassName: 'font-semibold text-slate-800',
+                cell: (f) => {
+                  const fileTitle =
+                    f.description || f.original_name || f.file_path || `فایل #${f.id}`;
                   return (
-                    <tr key={f.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="px-5 py-4 font-semibold text-slate-800">
-                        <div className="flex items-center gap-2.5">
-                          <FileText className="w-4 h-4 text-red-500 shrink-0" />
-                          <span>{fileTitle}</span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 text-slate-600">
-                        {f.student_name || studentObj?.name || (
-                          <span className="text-slate-400">#{f.student_id || 'عمومی'}</span>
-                        )}
-                      </td>
-                      <td className="px-5 py-4 tabular-nums text-slate-600" dir="ltr">
-                        {fileSize ? `${Math.round(fileSize / 1024)} KB` : '-'}
-                      </td>
-                      <td className="px-5 py-4 tabular-nums text-slate-500">
-                        {formatGregorianToJalali(uploadedDate)}
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-1">
-                          <a
-                            href={API.getFileDownloadUrl(f)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
-                            title="دانلود"
-                            aria-label={`دانلود ${fileTitle}`}
-                          >
-                            <Download className="w-4 h-4" />
-                          </a>
-                          <ActionButton
-                            type="button"
-                            variant="ghost"
-                            onClick={() => setDeleteTarget(f)}
-                            className="p-2 rounded-lg text-red-600 hover:bg-red-50"
-                            title="حذف"
-                            aria-label={`حذف ${fileTitle}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </ActionButton>
-                        </div>
-                      </td>
-                    </tr>
+                    <div className="flex items-center gap-2.5">
+                      <FileText className="w-4 h-4 text-red-500 shrink-0" />
+                      <span className="break-words">{fileTitle}</span>
+                    </div>
                   );
-                })}
-              </tbody>
-            </table>
-          </div>
+                },
+              },
+              {
+                key: 'student',
+                header: 'دانش‌آموز',
+                priority: 'secondary',
+                mobileLabel: 'دانش‌آموز',
+                cellClassName: 'text-slate-600',
+                cell: (f) => {
+                  const studentObj = students.find((s) => s.id === Number(f.student_id));
+                  return (
+                    f.student_name ||
+                    studentObj?.name || (
+                      <span className="text-slate-400">#{f.student_id || 'عمومی'}</span>
+                    )
+                  );
+                },
+              },
+              {
+                key: 'size',
+                header: 'حجم',
+                priority: 'desktop-only',
+                cellClassName: 'tabular-nums text-slate-600',
+                cell: (f) => {
+                  const fileSize = f.size ?? f.file_size;
+                  return (
+                    <span dir="ltr">
+                      {fileSize ? `${Math.round(fileSize / 1024)} KB` : '-'}
+                    </span>
+                  );
+                },
+              },
+              {
+                key: 'uploaded_at',
+                header: 'تاریخ آپلود',
+                priority: 'secondary',
+                mobileLabel: 'تاریخ آپلود',
+                cellClassName: 'tabular-nums text-slate-500',
+                value: (f) => {
+                  const uploadedDate = f.uploaded_at || f.created_at || f.exam_date;
+                  return formatGregorianToJalali(uploadedDate);
+                },
+                cell: (f) => {
+                  const uploadedDate = f.uploaded_at || f.created_at || f.exam_date;
+                  return formatGregorianToJalali(uploadedDate);
+                },
+              },
+            ]}
+            data={files}
+            rowKey={(f) => f.id}
+            ariaLabel="جدول فایل‌های آزمون"
+            actionsHeader="عملیات"
+            renderActions={(f) => {
+              const fileTitle =
+                f.description || f.original_name || f.file_path || `فایل #${f.id}`;
+              return (
+                <div className="flex items-center gap-1">
+                  <a
+                    href={API.getFileDownloadUrl(f)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-w-11 min-h-11 p-2.5 rounded-xl text-blue-600 hover:bg-blue-50 inline-flex items-center justify-center transition-colors cursor-pointer"
+                    title="دانلود"
+                    aria-label={`دانلود ${fileTitle}`}
+                  >
+                    <Download className="w-4 h-4" />
+                  </a>
+                  <ActionButton
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setDeleteTarget(f)}
+                    className="min-w-11 min-h-11 p-2.5 rounded-xl text-red-600 hover:bg-red-50"
+                    title="حذف"
+                    aria-label={`حذف ${fileTitle}`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </ActionButton>
+                </div>
+              );
+            }}
+          />
         </div>
       )}
 

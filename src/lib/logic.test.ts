@@ -100,13 +100,12 @@ test('Custom form validators return field-specific Persian error messages for em
   assert.ok(instErrors.title);
 
   const suppErrors = validateSupporterForm(
-    { name: '', phone: '', grade: '12', field: '', username: '', password: '12' },
+    { name: '', phone: '', grade: '12', field: '', password: '12' },
     false
   );
   assert.ok(suppErrors.name);
   assert.ok(suppErrors.phone);
   assert.ok(suppErrors.field);
-  assert.ok(suppErrors.username);
   assert.ok(suppErrors.password);
 
   const fileErrors = validateFileUploadForm({ studentId: '', examDate: '', hasFile: false });
@@ -174,11 +173,10 @@ test('Regression: numeric chat_id, phone, and national_id never throw .trim is n
   const suppEditErrors = validateSupporterForm(
     {
       name: 'سارا کریمی',
-      phone: 9123456789,
+      phone: '09123456789',
       grade: 12,
       field: 'تجربی',
       chat_id: 123456789,
-      username: 'sara',
       password: '',
     },
     true
@@ -609,5 +607,84 @@ test('Activity log describes API mutations, normalizes server logs, merges logs,
   assert.equal(filterActivityLogs(merged, { category: 'students' }).length, 1);
   assert.equal(filterActivityLogs(merged, { actionType: 'update' }).length, 1);
   assert.equal(filterActivityLogs(merged, { search: 'سارا کریمی' }).length, 1);
+});
+
+test('DataTable resolveVisibleColumns hides columns with hideWhenEmpty when all rows are "-" or empty', async () => {
+  const {
+    isValueEffectivelyEmpty,
+    resolveVisibleColumns,
+    isRowColumnEmpty,
+  } = await import('../components/DataTable');
+
+  assert.equal(isValueEffectivelyEmpty(''), true);
+  assert.equal(isValueEffectivelyEmpty('-'), true);
+  assert.equal(isValueEffectivelyEmpty('—'), true);
+  assert.equal(isValueEffectivelyEmpty(null), true);
+  assert.equal(isValueEffectivelyEmpty('فصل اول: مثلثات'), false);
+
+  interface MockSubRow {
+    subject: string;
+    chapter: string | null;
+  }
+
+  const columns = [
+    {
+      key: 'subject',
+      header: 'نام درس',
+      priority: 'primary' as const,
+      cell: (r: MockSubRow) => r.subject,
+    },
+    {
+      key: 'chapter',
+      header: 'مبحث',
+      priority: 'secondary' as const,
+      hideWhenEmpty: true,
+      value: (r: MockSubRow) => r.chapter,
+      cell: (r: MockSubRow) => r.chapter || '-',
+    },
+  ];
+
+  const rowsWithEmptyChapter: MockSubRow[] = [
+    { subject: 'ریاضی', chapter: '-' },
+    { subject: 'فیزیک', chapter: null },
+    { subject: 'شیمی', chapter: '   ' },
+  ];
+
+  const visibleWhenEmpty = resolveVisibleColumns(columns, rowsWithEmptyChapter);
+  assert.equal(visibleWhenEmpty.length, 1);
+  assert.equal(visibleWhenEmpty[0].key, 'subject');
+
+  const rowsWithRealChapter: MockSubRow[] = [
+    { subject: 'ریاضی', chapter: '-' },
+    { subject: 'فیزیک', chapter: 'دینامیک' },
+  ];
+
+  const visibleWhenPresent = resolveVisibleColumns(columns, rowsWithRealChapter);
+  assert.equal(visibleWhenPresent.length, 2);
+  assert.equal(isRowColumnEmpty(columns[1], rowsWithRealChapter[0]), true);
+  assert.equal(isRowColumnEmpty(columns[1], rowsWithRealChapter[1]), false);
+});
+
+test('resolveEntityImageUrl resolves data URLs, full HTTP URLs, and relative API paths', async () => {
+  const { resolveEntityImageUrl } = await import('./image-upload');
+
+  assert.equal(resolveEntityImageUrl(null), null);
+  assert.equal(resolveEntityImageUrl('   '), null);
+  assert.equal(
+    resolveEntityImageUrl('data:image/jpeg;base64,abc123'),
+    'data:image/jpeg;base64,abc123'
+  );
+  assert.equal(
+    resolveEntityImageUrl('https://cdn.famoacademy.ir/avatars/1.jpg'),
+    'https://cdn.famoacademy.ir/avatars/1.jpg'
+  );
+  assert.equal(
+    resolveEntityImageUrl('/uploads/instructors/1.png'),
+    'https://api.famoacademy.ir/uploads/instructors/1.png'
+  );
+  assert.equal(
+    resolveEntityImageUrl('uploads/supporters/2.png'),
+    'https://api.famoacademy.ir/uploads/supporters/2.png'
+  );
 });
 
