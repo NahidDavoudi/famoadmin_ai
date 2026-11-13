@@ -40,14 +40,7 @@ import type {
   TutoringBoardClass,
   TeacherTutoringStatus,
 } from '../types';
-import {
-  safeTrim,
-  safeNumber,
-  normalizeExamDetails,
-  buildStudentExamTrend,
-  type RawStudentExamHistoryRow,
-  type StudentExamTrendPoint,
-} from './exam-math';
+import { safeTrim, safeNumber, normalizeExamDetails } from './exam-math';
 
 export interface ApiErrorObject {
   code?: string;
@@ -847,75 +840,6 @@ class FamoApiClient {
       ...res,
       data: normalizeExamDetails(res.data),
     };
-  }
-
-  async getStudentExamTrend(
-    studentId: number,
-    currentExamDate?: string | null,
-    currentDetails?: ExamDetailsResponse | null
-  ): Promise<StudentExamTrendPoint[]> {
-    const collectedRows: RawStudentExamHistoryRow[] = [];
-
-    try {
-      const query = new URLSearchParams({
-        student_id: String(studentId),
-        per_page: '200',
-      });
-      const res = await this.requestJson<
-        { exams?: RawStudentExamHistoryRow[] } | RawStudentExamHistoryRow[]
-      >(`/exams?${query.toString()}`, {}, 'خطا در بارگذاری روند آزمون‌های دانش‌آموز');
-      const exams = Array.isArray(res.data) ? res.data : res.data?.exams || [];
-      if (exams.length > 0) {
-        collectedRows.push(...exams);
-      }
-    } catch {
-      // Fallback to /exams/dates or /students/{id}/analytics/exam-trend below
-    }
-
-    if (collectedRows.length === 0) {
-      try {
-        const res = await this.requestJson<
-          { dates?: RawStudentExamHistoryRow[] } | RawStudentExamHistoryRow[]
-        >(
-          `/exams/dates?student_id=${encodeURIComponent(String(studentId))}&per_page=50`,
-          {},
-          'خطا در بارگذاری تاریخ‌های آزمون دانش‌آموز'
-        );
-        const dates = Array.isArray(res.data) ? res.data : res.data?.dates || [];
-        if (dates.length > 0) {
-          collectedRows.push(...dates);
-        }
-      } catch {
-        // Fallback to analytics/exam-trend
-      }
-    }
-
-    if (collectedRows.length === 0) {
-      try {
-        const res = await this.requestJson<
-          | { trend?: RawStudentExamHistoryRow[]; exams?: RawStudentExamHistoryRow[] }
-          | RawStudentExamHistoryRow[]
-        >(
-          `/students/${encodeURIComponent(String(studentId))}/analytics/exam-trend`,
-          {},
-          'خطا در بارگذاری روند آزمون'
-        );
-        const trend = Array.isArray(res.data)
-          ? res.data
-          : res.data?.trend || res.data?.exams || [];
-        if (trend.length > 0) {
-          collectedRows.push(...trend);
-        }
-      } catch {
-        // Use currentDetails if available
-      }
-    }
-
-    return buildStudentExamTrend(collectedRows, {
-      currentExamDate,
-      currentDetails,
-      limit: 5,
-    });
   }
 
   async submitExamEntry(payload: {
