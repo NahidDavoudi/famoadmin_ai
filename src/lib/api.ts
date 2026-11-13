@@ -904,6 +904,16 @@ class FamoApiClient {
       }
     }
 
+    let localDescMap: Record<string, string> = {};
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const rawDesc = localStorage.getItem('famo_supporter_descriptions_v1');
+        if (rawDesc) localDescMap = JSON.parse(rawDesc) as Record<string, string>;
+      }
+    } catch {
+      localDescMap = {};
+    }
+
     const enriched: Supporter[] = baseList.map((sup) => {
       const pub = publicById.get(Number(sup.id));
       const perf = perfById.get(Number(sup.id));
@@ -913,6 +923,7 @@ class FamoApiClient {
           : sup.avg_response_hours ?? null;
       return {
         ...sup,
+        description: sup.description ?? localDescMap[String(sup.id)] ?? null,
         avatar: sup.avatar ?? pub?.avatar ?? null,
         avatar_url: sup.avatar_url ?? pub?.avatar_url ?? null,
         assigned_students: perf?.assigned_students ?? sup.assigned_students,
@@ -937,6 +948,7 @@ class FamoApiClient {
     phone: string | number;
     grade: number;
     field: AcademicField;
+    description?: string | null;
     chat_id?: string | number | null;
   }): Promise<ApiEnvelope<Supporter>> {
     const body: Record<string, unknown> = {
@@ -945,12 +957,16 @@ class FamoApiClient {
       grade: Number(payload.grade),
       field: payload.field,
     };
+    const descStr = safeTrim(payload.description);
+    if (descStr) {
+      body.description = descStr;
+    }
     const chatIdStr = safeTrim(payload.chat_id);
     if (chatIdStr) {
       body.chat_id = chatIdStr;
     }
 
-    return this.requestJson<Supporter>(
+    const res = await this.requestJson<Supporter>(
       '/supporters',
       {
         method: 'POST',
@@ -958,6 +974,21 @@ class FamoApiClient {
       },
       'خطا در افزودن پشتیبان'
     );
+
+    if (res.data?.id && descStr) {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          const rawDesc = localStorage.getItem('famo_supporter_descriptions_v1');
+          const map = rawDesc ? (JSON.parse(rawDesc) as Record<string, string>) : {};
+          map[String(res.data.id)] = descStr;
+          localStorage.setItem('famo_supporter_descriptions_v1', JSON.stringify(map));
+        }
+      } catch {
+        // ignore storage errors
+      }
+    }
+
+    return res;
   }
 
   /**
@@ -970,6 +1001,7 @@ class FamoApiClient {
       name: string;
       grade: number;
       field: AcademicField;
+      description?: string | null;
       phone?: string | number | null;
       is_active?: number | boolean;
       chat_id?: string | number | null;
@@ -981,6 +1013,21 @@ class FamoApiClient {
       grade: Number(payload.grade),
       field: payload.field,
     };
+    if (payload.description !== undefined) {
+      const descStr = safeTrim(payload.description);
+      body.description = descStr;
+      try {
+        if (typeof localStorage !== 'undefined') {
+          const rawDesc = localStorage.getItem('famo_supporter_descriptions_v1');
+          const map = rawDesc ? (JSON.parse(rawDesc) as Record<string, string>) : {};
+          if (descStr) map[String(id)] = descStr;
+          else delete map[String(id)];
+          localStorage.setItem('famo_supporter_descriptions_v1', JSON.stringify(map));
+        }
+      } catch {
+        // ignore storage errors
+      }
+    }
     if (payload.phone !== undefined) {
       const phoneStr = safeTrim(payload.phone);
       body.phone = phoneStr || null;

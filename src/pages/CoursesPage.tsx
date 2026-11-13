@@ -135,21 +135,28 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
       key: 'display_order',
       header: 'ترتیب',
       priority: 'desktop-only',
-      headerClassName: 'w-20',
-      cellClassName: 'tabular-nums font-medium text-slate-600',
+      headerClassName: 'w-16',
+      cellClassName: 'w-16 tabular-nums font-medium text-slate-600',
       cell: (c) => c.display_order,
     },
     {
       key: 'name',
       header: 'نام دوره',
       priority: 'primary',
-      headerClassName: 'min-w-[200px]',
+      headerClassName: 'w-48 xl:w-56',
+      cellClassName: 'w-48 xl:w-56 font-semibold text-slate-800 whitespace-normal break-words',
       cell: (c) => (
-        <div>
-          <div className="font-semibold text-slate-800">{c.name}</div>
-          {c.description && (
-            <div className="text-xs text-slate-500 mt-0.5 line-clamp-1">{c.description}</div>
-          )}
+        <div className="font-semibold text-slate-800 whitespace-normal break-words">{c.name}</div>
+      ),
+    },
+    {
+      key: 'description',
+      header: 'توضیحات',
+      priority: 'desktop-only',
+      cellClassName: 'min-w-0 text-slate-600',
+      cell: (c) => (
+        <div className="whitespace-normal break-words line-clamp-2 max-w-prose text-xs text-slate-600 leading-relaxed">
+          {c.description || '—'}
         </div>
       ),
     },
@@ -158,7 +165,8 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
       header: 'قیمت',
       priority: 'secondary',
       mobileLabel: 'قیمت',
-      cellClassName: 'text-slate-600 tabular-nums',
+      headerClassName: 'w-32 xl:w-36',
+      cellClassName: 'w-32 xl:w-36 text-slate-600 tabular-nums whitespace-normal break-words',
       value: (c) => c.price || '-',
       cell: (c) => c.price || '-',
     },
@@ -166,7 +174,8 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
       key: 'colors',
       header: 'رنگ‌بندی',
       priority: 'desktop-only',
-      headerClassName: 'w-24',
+      headerClassName: 'w-20',
+      cellClassName: 'w-20',
       cell: (c) => (
         <div
           className="w-10 h-10 rounded-xl shadow-xs border border-slate-200"
@@ -220,15 +229,17 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({ showToast }) => {
           </ActionButton>
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs">
           <DataTable
             columns={courseColumns}
             data={courses}
             rowKey={(c) => c.id}
             ariaLabel="جدول دوره‌های آموزشی"
             actionsHeader="عملیات"
+            actionsHeaderClassName="w-28"
+            actionsCellClassName="w-28 shrink-0"
             renderActions={(c) => (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 <ActionButton
                   type="button"
                   variant="ghost"

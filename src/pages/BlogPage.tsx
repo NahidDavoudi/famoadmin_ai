@@ -511,12 +511,16 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
       key: 'title',
       header: 'عنوان',
       priority: 'primary',
-      headerClassName: 'min-w-[220px]',
+      cellClassName: 'min-w-0',
       cell: (p) => (
-        <div>
-          <div className="font-semibold text-slate-800 break-words">{p.title}</div>
+        <div className="min-w-0">
+          <div className="font-semibold text-slate-800 whitespace-normal break-words line-clamp-2 max-w-prose">
+            {p.title}
+          </div>
           {p.excerpt && (
-            <div className="text-xs text-slate-500 line-clamp-1 mt-0.5">{p.excerpt}</div>
+            <div className="text-xs font-normal text-slate-500 whitespace-normal break-words line-clamp-2 max-w-prose mt-0.5">
+              {p.excerpt}
+            </div>
           )}
         </div>
       ),
@@ -526,7 +530,8 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
       header: 'دسته‌بندی',
       priority: 'secondary',
       mobileLabel: 'دسته‌بندی',
-      cellClassName: 'text-slate-600 font-medium',
+      headerClassName: 'w-24 xl:w-32',
+      cellClassName: 'w-24 xl:w-32 text-slate-600 font-medium whitespace-normal break-words',
       value: (p) => p.category,
       cell: (p) => p.category || '-',
     },
@@ -534,9 +539,11 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
       key: 'slug',
       header: 'اسلاگ',
       priority: 'desktop-only',
+      headerClassName: 'w-28 xl:w-36',
+      cellClassName: 'w-28 xl:w-36 min-w-0',
       cell: (p) => (
-        <div dir="ltr">
-          <code className="text-xs text-slate-600 bg-slate-100 px-2 py-1 rounded">
+        <div dir="ltr" className="min-w-0">
+          <code className="block text-xs text-slate-600 bg-slate-100 px-2 py-1 rounded truncate">
             {p.slug}
           </code>
         </div>
@@ -547,6 +554,8 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
       header: 'وضعیت',
       priority: 'secondary',
       mobileLabel: 'وضعیت',
+      headerClassName: 'w-20 xl:w-24',
+      cellClassName: 'w-20 xl:w-24',
       cell: (p) => (
         <span
           className={`text-xs font-semibold ${
@@ -561,8 +570,8 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
       key: 'views',
       header: 'بازدیدها',
       priority: 'desktop-only',
-      headerClassName: 'text-center',
-      cellClassName: 'text-center tabular-nums font-medium text-slate-600',
+      headerClassName: 'w-16 xl:w-20 text-center',
+      cellClassName: 'w-16 xl:w-20 text-center tabular-nums font-medium text-slate-600',
       cell: (p) => p.views || 0,
     },
     {
@@ -570,8 +579,8 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
       header: 'تاریخ انتشار',
       priority: 'secondary',
       mobileLabel: 'تاریخ انتشار',
-      headerClassName: 'text-center',
-      cellClassName: 'text-center tabular-nums text-slate-500 text-xs',
+      headerClassName: 'w-24 xl:w-28 text-center',
+      cellClassName: 'w-24 xl:w-28 text-center tabular-nums text-slate-500 text-xs',
       value: (p) => formatGregorianToJalali(p.published_at),
       cell: (p) => formatGregorianToJalali(p.published_at),
     },
@@ -617,15 +626,17 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
           </ActionButton>
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs">
           <DataTable
             columns={blogColumns}
             data={posts}
             rowKey={(p) => p.id}
             ariaLabel="جدول مقالات وبلاگ"
             actionsHeader="عملیات"
+            actionsHeaderClassName="w-28"
+            actionsCellClassName="w-28 shrink-0"
             renderActions={(p) => (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 <ActionButton
                   type="button"
                   variant="ghost"

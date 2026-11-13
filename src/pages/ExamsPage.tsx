@@ -317,7 +317,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
           ))}
         </div>
       ) : view === 'dates' ? (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs">
           <DataTable<ExamDateSummary>
             tableAriaLabel="جدول آزمون‌های برگزار شده"
             data={dates}
@@ -348,10 +348,13 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   key: 'exam_date',
                   header: 'تاریخ آزمون',
                   priority: 'primary',
+                  cellClassName: 'min-w-0 whitespace-normal break-words',
                   cell: (exam) => (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
                       <Calendar className="w-4 h-4 text-[#445D84] shrink-0" aria-hidden="true" />
-                      <span>{formatJalaliLong(exam.exam_date)}</span>
+                      <span className="whitespace-normal break-words">
+                        {formatJalaliLong(exam.exam_date)}
+                      </span>
                     </div>
                   ),
                 },
@@ -360,14 +363,16 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   header: 'تعداد شرکت‌کنندگان',
                   mobileLabel: 'شرکت‌کنندگان',
                   priority: 'secondary',
-                  cellClassName: 'tabular-nums text-slate-700 font-medium',
+                  headerClassName: 'w-36 xl:w-40',
+                  cellClassName: 'w-36 xl:w-40 tabular-nums text-slate-700 font-medium',
                   cell: (exam) => `${exam.student_count} نفر`,
                 },
                 {
                   key: 'subject_count',
                   header: 'تعداد دروس ثبت‌شده',
                   priority: 'desktop-only',
-                  cellClassName: 'tabular-nums text-slate-600',
+                  headerClassName: 'w-36 xl:w-40',
+                  cellClassName: 'w-36 xl:w-40 tabular-nums text-slate-600',
                   cell: (exam) => `${exam.subject_count} درس`,
                 },
                 {
@@ -375,7 +380,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   header: 'میانگین درصد',
                   mobileLabel: 'میانگین درصد',
                   priority: 'secondary',
-                  cellClassName: 'tabular-nums',
+                  headerClassName: 'w-28 xl:w-32',
+                  cellClassName: 'w-28 xl:w-32 tabular-nums',
                   cell: (exam) => (
                     <span
                       dir="ltr"
@@ -392,6 +398,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   header: 'عملیات',
                   priority: 'secondary',
                   isAction: true,
+                  headerClassName: 'w-44',
+                  cellClassName: 'w-44 shrink-0',
                   cell: (exam) => (
                     <ActionButton
                       type="button"
@@ -401,7 +409,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                         return handleSelectDate(exam.exam_date);
                       }}
                       icon={<Users className="w-4 h-4" />}
-                      className="px-3 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs"
+                      className="px-3 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs shrink-0"
                     >
                       <span>مشاهده شرکت‌کنندگان</span>
                     </ActionButton>
@@ -412,7 +420,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
           />
         </div>
       ) : view === 'students' ? (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs">
           <DataTable<ExamStudentSummary>
             tableAriaLabel="جدول شرکت‌کنندگان آزمون"
             data={students}
@@ -423,13 +431,19 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   key: 'name',
                   header: 'دانش‌آموز',
                   priority: 'primary',
-                  cell: (s) => <span className="font-semibold text-slate-800">{s.name}</span>,
+                  cellClassName: 'min-w-0 whitespace-normal break-words',
+                  cell: (s) => (
+                    <span className="font-semibold text-slate-800 whitespace-normal break-words">
+                      {s.name}
+                    </span>
+                  ),
                 },
                 {
                   key: 'grade',
                   header: 'پایه',
                   priority: 'desktop-only',
-                  cellClassName: 'tabular-nums text-slate-600',
+                  headerClassName: 'w-20',
+                  cellClassName: 'w-20 tabular-nums text-slate-600',
                   cell: (s) => `پایه ${s.grade}`,
                 },
                 {
@@ -437,7 +451,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   header: 'رشته',
                   mobileLabel: 'پایه و رشته',
                   priority: 'secondary',
-                  cellClassName: 'text-slate-600',
+                  headerClassName: 'w-28',
+                  cellClassName: 'w-28 text-slate-600',
                   cell: (s) => (
                     <span>
                       <span className="md:hidden tabular-nums">پایه {s.grade} · </span>
@@ -449,7 +464,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   key: 'subject_count',
                   header: 'تعداد دروس',
                   priority: 'desktop-only',
-                  cellClassName: 'tabular-nums text-slate-600',
+                  headerClassName: 'w-28',
+                  cellClassName: 'w-28 tabular-nums text-slate-600',
                   cell: (s) => `${s.subject_count} درس`,
                 },
                 {
@@ -457,7 +473,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   header: 'میانگین درصد',
                   mobileLabel: 'میانگین کل',
                   priority: 'secondary',
-                  cellClassName: 'tabular-nums',
+                  headerClassName: 'w-28',
+                  cellClassName: 'w-28 tabular-nums',
                   cell: (s) => (
                     <span
                       dir="ltr"
@@ -474,8 +491,10 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   header: 'عملیات',
                   priority: 'secondary',
                   isAction: true,
+                  headerClassName: 'w-48',
+                  cellClassName: 'w-48 shrink-0',
                   cell: (s) => (
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <ActionButton
                         type="button"
                         variant="ghost"
@@ -585,7 +604,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                 <h3 className="font-bold text-sm sm:text-base mb-2.5 text-[#344868]">
                   ۱. جدول جزئیات درصدهای دروس آزمون:
                 </h3>
-                <div className="rounded-xl border border-slate-300 overflow-hidden bg-slate-50/30 md:bg-white">
+                <div className="rounded-xl border border-slate-300 bg-slate-50/30 md:bg-white">
                   <DataTable<SubjectResult>
                     tableAriaLabel="جدول جزئیات درصدهای دروس آزمون"
                     data={details.subjects || []}
@@ -596,16 +615,18 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                           key: 'row_num',
                           header: 'ردیف',
                           priority: 'desktop-only',
-                          headerClassName: 'text-center w-12',
-                          cellClassName: 'text-center tabular-nums text-slate-500 text-xs',
+                          headerClassName: 'text-center w-14',
+                          cellClassName: 'w-14 text-center tabular-nums text-slate-500 text-xs',
                           cell: (_sub, idx) => idx + 1,
                         },
                         {
                           key: 'subject',
                           header: 'نام درس',
                           priority: 'primary',
-                          cellClassName: 'font-bold text-slate-800',
-                          cell: (sub) => sub.subject,
+                          cellClassName: 'min-w-0 font-bold text-slate-800 whitespace-normal break-words',
+                          cell: (sub) => (
+                            <span className="whitespace-normal break-words">{sub.subject}</span>
+                          ),
                         },
                         {
                           key: 'chapter',
@@ -613,47 +634,52 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                           priority: 'secondary',
                           hideWhenEmpty: true,
                           rawValue: (sub) => sub.chapter,
-                          cellClassName: 'text-slate-600',
-                          cell: (sub) => sub.chapter || '-',
+                          headerClassName: 'w-32 xl:w-40',
+                          cellClassName: 'w-32 xl:w-40 text-slate-600 whitespace-normal break-words',
+                          cell: (sub) => (
+                            <span className="whitespace-normal break-words line-clamp-2 max-w-prose">
+                              {sub.chapter || '-'}
+                            </span>
+                          ),
                         },
                         {
                           key: 'total_q',
                           header: 'کل سوالات',
                           priority: 'secondary',
-                          headerClassName: 'text-center',
-                          cellClassName: 'text-center tabular-nums font-medium',
+                          headerClassName: 'w-20 text-center',
+                          cellClassName: 'w-20 text-center tabular-nums font-medium',
                           cell: (sub) => sub.total_q,
                         },
                         {
                           key: 'correct',
                           header: 'صحیح',
                           priority: 'secondary',
-                          headerClassName: 'text-center',
-                          cellClassName: 'text-center tabular-nums text-emerald-700 font-bold',
+                          headerClassName: 'w-16 text-center',
+                          cellClassName: 'w-16 text-center tabular-nums text-emerald-700 font-bold',
                           cell: (sub) => sub.correct,
                         },
                         {
                           key: 'wrong',
                           header: 'غلط',
                           priority: 'secondary',
-                          headerClassName: 'text-center',
-                          cellClassName: 'text-center tabular-nums text-red-600 font-bold',
+                          headerClassName: 'w-16 text-center',
+                          cellClassName: 'w-16 text-center tabular-nums text-red-600 font-bold',
                           cell: (sub) => sub.wrong,
                         },
                         {
                           key: 'skipped',
                           header: 'نزده',
                           priority: 'secondary',
-                          headerClassName: 'text-center',
-                          cellClassName: 'text-center tabular-nums text-slate-600',
+                          headerClassName: 'w-16 text-center',
+                          cellClassName: 'w-16 text-center tabular-nums text-slate-600',
                           cell: (sub) => sub.skipped,
                         },
                         {
                           key: 'percentage',
                           header: 'درصد (با نمره منفی)',
                           priority: 'secondary',
-                          headerClassName: 'text-center',
-                          cellClassName: 'text-center tabular-nums',
+                          headerClassName: 'w-32 text-center',
+                          cellClassName: 'w-32 text-center tabular-nums',
                           cell: (sub) => {
                             const pct = safeNumber(sub.percentage);
                             return (
@@ -674,8 +700,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                           key: 'chart',
                           header: 'نمودار',
                           priority: 'desktop-only',
-                          headerClassName: 'text-center',
-                          cellClassName: 'py-1.5 text-center',
+                          headerClassName: 'w-24 text-center',
+                          cellClassName: 'w-24 py-1.5 text-center',
                           cell: (sub) => <RadialGauge percentage={safeNumber(sub.percentage)} />,
                         },
                       ] satisfies Column<SubjectResult>[]

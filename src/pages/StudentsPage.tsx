@@ -313,17 +313,18 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       key: 'name',
       header: 'نام',
       priority: 'primary',
-      headerClassName: 'min-w-[180px]',
-      cellClassName: 'font-semibold text-slate-800 whitespace-nowrap',
-      cell: (s) => s.name,
+      cellClassName: 'min-w-0 font-semibold text-slate-800 whitespace-normal break-words',
+      cell: (s) => (
+        <span className="whitespace-normal break-words">{s.name}</span>
+      ),
     },
     {
       key: 'contact',
       header: 'تماس / کد ملی',
       priority: 'secondary',
       mobileLabel: 'شماره تماس',
-      headerClassName: 'text-center',
-      cellClassName: 'text-center tabular-nums',
+      headerClassName: 'w-32 xl:w-36 text-center',
+      cellClassName: 'w-32 xl:w-36 text-center tabular-nums',
       value: (s) => s.phone || s.national_id || '-',
       cell: (s) => (
         <div className="flex flex-col md:items-center text-xs tabular-nums" dir="ltr">
@@ -336,8 +337,8 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       key: 'grade',
       header: 'پایه',
       priority: 'desktop-only',
-      headerClassName: 'text-center',
-      cellClassName: 'text-center text-slate-600 tabular-nums',
+      headerClassName: 'w-20 text-center',
+      cellClassName: 'w-20 text-center text-slate-600 tabular-nums',
       cell: (s) => `پایه ${s.grade}`,
     },
     {
@@ -345,8 +346,8 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       header: 'رشته',
       priority: 'secondary',
       mobileLabel: 'پایه و رشته',
-      headerClassName: 'text-center',
-      cellClassName: 'text-center font-medium text-slate-700',
+      headerClassName: 'w-24 xl:w-28 text-center',
+      cellClassName: 'w-24 xl:w-28 text-center font-medium text-slate-700',
       cell: (s) => (
         <span>
           <span className="md:hidden">پایه {s.grade} • </span>
@@ -359,8 +360,8 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       header: 'حساب',
       priority: 'secondary',
       mobileLabel: 'وضعیت حساب',
-      headerClassName: 'text-center',
-      cellClassName: 'text-center',
+      headerClassName: 'w-20 xl:w-24 text-center',
+      cellClassName: 'w-20 xl:w-24 text-center',
       cell: (s) => {
         const isActive = Number(s.status ?? s.is_active ?? 1) === 1;
         return (
@@ -380,7 +381,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     const isActive = Number(s.status ?? s.is_active ?? 1) === 1;
     const hasAccount = s.user_id !== undefined ? Boolean(s.user_id) : true;
     return (
-      <div className="flex items-center justify-center gap-1">
+      <div className="flex items-center justify-center gap-1 shrink-0">
         <ActionButton
           type="button"
           variant="ghost"
@@ -568,13 +569,15 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
           </ActionButton>
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs">
           <DataTable
             columns={studentColumns}
             data={students}
             rowKey={(s) => s.id}
             ariaLabel="جدول دانش‌آموزان"
             actionsHeader="عملیات"
+            actionsHeaderClassName="w-48 text-center"
+            actionsCellClassName="w-48 shrink-0"
             renderActions={renderStudentActions}
           />
 

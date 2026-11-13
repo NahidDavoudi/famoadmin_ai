@@ -1,14 +1,7 @@
 services:
   famo-admin:
-<<<<<<< HEAD
-    # آدرس ایمیج ساخته شده در GitHub Container Registry (یا Docker Hub) با تگ latest
-    # مقدار OWNER/REPO را با نام اکانت و ریپازیتوری گیت‌هاب خود جایگزین کنید (با حروف کوچک)
-    image: ${FAMO_ADMIN_IMAGE:-ghcr.io/owner/famoadmin_ai:latest}
-    container_name: famo-admin-panel
-=======
     image: ${FAMO_ADMIN_IMAGE:-ghcr.io/nahiddavoudi/famoadmin_ai:latest}
     container_name: famo-admin-test
->>>>>>> 9a52725 (fix: edited the containers name to sync it with caddy file)
     pull_policy: always
     restart: unless-stopped
     ports:

@@ -298,7 +298,7 @@ export const ActivityLogsPage: React.FC<ActivityLogsPageProps> = ({ showToast })
       </div>
 
       {/* Activity Log Table */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs">
         {loading ? (
           <div className="p-6 space-y-3">
             {[1, 2, 3, 4].map((n) => (
@@ -327,19 +327,20 @@ export const ActivityLogsPage: React.FC<ActivityLogsPageProps> = ({ showToast })
                   header: 'کی انجام داد؟ (کاربر)',
                   priority: 'secondary',
                   mobileLabel: 'کاربر',
-                  cellClassName: 'whitespace-nowrap',
+                  headerClassName: 'w-40 xl:w-48',
+                  cellClassName: 'w-40 xl:w-48 whitespace-normal break-words',
                   cell: (item) => {
                     const roleLabel = ROLE_LABELS[item.actor_role] || item.actor_role;
                     return (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
                         <span className="hidden md:flex w-7 h-7 rounded-lg bg-[#445D84]/10 text-[#445D84] items-center justify-center shrink-0">
                           <UserCheck className="w-4 h-4" />
                         </span>
-                        <div>
-                          <div className="font-bold text-slate-800 text-xs sm:text-sm">
+                        <div className="min-w-0">
+                          <div className="font-bold text-slate-800 text-xs sm:text-sm whitespace-normal break-words">
                             {item.actor_name}
                           </div>
-                          <div className="text-[11px] text-slate-400 hidden md:block">
+                          <div className="text-[11px] text-slate-400 hidden md:block whitespace-normal break-words">
                             {roleLabel}
                           </div>
                         </div>
@@ -351,9 +352,10 @@ export const ActivityLogsPage: React.FC<ActivityLogsPageProps> = ({ showToast })
                   key: 'category',
                   header: 'بخش',
                   priority: 'desktop-only',
-                  cellClassName: 'whitespace-nowrap',
+                  headerClassName: 'w-24 xl:w-28',
+                  cellClassName: 'w-24 xl:w-28',
                   cell: (item) => (
-                    <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-md">
+                    <span className="inline-block text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-md">
                       {item.category_label}
                     </span>
                   ),
@@ -363,7 +365,8 @@ export const ActivityLogsPage: React.FC<ActivityLogsPageProps> = ({ showToast })
                   header: 'نوع عملیات',
                   priority: 'secondary',
                   mobileLabel: 'نوع عملیات',
-                  cellClassName: 'whitespace-nowrap',
+                  headerClassName: 'w-28 xl:w-32',
+                  cellClassName: 'w-28 xl:w-32',
                   cell: (item) => {
                     const badge = getActionBadgeStyle(item.action_type);
                     return (
@@ -379,14 +382,14 @@ export const ActivityLogsPage: React.FC<ActivityLogsPageProps> = ({ showToast })
                   key: 'title',
                   header: 'چیکار کرد؟ (شرح عملیات)',
                   priority: 'primary',
-                  headerClassName: 'min-w-[220px]',
+                  cellClassName: 'min-w-0',
                   cell: (item) => (
-                    <div>
-                      <div className="font-bold text-slate-800 text-xs sm:text-sm break-words">
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-800 text-xs sm:text-sm whitespace-normal break-words line-clamp-2 max-w-prose">
                         {item.title}
                       </div>
                       {item.description && (
-                        <div className="text-xs text-slate-500 mt-0.5 break-words">
+                        <div className="text-xs font-normal text-slate-500 mt-0.5 whitespace-normal break-words line-clamp-2 max-w-prose">
                           {item.description}
                         </div>
                       )}
@@ -398,7 +401,8 @@ export const ActivityLogsPage: React.FC<ActivityLogsPageProps> = ({ showToast })
                   header: 'زمان ثبت',
                   priority: 'secondary',
                   mobileLabel: 'زمان ثبت',
-                  cellClassName: 'whitespace-nowrap tabular-nums text-xs text-slate-600 font-medium',
+                  headerClassName: 'w-32 xl:w-36',
+                  cellClassName: 'w-32 xl:w-36 tabular-nums text-xs text-slate-600 font-medium',
                   cell: (item) => item.jalali_datetime,
                 },
               ] satisfies Column<ActivityLogItem>[]

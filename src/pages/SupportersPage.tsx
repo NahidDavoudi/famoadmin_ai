@@ -48,6 +48,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
     phone: '',
     grade: '12',
     field: '' as AcademicField | '',
+    description: '',
     is_active: 1,
     chat_id: '',
     password: '',
@@ -80,6 +81,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       phone: '',
       grade: '12',
       field: '',
+      description: '',
       is_active: 1,
       chat_id: '',
       password: '',
@@ -96,6 +98,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       phone: String(s.phone ?? ''),
       grade: String(s.grade ?? '12'),
       field: (s.field as AcademicField) || '',
+      description: String(s.description ?? ''),
       is_active: s.is_active === false || s.is_active === 0 ? 0 : 1,
       chat_id: s.chat_id !== null && s.chat_id !== undefined ? String(s.chat_id) : '',
       password: '',
@@ -116,6 +119,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
 
     const trimmedChatId = String(formState.chat_id ?? '').trim();
     const trimmedPhone = String(formState.phone ?? '').trim();
+    const trimmedDescription = String(formState.description ?? '').trim();
 
     setSubmitting(true);
     try {
@@ -125,6 +129,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
           phone: trimmedPhone || null,
           grade: Number(formState.grade),
           field: formState.field as AcademicField,
+          description: trimmedDescription,
           is_active: formState.is_active ? 1 : 0,
           chat_id: trimmedChatId || null,
           password: formState.password || undefined,
@@ -137,6 +142,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
           phone: trimmedPhone,
           grade: Number(formState.grade),
           field: formState.field as AcademicField,
+          description: trimmedDescription,
           chat_id: trimmedChatId || null,
         });
         setIsAddOpen(false);
@@ -168,12 +174,12 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       key: 'name',
       header: 'نام پشتیبان',
       priority: 'primary',
-      headerClassName: 'min-w-[180px]',
-      cellClassName: 'font-semibold text-slate-800 whitespace-nowrap',
+      headerClassName: 'w-40 xl:w-52',
+      cellClassName: 'w-40 xl:w-52 font-semibold text-slate-800 whitespace-normal break-words',
       cell: (s) => {
         const imgSrc = resolveEntityImageUrl(s.avatar_url || s.avatar);
         return (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             {imgSrc ? (
               <img
                 src={imgSrc}
@@ -185,7 +191,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
                 {s.name.charAt(0)}
               </div>
             )}
-            <span>{s.name}</span>
+            <span className="min-w-0 whitespace-normal break-words">{s.name}</span>
           </div>
         );
       },
@@ -195,32 +201,37 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       header: 'شماره تماس',
       priority: 'secondary',
       mobileLabel: 'شماره تماس',
-      cellClassName: 'tabular-nums text-slate-600',
+      headerClassName: 'w-28 xl:w-32',
+      cellClassName: 'w-28 xl:w-32 tabular-nums text-slate-600',
       value: (s) => s.phone || '-',
       cell: (s) => (
-        <span dir="ltr" className="inline-block">
+        <span dir="ltr" className="inline-block break-all">
           {s.phone || '-'}
         </span>
       ),
     },
     {
-      key: 'grade',
-      header: 'پایه',
-      priority: 'desktop-only',
-      cellClassName: 'tabular-nums text-slate-600',
-      cell: (s) => `پایه ${s.grade}`,
-    },
-    {
       key: 'field',
-      header: 'رشته / درس',
+      header: 'پایه و رشته',
       priority: 'secondary',
       mobileLabel: 'پایه و رشته',
-      cellClassName: 'text-slate-600',
+      headerClassName: 'w-28 xl:w-32',
+      cellClassName: 'w-28 xl:w-32 text-slate-600 whitespace-normal break-words',
       cell: (s) => (
-        <span>
-          <span className="md:hidden">پایه {s.grade} • </span>
-          {s.field}
+        <span className="whitespace-normal break-words">
+          پایه {s.grade} • {s.field}
         </span>
+      ),
+    },
+    {
+      key: 'description',
+      header: 'توضیحات',
+      priority: 'desktop-only',
+      cellClassName: 'min-w-0 text-slate-600',
+      cell: (s) => (
+        <div className="whitespace-normal break-words line-clamp-2 max-w-prose text-xs text-slate-600 leading-relaxed">
+          {s.description || '—'}
+        </div>
       ),
     },
     {
@@ -228,6 +239,8 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       header: 'وضعیت',
       priority: 'secondary',
       mobileLabel: 'وضعیت',
+      headerClassName: 'w-20',
+      cellClassName: 'w-20',
       cell: (s) => {
         const active = s.is_active !== false && s.is_active !== 0;
         return (
@@ -242,26 +255,15 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       },
     },
     {
-      key: 'chat_id',
-      header: 'شناسه تلگرام',
-      priority: 'desktop-only',
-      cellClassName: 'tabular-nums',
-      cell: (s) =>
-        s.chat_id ? (
-          <span className="text-emerald-600 font-medium">{s.chat_id}</span>
-        ) : (
-          <span className="text-slate-400">ثبت نشده</span>
-        ),
-    },
-    {
       key: 'reports',
-      header: 'گزارش‌ها (پاسخ / انتظار)',
+      header: 'گزارش‌ها',
       priority: 'desktop-only',
-      cellClassName: 'tabular-nums',
+      headerClassName: 'w-24',
+      cellClassName: 'w-24 tabular-nums',
       cell: (s) => (
         <span>
           <span className="text-emerald-600 font-semibold">{s.replied_count ?? 0}</span>
-          <span className="text-slate-300 mx-1.5">/</span>
+          <span className="text-slate-300 mx-1">/</span>
           <span className="text-amber-600 font-semibold">{s.pending_count ?? 0}</span>
         </span>
       ),
@@ -352,15 +354,17 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
           </ActionButton>
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs">
           <DataTable
             columns={supporterColumns}
             data={supporters}
             rowKey={(s) => s.id}
             ariaLabel="جدول پشتیبان‌ها"
             actionsHeader="عملیات"
+            actionsHeaderClassName="w-28"
+            actionsCellClassName="w-28 shrink-0"
             renderActions={(s) => (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 <ActionButton
                   type="button"
                   variant="ghost"
@@ -398,7 +402,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
           }
         }}
         title={editingSupporter ? 'ویرایش پشتیبان' : 'افزودن پشتیبان جدید'}
-        subtitle="اطلاعات پشتیبان تحصیلی (مطابق API بک‌اند)"
+        subtitle="اطلاعات پشتیبان تحصیلی"
         icon={<Headset className="w-5 h-5" />}
         footer={
           <div className="flex items-center gap-3">
@@ -511,6 +515,17 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
               </select>
               <FieldError message={errors.field} />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">توضیحات</label>
+            <textarea
+              rows={3}
+              placeholder="سوابق، تخصص یا توضیحات تکمیلی پشتیبان..."
+              value={formState.description}
+              onChange={(e) => setFormState({ ...formState, description: e.target.value })}
+              className="w-full px-3.5 py-2.5 border-2 border-slate-200 rounded-xl text-sm resize-none focus:outline-none focus:border-[#445D84]"
+            />
           </div>
 
           <div>

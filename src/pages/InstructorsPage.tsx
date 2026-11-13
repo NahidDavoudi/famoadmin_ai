@@ -149,54 +149,59 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
       key: 'display_order',
       header: 'ترتیب',
       priority: 'desktop-only',
-      headerClassName: 'w-20',
-      cellClassName: 'tabular-nums font-medium text-slate-600',
+      headerClassName: 'w-16',
+      cellClassName: 'w-16 tabular-nums font-medium text-slate-600',
       cell: (i) => i.display_order,
     },
     {
       key: 'name',
       header: 'نام',
       priority: 'primary',
-      headerClassName: 'min-w-[180px]',
-      cellClassName: 'font-semibold text-slate-800 whitespace-nowrap',
-      cell: (i) => (
-        <div>
-          <div className="font-semibold text-slate-800">{i.name}</div>
-          {i.description && (
-            <div className="text-xs font-normal text-slate-500 mt-0.5 line-clamp-1">
-              {i.description}
-            </div>
-          )}
-        </div>
-      ),
+      headerClassName: 'w-48 xl:w-56',
+      cellClassName: 'w-48 xl:w-56 font-semibold text-slate-800 whitespace-normal break-words',
+      cell: (i) => {
+        const imgSrc = resolveEntityImageUrl(i.image_url);
+        return (
+          <div className="flex items-center gap-3 min-w-0">
+            {imgSrc ? (
+              <img
+                src={imgSrc}
+                alt={i.name}
+                className="w-10 h-10 rounded-full object-cover border border-slate-200 bg-slate-100 shrink-0"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-[#E2D9C6] flex items-center justify-center text-[#445D84] font-bold text-sm shrink-0">
+                {i.initial_letter || i.name.charAt(0)}
+              </div>
+            )}
+            <span className="min-w-0 font-semibold text-slate-800 whitespace-normal break-words">
+              {i.name}
+            </span>
+          </div>
+        );
+      },
     },
     {
       key: 'title',
       header: 'عنوان / سمت',
       priority: 'secondary',
-      cellClassName: 'text-slate-600',
+      headerClassName: 'w-40 xl:w-48',
+      cellClassName: 'w-40 xl:w-48 text-slate-600 whitespace-normal break-words',
       value: (i) => i.title,
-      cell: (i) => i.title,
+      cell: (i) => (
+        <div className="whitespace-normal break-words">{i.title || '—'}</div>
+      ),
     },
     {
-      key: 'initial_letter',
-      header: 'حرف اول / تصویر',
+      key: 'description',
+      header: 'توضیحات',
       priority: 'desktop-only',
-      headerClassName: 'w-28',
-      cell: (i) => {
-        const imgSrc = resolveEntityImageUrl(i.image_url);
-        return imgSrc ? (
-          <img
-            src={imgSrc}
-            alt={i.name}
-            className="w-10 h-10 rounded-full object-cover border border-slate-200 bg-slate-100"
-          />
-        ) : (
-          <div className="w-10 h-10 rounded-full bg-[#E2D9C6] flex items-center justify-center text-[#445D84] font-bold text-sm">
-            {i.initial_letter || i.name.charAt(0)}
-          </div>
-        );
-      },
+      cellClassName: 'min-w-0 text-slate-600',
+      cell: (i) => (
+        <div className="whitespace-normal break-words line-clamp-2 max-w-prose text-xs text-slate-600 leading-relaxed">
+          {i.description || '—'}
+        </div>
+      ),
     },
   ];
 
@@ -245,15 +250,17 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
           </ActionButton>
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs">
           <DataTable
             columns={instructorColumns}
             data={instructors}
             rowKey={(i) => i.id}
             ariaLabel="جدول اساتید"
             actionsHeader="عملیات"
+            actionsHeaderClassName="w-28"
+            actionsCellClassName="w-28 shrink-0"
             renderActions={(i) => (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 <ActionButton
                   type="button"
                   variant="ghost"
@@ -279,14 +286,16 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
             renderMobileCard={(i) => (
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-extrabold text-slate-900 leading-snug break-words">
+                  <div className="text-sm font-extrabold text-slate-900 leading-snug whitespace-normal break-words">
                     {i.name}
                   </div>
                   {i.title && (
-                    <div className="text-xs text-slate-500 mt-1 break-words">{i.title}</div>
+                    <div className="text-xs text-slate-500 mt-1 whitespace-normal break-words">
+                      {i.title}
+                    </div>
                   )}
                   {i.description && (
-                    <div className="text-xs text-slate-400 mt-1 line-clamp-2 break-words">
+                    <div className="text-xs text-slate-400 mt-1 whitespace-normal break-words line-clamp-2 max-w-prose">
                       {i.description}
                     </div>
                   )}

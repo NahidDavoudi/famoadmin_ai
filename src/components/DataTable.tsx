@@ -31,6 +31,8 @@ export interface DataTableProps<T> {
   tableAriaLabel?: string;
   ariaLabel?: string;
   actionsHeader?: string;
+  actionsHeaderClassName?: string;
+  actionsCellClassName?: string;
   renderActions?: (row: T, index: number) => React.ReactNode;
 }
 
@@ -93,6 +95,8 @@ export function DataTable<T>({
   tableAriaLabel,
   ariaLabel,
   actionsHeader,
+  actionsHeaderClassName,
+  actionsCellClassName,
   renderActions,
 }: DataTableProps<T>) {
   if (!data || data.length === 0) {
@@ -114,6 +118,8 @@ export function DataTable<T>({
           header: actionsHeader || 'عملیات',
           priority: 'secondary',
           isAction: true,
+          headerClassName: actionsHeaderClassName || 'w-28',
+          cellClassName: actionsCellClassName || 'w-28',
           cell: renderActions,
         },
       ]
@@ -137,23 +143,26 @@ export function DataTable<T>({
 
   return (
     <div className="w-full">
-      {/* دسکتاپ (md به بالا): جدول کامل و عادی بدون اسکرول افقی */}
+      {/* دسکتاپ (md به بالا): جدول کامل با table-fixed و عرض صریح ستون‌ها بدون اسکرول افقی */}
       <table
         aria-label={effectiveAriaLabel}
-        className="hidden md:table w-full text-sm border-collapse"
+        className="hidden md:table w-full table-fixed text-sm border-collapse"
       >
         <thead className="bg-[#344868] text-white text-xs">
           <tr>
-            {visibleColumns.map((col) => (
-              <th
-                key={col.key}
-                className={`px-4 py-3.5 text-start font-semibold whitespace-nowrap ${
-                  col.priority === 'primary' ? 'min-w-[170px]' : ''
-                } ${col.headerClassName || ''}`}
-              >
-                {col.header}
-              </th>
-            ))}
+            {visibleColumns.map((col) => {
+              const isActionCol = Boolean(col.isAction || col.key === 'actions');
+              return (
+                <th
+                  key={col.key}
+                  className={`px-3.5 py-3.5 text-start font-semibold min-w-0 break-words first:rounded-ss-2xl last:rounded-se-2xl ${
+                    isActionCol ? 'w-28 shrink-0 whitespace-nowrap' : ''
+                  } ${col.headerClassName || ''}`}
+                >
+                  {col.header}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
@@ -167,16 +176,21 @@ export function DataTable<T>({
                   onRowClick ? 'cursor-pointer' : ''
                 } ${customRowCls}`}
               >
-                {visibleColumns.map((col) => (
-                  <td
-                    key={col.key}
-                    className={`px-4 py-3.5 text-start align-middle ${
-                      col.priority === 'primary' ? 'font-semibold text-slate-800' : ''
-                    } ${col.cellClassName || ''}`}
-                  >
-                    {col.cell(row, idx)}
-                  </td>
-                ))}
+                {visibleColumns.map((col) => {
+                  const isActionCol = Boolean(col.isAction || col.key === 'actions');
+                  return (
+                    <td
+                      key={col.key}
+                      className={`px-3.5 py-3.5 text-start align-middle min-w-0 ${
+                        isActionCol ? 'w-28 shrink-0 whitespace-nowrap' : 'break-words'
+                      } ${
+                        col.priority === 'primary' ? 'font-semibold text-slate-800' : ''
+                      } ${col.cellClassName || ''}`}
+                    >
+                      {col.cell(row, idx)}
+                    </td>
+                  );
+                })}
               </tr>
             );
           })}

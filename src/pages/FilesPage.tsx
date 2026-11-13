@@ -214,22 +214,23 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs">
           <DataTable<ExamFile>
             columns={[
               {
                 key: 'file_name',
                 header: 'نام فایل',
                 priority: 'primary',
-                headerClassName: 'min-w-[200px]',
-                cellClassName: 'font-semibold text-slate-800',
+                cellClassName: 'min-w-0 font-semibold text-slate-800',
                 cell: (f) => {
                   const fileTitle =
                     f.description || f.original_name || f.file_path || `فایل #${f.id}`;
                   return (
-                    <div className="flex items-center gap-2.5">
-                      <FileText className="w-4 h-4 text-red-500 shrink-0" />
-                      <span className="break-words">{fileTitle}</span>
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <FileText className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                      <span className="whitespace-normal break-words line-clamp-2 max-w-prose">
+                        {fileTitle}
+                      </span>
                     </div>
                   );
                 },
@@ -239,7 +240,8 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
                 header: 'دانش‌آموز',
                 priority: 'secondary',
                 mobileLabel: 'دانش‌آموز',
-                cellClassName: 'text-slate-600',
+                headerClassName: 'w-40 xl:w-48',
+                cellClassName: 'w-40 xl:w-48 text-slate-600 whitespace-normal break-words',
                 cell: (f) => {
                   const studentObj = students.find((s) => s.id === Number(f.student_id));
                   return (
@@ -254,7 +256,8 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
                 key: 'size',
                 header: 'حجم',
                 priority: 'desktop-only',
-                cellClassName: 'tabular-nums text-slate-600',
+                headerClassName: 'w-20 xl:w-24',
+                cellClassName: 'w-20 xl:w-24 tabular-nums text-slate-600',
                 cell: (f) => {
                   const fileSize = f.size ?? f.file_size;
                   return (
@@ -269,7 +272,8 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
                 header: 'تاریخ آپلود',
                 priority: 'secondary',
                 mobileLabel: 'تاریخ آپلود',
-                cellClassName: 'tabular-nums text-slate-500',
+                headerClassName: 'w-28 xl:w-32',
+                cellClassName: 'w-28 xl:w-32 tabular-nums text-slate-500',
                 value: (f) => {
                   const uploadedDate = f.uploaded_at || f.created_at || f.exam_date;
                   return formatGregorianToJalali(uploadedDate);
@@ -284,11 +288,13 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
             rowKey={(f) => f.id}
             ariaLabel="جدول فایل‌های آزمون"
             actionsHeader="عملیات"
+            actionsHeaderClassName="w-28"
+            actionsCellClassName="w-28 shrink-0"
             renderActions={(f) => {
               const fileTitle =
                 f.description || f.original_name || f.file_path || `فایل #${f.id}`;
               return (
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 shrink-0">
                   <a
                     href={API.getFileDownloadUrl(f)}
                     target="_blank"

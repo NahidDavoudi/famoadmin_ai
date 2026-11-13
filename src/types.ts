@@ -78,6 +78,7 @@ export interface Supporter {
   phone?: string | number | null;
   grade: number;
   field: AcademicField;
+  description?: string | null;
   is_active?: boolean | number;
   chat_id: string | number | null;
   created_at?: string;
