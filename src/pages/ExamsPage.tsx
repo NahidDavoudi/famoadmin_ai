@@ -28,7 +28,11 @@ import type {
   PageId,
   ToastType,
 } from '../types';
-import { RadialGauge, StudentExamTrendChart } from '../components/Charts';
+import {
+  RadialGauge,
+  StudentExamTrendChart,
+  PrintableStudentTrendChart,
+} from '../components/Charts';
 import { ActionButton } from '../components/FormControls';
 
 interface ExamsPageProps {
@@ -223,6 +227,22 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
   };
 
   const activeExamDate = selectedDate || details?.exam_date || '';
+
+  const effectiveTrendPoints: StudentExamTrendPoint[] =
+    trendPoints.length > 0
+      ? trendPoints
+      : details
+        ? [
+            {
+              exam_date: activeExamDate || 'current',
+              jalali_date: activeExamDate ? formatGregorianToJalali(activeExamDate) : '-',
+              subject_count: (details.subjects || []).length,
+              avg_percentage: Math.round(safeNumber(details.avg_percentage) * 10) / 10,
+              delta: null,
+              is_current: true,
+            },
+          ]
+        : [];
 
   const pageTitle =
     view === 'dates'
@@ -589,7 +609,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                     محاسبه بر اساس فرمول کنکوری (با احتساب نمره منفی)
                   </span>
                 </div>
-                <StudentExamTrendChart data={trendPoints} loading={trendLoading} />
+                <StudentExamTrendChart data={effectiveTrendPoints} loading={trendLoading} />
               </div>
 
               {/* Per-Subject Instructor Comments & Feedback Inputs */}
@@ -829,18 +849,31 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                 </table>
               </div>
 
-              {/* 2. Last 5 Exams Trend Summary Table (Compact & 100% Print-Safe) */}
-              {trendPoints.length > 0 && (
-                <div className="mb-3">
+              {/* 2. Last 5 Exams Visual Trend Line Chart + Summary Table (100% Print-Safe) */}
+              {effectiveTrendPoints.length > 0 && (
+                <div className="mb-3 print-avoid-break">
                   <div className="text-xs font-extrabold text-slate-900 mb-1">
-                    ۲. روند تغییرات میانگین درصد دانش‌آموز در {trendPoints.length} آزمون اخیر:
+                    ۲. نمودار و روند تغییرات میانگین درصد دانش‌آموز در {effectiveTrendPoints.length}{' '}
+                    آزمون اخیر:
                   </div>
+                  <table className="w-full border-collapse mb-1.5">
+                    <tbody>
+                      <tr>
+                        <td className="border border-slate-400 p-2 bg-white" dir="ltr">
+                          <PrintableStudentTrendChart data={effectiveTrendPoints} />
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                   <table className="w-full border-collapse text-center text-[10px]">
                     <thead>
                       <tr className="bg-slate-100 text-slate-700">
                         <th className="border border-slate-400 py-1 px-2 text-right">شاخص</th>
-                        {trendPoints.map((pt, i) => (
-                          <th key={pt.exam_date} className="border border-slate-400 py-1 px-2 tabular-nums">
+                        {effectiveTrendPoints.map((pt, i) => (
+                          <th
+                            key={pt.exam_date}
+                            className="border border-slate-400 py-1 px-2 tabular-nums"
+                          >
                             آزمون {i + 1} ({pt.jalali_date})
                           </th>
                         ))}
@@ -851,7 +884,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                         <td className="border border-slate-400 py-1 px-2 text-right font-bold">
                           میانگین درصد
                         </td>
-                        {trendPoints.map((pt) => (
+                        {effectiveTrendPoints.map((pt) => (
                           <td
                             key={pt.exam_date}
                             className="border border-slate-400 py-1 px-2 font-extrabold tabular-nums"
@@ -866,7 +899,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                         <td className="border border-slate-400 py-1 px-2 text-right font-semibold text-slate-600">
                           تغییر نسبت به آزمون قبل
                         </td>
-                        {trendPoints.map((pt) => (
+                        {effectiveTrendPoints.map((pt) => (
                           <td
                             key={pt.exam_date}
                             className="border border-slate-400 py-1 px-2 tabular-nums text-slate-700"
@@ -875,7 +908,9 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                               '-'
                             ) : (
                               <span dir="ltr" className="inline-block font-bold">
-                                {pt.delta > 0 ? `+${pt.delta.toFixed(1)}%` : `${pt.delta.toFixed(1)}%`}
+                                {pt.delta > 0
+                                  ? `+${pt.delta.toFixed(1)}%`
+                                  : `${pt.delta.toFixed(1)}%`}
                               </span>
                             )}
                           </td>

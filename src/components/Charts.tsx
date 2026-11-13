@@ -469,92 +469,237 @@ export const StudentExamTrendChart: React.FC<{
         </ResponsiveContainer>
       </div>
 
-      {/* Print-safe native viewBox SVG chart (scales to 100% of A4 width without clipping) */}
+      {/* Print-safe native viewBox SVG chart */}
       <div className="hidden print:block w-full" dir="ltr">
-        {(() => {
-          const svgW = 620;
-          const svgH = 120;
-          const padL = 38;
-          const padR = 24;
-          const padT = 16;
-          const padB = 24;
-          const plotW = svgW - padL - padR;
-          const plotH = svgH - padT - padB;
-          const range = 100 - yMin || 100;
-          const getX = (i: number) =>
-            data.length === 1 ? padL + plotW / 2 : padL + (i / (data.length - 1)) * plotW;
-          const getY = (val: number) => padT + plotH - ((val - yMin) / range) * plotH;
-          const polyPoints = data.map((d, i) => `${getX(i)},${getY(d.avg_percentage)}`).join(' ');
-
-          return (
-            <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full h-[115px] overflow-visible">
-              {[yMin, 0, 50, 100]
-                .filter((v, idx, arr) => v >= yMin && arr.indexOf(v) === idx)
-                .map((tick) => {
-                  const y = getY(tick);
-                  return (
-                    <g key={tick}>
-                      <line
-                        x1={padL}
-                        y1={y}
-                        x2={svgW - padR}
-                        y2={y}
-                        stroke={tick === 0 ? '#94a3b8' : '#e2e8f0'}
-                        strokeDasharray="3 3"
-                        strokeWidth="1"
-                      />
-                      <text
-                        x={padL - 6}
-                        y={y + 3}
-                        fontSize="9"
-                        fill="#64748b"
-                        textAnchor="end"
-                      >
-                        {tick}%
-                      </text>
-                    </g>
-                  );
-                })}
-              <polyline
-                fill="none"
-                stroke="#344868"
-                strokeWidth="2.2"
-                points={polyPoints}
-              />
-              {data.map((d, i) => {
-                const x = getX(i);
-                const y = getY(d.avg_percentage);
-                const fill = d.avg_percentage >= 50 ? '#10b981' : '#ef4444';
-                return (
-                  <g key={d.exam_date}>
-                    <circle cx={x} cy={y} r={d.is_current ? 4.5 : 3.5} fill={fill} stroke="#fff" strokeWidth="1" />
-                    <text
-                      x={x}
-                      y={y - 6}
-                      fontSize="9"
-                      fontWeight="bold"
-                      fill="#1e293b"
-                      textAnchor="middle"
-                    >
-                      {d.avg_percentage.toFixed(1)}%
-                    </text>
-                    <text
-                      x={x}
-                      y={svgH - 6}
-                      fontSize="9"
-                      fill="#475569"
-                      textAnchor="middle"
-                    >
-                      {d.jalali_date}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
-          );
-        })()}
+        <PrintableStudentTrendChart data={data} />
       </div>
     </div>
   );
 };
+
+/**
+ * Pure-SVG, fixed-viewBox trend chart specifically engineered for A4 Portrait printing.
+ * Uses zero JS ResizeObserver or fixed pixel widths so it never stretches or clips
+ * RTL print tables.
+ */
+export const PrintableStudentTrendChart: React.FC<{
+  data: StudentExamTrendPoint[];
+}> = ({ data }) => {
+  if (!data || data.length === 0) return null;
+
+  const minVal = Math.min(0, ...data.map((d) => d.avg_percentage));
+  const yMin = minVal < 0 ? Math.max(-40, Math.floor((minVal - 5) / 10) * 10) : 0;
+
+  const svgW = 660;
+  const svgH = 148;
+  const padL = 46;
+  const padR = 36;
+  const padT = 24;
+  const padB = 30;
+  const plotW = svgW - padL - padR;
+  const plotH = svgH - padT - padB;
+  const range = 100 - yMin || 100;
+
+  const getX = (i: number) =>
+    data.length === 1 ? padL + plotW / 2 : padL + (i / (data.length - 1)) * plotW;
+  const getY = (val: number) => {
+    const clamped = Math.max(yMin, Math.min(100, Number(val) || 0));
+    return padT + plotH - ((clamped - yMin) / range) * plotH;
+  };
+
+  const zeroY = getY(0);
+  const polyPoints = data.map((d, i) => `${getX(i)},${getY(d.avg_percentage)}`).join(' ');
+  const areaPoints =
+    data.length > 1
+      ? `${getX(0)},${zeroY} ${polyPoints} ${getX(data.length - 1)},${zeroY}`
+      : '';
+
+  const yTicks = [yMin, 0, 25, 50, 75, 100].filter(
+    (v, idx, arr) => v >= yMin && arr.indexOf(v) === idx
+  );
+
+  return (
+    <svg
+      viewBox={`0 0 ${svgW} ${svgH}`}
+      preserveAspectRatio="xMidYMid meet"
+      className="w-full h-[132px] block select-none"
+      role="img"
+      aria-label="نمودار خطی روند تغییرات درصد در آزمون‌های اخیر"
+    >
+      <defs>
+        <linearGradient id="printTrendAreaGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#445D84" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="#445D84" stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+
+      {/* Plot frame background */}
+      <rect
+        x={padL}
+        y={padT}
+        width={plotW}
+        height={plotH}
+        fill="#f8fafc"
+        stroke="#cbd5e1"
+        strokeWidth="1"
+        rx="4"
+      />
+
+      {/* Horizontal grid lines & Y-axis labels */}
+      {yTicks.map((tick) => {
+        const y = getY(tick);
+        const isZero = tick === 0 && yMin < 0;
+        const isTarget = tick === 50;
+        return (
+          <g key={tick}>
+            <line
+              x1={padL}
+              y1={y}
+              x2={svgW - padR}
+              y2={y}
+              stroke={isZero ? '#64748b' : isTarget ? '#10b981' : '#e2e8f0'}
+              strokeDasharray={isZero ? '4 2' : isTarget ? '4 3' : '3 3'}
+              strokeWidth={isZero || isTarget ? '1.1' : '0.8'}
+              strokeOpacity={isTarget ? 0.65 : 1}
+            />
+            <text
+              x={padL - 6}
+              y={y + 3}
+              fontSize="9.5"
+              fontWeight={isZero || isTarget ? '700' : '500'}
+              fill={isTarget ? '#047857' : '#475569'}
+              textAnchor="end"
+            >
+              {tick}%
+            </text>
+          </g>
+        );
+      })}
+
+      {/* Shaded area under trend line */}
+      {areaPoints && <polygon points={areaPoints} fill="url(#printTrendAreaGrad)" />}
+
+      {/* Single-point guide line if student only has 1 exam */}
+      {data.length === 1 && (
+        <line
+          x1={padL + 20}
+          y1={getY(data[0].avg_percentage)}
+          x2={svgW - padR - 20}
+          y2={getY(data[0].avg_percentage)}
+          stroke="#445D84"
+          strokeWidth="1.5"
+          strokeDasharray="5 4"
+        />
+      )}
+
+      {/* Main trend line */}
+      {data.length > 1 && (
+        <polyline
+          fill="none"
+          stroke="#344868"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={polyPoints}
+        />
+      )}
+
+      {/* Data points, value badges, and X-axis date labels */}
+      {data.map((d, i) => {
+        const x = getX(i);
+        const y = getY(d.avg_percentage);
+        const isPositive = d.avg_percentage >= 50;
+        const dotColor = isPositive ? '#059669' : '#dc2626';
+        const labelText = `${d.avg_percentage.toFixed(1)}%`;
+        const badgeW = 42;
+        const badgeH = 15;
+        // Place badge above point unless point is very close to top border
+        const placeBelow = y < padT + 18;
+        const badgeY = placeBelow ? y + 7 : y - badgeH - 6;
+
+        return (
+          <g key={`${d.exam_date}-${i}`}>
+            {/* Vertical subtle guide to X-axis */}
+            <line
+              x1={x}
+              y1={y}
+              x2={x}
+              y2={padT + plotH}
+              stroke="#cbd5e1"
+              strokeDasharray="2 2"
+              strokeWidth="0.8"
+            />
+
+            {/* Highlight halo for current exam */}
+            {d.is_current && (
+              <circle
+                cx={x}
+                cy={y}
+                r="7.5"
+                fill={dotColor}
+                fillOpacity="0.18"
+                stroke={dotColor}
+                strokeWidth="1"
+              />
+            )}
+
+            {/* Data point circle */}
+            <circle
+              cx={x}
+              cy={y}
+              r={d.is_current ? '4.8' : '4'}
+              fill={dotColor}
+              stroke="#ffffff"
+              strokeWidth="1.5"
+            />
+
+            {/* Percentage pill above/below node */}
+            <rect
+              x={x - badgeW / 2}
+              y={badgeY}
+              width={badgeW}
+              height={badgeH}
+              rx="3.5"
+              fill="#ffffff"
+              stroke={isPositive ? '#a7f3d0' : '#fecaca'}
+              strokeWidth="1"
+            />
+            <text
+              x={x}
+              y={badgeY + 10.5}
+              fontSize="9.5"
+              fontWeight="800"
+              fill={isPositive ? '#065f46' : '#991b1b'}
+              textAnchor="middle"
+            >
+              {labelText}
+            </text>
+
+            {/* X-axis Jalali date label */}
+            <text
+              x={x}
+              y={padT + plotH + 13}
+              fontSize="9.5"
+              fontWeight={d.is_current ? '800' : '600'}
+              fill={d.is_current ? '#0f172a' : '#334155'}
+              textAnchor="middle"
+            >
+              {d.jalali_date}
+            </text>
+            <text
+              x={x}
+              y={padT + plotH + 24}
+              fontSize="8.5"
+              fill="#64748b"
+              textAnchor="middle"
+            >
+              {`آزمون ${i + 1}${d.is_current ? ' (فعلی)' : ''}`}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
 
