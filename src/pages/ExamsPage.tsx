@@ -37,6 +37,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
   const [dates, setDates] = useState<ExamDateSummary[]>([]);
   const [students, setStudents] = useState<ExamStudentSummary[]>([]);
   const [details, setDetails] = useState<ExamDetailsResponse | null>(null);
+  const [detailsCache, setDetailsCache] = useState<Record<string, ExamDetailsResponse>>({});
 
   const loadDates = useCallback(
     async (month = monthFilter) => {
@@ -66,7 +67,41 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
     setView('students');
     try {
       const res = await API.getExamStudents(examDate);
-      setStudents(res.data?.students || []);
+      const rawStudents = res.data?.students || [];
+      setStudents(rawStudents);
+
+      if (rawStudents.length > 0) {
+        const settled = await Promise.allSettled(
+          rawStudents.map((s) => API.getExamDetails(examDate, s.student_id))
+        );
+        const nextCache: Record<string, ExamDetailsResponse> = {};
+        const enrichedStudents = rawStudents.map((s, idx) => {
+          const outcome = settled[idx];
+          if (outcome.status === 'fulfilled' && outcome.value?.data) {
+            const detailData = outcome.value.data;
+            nextCache[`${examDate}:${s.student_id}`] = detailData;
+            return {
+              ...s,
+              subject_count: detailData.subjects?.length || s.subject_count,
+              avg_percentage: detailData.avg_percentage,
+            };
+          }
+          return s;
+        });
+
+        setDetailsCache((prev) => ({ ...prev, ...nextCache }));
+        setStudents(enrichedStudents);
+
+        const totalAvg =
+          enrichedStudents.reduce((sum, s) => sum + safeNumber(s.avg_percentage), 0) /
+          enrichedStudents.length;
+        const roundedDateAvg = Math.round(totalAvg * 10) / 10;
+        setDates((prev) =>
+          prev.map((d) =>
+            d.exam_date === examDate ? { ...d, avg_percentage: roundedDateAvg } : d
+          )
+        );
+      }
     } catch {
       showToast('خطا در بارگذاری لیست شرکت‌کنندگان', 'error');
     } finally {
@@ -75,11 +110,21 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
   };
 
   const handleSelectStudentDetails = async (examDate: string, studentId: number) => {
+    const cacheKey = `${examDate}:${studentId}`;
+    if (detailsCache[cacheKey]) {
+      setDetails(detailsCache[cacheKey]);
+      setView('details');
+      return;
+    }
+
     setLoading(true);
     setView('details');
     try {
       const res = await API.getExamDetails(examDate, studentId);
       setDetails(res.data);
+      if (res.data) {
+        setDetailsCache((prev) => ({ ...prev, [cacheKey]: res.data }));
+      }
     } catch {
       showToast('خطا در بارگذاری جزئیات کارنامه', 'error');
     } finally {
@@ -89,7 +134,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
 
   const handleGoBack = async () => {
     if (view === 'details' && selectedDate) {
-      await handleSelectDate(selectedDate);
+      setView('students');
+      setDetails(null);
     } else {
       await loadDates(monthFilter);
     }
@@ -207,7 +253,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                       </td>
                       <td className="px-5 py-4 tabular-nums">
                         <span
-                          className={`font-bold ${
+                          dir="ltr"
+                          className={`inline-block font-bold ${
                             safeNumber(exam.avg_percentage) >= 50 ? 'text-emerald-600' : 'text-red-600'
                           }`}
                         >
@@ -258,7 +305,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                     <td className="px-5 py-4 tabular-nums text-slate-600">{s.subject_count}</td>
                     <td className="px-5 py-4 tabular-nums">
                       <span
-                        className={`font-bold ${
+                        dir="ltr"
+                        className={`inline-block font-bold ${
                           safeNumber(s.avg_percentage) >= 50 ? 'text-emerald-600' : 'text-red-600'
                         }`}
                       >
@@ -307,6 +355,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
               <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 text-center">
                 <p className="text-slate-500 text-xs mb-1">میانگین کل</p>
                 <p
+                  dir="ltr"
                   className={`font-bold text-sm tabular-nums ${
                     safeNumber(details.avg_percentage) >= 50 ? 'text-emerald-600' : 'text-red-600'
                   }`}

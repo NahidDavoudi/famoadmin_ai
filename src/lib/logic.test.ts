@@ -419,6 +419,61 @@ test('Spreadsheet appointment time normalization and sync plan compute create, u
   assert.deepEqual(plan.activeStudentIdsWithTime, [1, 2]);
 });
 
+test('normalizeExamSubject and normalizeExamDetails recompute Konkur negative marking and preserve negative percentages', async () => {
+  const { normalizeExamSubject, normalizeExamDetails } = await import('./exam-math');
 
+  // Case 1: 0 correct, 5 wrong out of 15 -> backend returns 0.0%, Konkur formula is -11.1%
+  const negZeroCorrect = normalizeExamSubject({
+    subject: 'شیمی',
+    chapter: 'فصل ۱',
+    total_q: 15,
+    correct: 0,
+    wrong: 5,
+    skipped: 10,
+    percentage: 0, // backend simple ratio (0 / 15 * 100)
+  });
+  assert.equal(negZeroCorrect.skipped, 10);
+  assert.equal(negZeroCorrect.percentage, -11.1);
 
+  // Case 2: 2 correct, 10 wrong out of 20 -> backend returns 10.0%, Konkur formula is ((6 - 10)/60)*100 = -6.7%
+  const negWithCorrect = normalizeExamSubject({
+    subject: 'فیزیک',
+    chapter: null,
+    total_q: 20,
+    correct: 2,
+    wrong: 10,
+    skipped: 8,
+    percentage: 10, // backend simple ratio (2 / 20 * 100)
+  });
+  assert.equal(negWithCorrect.skipped, 8);
+  assert.equal(negWithCorrect.percentage, -6.7);
 
+  // Case 3: 10 correct, 6 wrong out of 20 -> backend returns 50.0%, Konkur formula is ((30 - 6)/60)*100 = 40.0%
+  const posWithPenalty = normalizeExamSubject({
+    subject: 'زیست‌شناسی',
+    chapter: 'فصل ۲',
+    total_q: 20,
+    correct: 10,
+    wrong: 6,
+    skipped: 4,
+    percentage: 50, // backend simple ratio (10 / 20 * 100)
+  });
+  assert.equal(posWithPenalty.skipped, 4);
+  assert.equal(posWithPenalty.percentage, 40);
+
+  // Report card details average should be (-11.1 + -6.7 + 40) / 3 = 22.2 / 3 = 7.4%
+  const reportCard = normalizeExamDetails({
+    student: { id: 7, name: 'سارا محمدی', grade: 12, field: 'تجربی' },
+    exam_date: '2026-02-20',
+    avg_percentage: 20, // backend average of [0, 10, 50]
+    subjects: [
+      { subject: 'شیمی', chapter: 'فصل ۱', total_q: 15, correct: 0, wrong: 5, skipped: 10, percentage: 0 },
+      { subject: 'فیزیک', chapter: null, total_q: 20, correct: 2, wrong: 10, skipped: 8, percentage: 10 },
+      { subject: 'زیست‌شناسی', chapter: 'فصل ۲', total_q: 20, correct: 10, wrong: 6, skipped: 4, percentage: 50 },
+    ],
+  });
+  assert.equal(reportCard.subjects[0].percentage, -11.1);
+  assert.equal(reportCard.subjects[1].percentage, -6.7);
+  assert.equal(reportCard.subjects[2].percentage, 40);
+  assert.equal(reportCard.avg_percentage, 7.4);
+});

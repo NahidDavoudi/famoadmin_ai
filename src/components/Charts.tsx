@@ -37,23 +37,28 @@ export const AvgByFieldBarChart: React.FC<{ data: FieldAvgStat[] }> = ({ data })
           </div>
 
           {data.map((item, idx) => {
-            const pct = Math.max(0, Math.min(100, Number(item.avg_percentage) || 0));
+            const rawPct = Number(item.avg_percentage);
+            const displayPct = Number.isFinite(rawPct) ? Math.max(-100, Math.min(100, rawPct)) : 0;
+            const barPct = Math.max(0, Math.min(100, displayPct));
             const color = BAR_COLORS[idx % BAR_COLORS.length];
             return (
               <div
                 key={item.field}
                 className="relative z-10 flex flex-col items-center justify-end h-full flex-1 max-w-[110px] group px-2"
               >
-                <span className="text-xs font-bold text-slate-700 tabular-nums mb-1.5 transition-transform group-hover:-translate-y-0.5">
-                  {pct.toFixed(1)}%
+                <span
+                  dir="ltr"
+                  className="text-xs font-bold text-slate-700 tabular-nums mb-1.5 transition-transform group-hover:-translate-y-0.5"
+                >
+                  {displayPct.toFixed(1)}%
                 </span>
                 <div
                   className="w-full rounded-t-lg transition-all duration-500 shadow-xs group-hover:opacity-90"
                   style={{
-                    height: `${Math.max(pct, 4)}%`,
+                    height: `${Math.max(barPct, 4)}%`,
                     backgroundColor: color,
                   }}
-                  title={`میانگین ${item.field}: ${pct.toFixed(1)}%`}
+                  title={`میانگین ${item.field}: ${displayPct.toFixed(1)}%`}
                 />
               </div>
             );
@@ -215,12 +220,14 @@ export const DailyReportsAreaChart: React.FC<{ data: ReportDayStat[] }> = ({ dat
 };
 
 export const RadialGauge: React.FC<{ percentage: number }> = ({ percentage }) => {
-  const clamped = Math.max(0, Math.min(100, Number(percentage) || 0));
-  const isPositive = clamped >= 50;
+  const rawPct = Number(percentage);
+  const displayPct = Number.isFinite(rawPct) ? Math.max(-100, Math.min(100, rawPct)) : 0;
+  const arcPct = Math.max(0, Math.min(100, displayPct));
+  const isPositive = displayPct >= 50;
   const color = isPositive ? '#10b981' : '#ef4444';
   const radius = 32;
   const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (clamped / 100) * circumference;
+  const offset = circumference - (arcPct / 100) * circumference;
 
   return (
     <div className="inline-flex flex-col items-center justify-center">
@@ -252,7 +259,7 @@ export const RadialGauge: React.FC<{ percentage: number }> = ({ percentage }) =>
           }`}
           dir="ltr"
         >
-          {clamped.toFixed(1)}%
+          {displayPct.toFixed(1)}%
         </span>
       </div>
     </div>

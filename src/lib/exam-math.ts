@@ -1,4 +1,4 @@
-import type { AcademicField, Student } from '../types';
+import type { AcademicField, ExamDetailsResponse, SubjectResult, Student } from '../types';
 
 export interface SubjectDraft {
   id: string;
@@ -29,7 +29,7 @@ export const VALID_GRADES: readonly number[] = [7, 8, 9, 10, 11, 12] as const;
 
 /**
  * Calculates skipped count and exam score percentage using standard Iranian Konkur formula:
- * ((correct - wrong / 3) / total) * 100
+ * ((correct * 3 - wrong) / (total * 3)) * 100
  */
 export function calculateSubjectMetrics(
   totalRaw: number | string,
@@ -49,13 +49,77 @@ export function calculateSubjectMetrics(
     return { skipped, percentage: null, isValid: false };
   }
 
-  const rawPercentage = ((correct - wrong / 3) / total) * 100;
+  const rawPercentage = ((correct * 3 - wrong) / (total * 3)) * 100;
   const rounded = Math.round(rawPercentage * 10) / 10;
 
   return {
     skipped,
     percentage: rounded,
     isValid: true,
+  };
+}
+
+/**
+ * Normalizes a single exam subject row and recalculates `skipped` and Konkur `percentage`
+ * (((correct * 3 - wrong) / (total_q * 3)) * 100) whenever `total_q > 0`, overriding
+ * backend simple ratios (`correct / total_q * 100`) that omit negative marking.
+ */
+export function normalizeExamSubject(sub: Partial<SubjectResult> | null | undefined): SubjectResult {
+  const total_q = safeNumber(sub?.total_q);
+  const correct = safeNumber(sub?.correct);
+  const wrong = safeNumber(sub?.wrong);
+  const calc = calculateSubjectMetrics(total_q, correct, wrong);
+
+  let skipped = safeNumber(sub?.skipped);
+  let percentage = safeNumber(sub?.percentage);
+
+  if (calc.isValid && calc.percentage !== null && calc.skipped !== null) {
+    skipped = calc.skipped;
+    percentage = calc.percentage;
+  } else if (total_q > 0 && correct >= 0 && wrong >= 0) {
+    skipped = Math.max(0, total_q - correct - wrong);
+    percentage = Math.round((((correct * 3 - wrong) / (total_q * 3)) * 100) * 10) / 10;
+  }
+
+  return {
+    ...sub,
+    subject: safeTrim(sub?.subject),
+    chapter: sub?.chapter ? safeTrim(sub.chapter) : null,
+    total_q,
+    correct,
+    wrong,
+    skipped,
+    percentage,
+  };
+}
+
+/**
+ * Normalizes a student's exam report card (`ExamDetailsResponse`), computing Konkur
+ * negative-marking percentages per subject and the overall `avg_percentage`.
+ */
+export function normalizeExamDetails(
+  raw: Partial<ExamDetailsResponse> | null | undefined
+): ExamDetailsResponse {
+  const subjects = Array.isArray(raw?.subjects)
+    ? raw.subjects.map((sub) => normalizeExamSubject(sub))
+    : [];
+
+  const avg_percentage =
+    subjects.length > 0
+      ? Math.round((subjects.reduce((sum, s) => sum + s.percentage, 0) / subjects.length) * 10) / 10
+      : safeNumber(raw?.avg_percentage);
+
+  return {
+    ...raw,
+    student: {
+      id: safeNumber(raw?.student?.id),
+      name: safeTrim(raw?.student?.name),
+      grade: safeNumber(raw?.student?.grade, 12),
+      field: (safeTrim(raw?.student?.field) || 'تجربی') as AcademicField,
+    },
+    exam_date: raw?.exam_date ? safeTrim(raw.exam_date) : undefined,
+    subjects,
+    avg_percentage,
   };
 }
 

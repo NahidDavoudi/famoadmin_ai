@@ -40,7 +40,7 @@ import type {
   TutoringBoardClass,
   TeacherTutoringStatus,
 } from '../types';
-import { safeTrim, safeNumber } from './exam-math';
+import { safeTrim, safeNumber, normalizeExamDetails } from './exam-math';
 
 export interface ApiErrorObject {
   code?: string;
@@ -836,25 +836,9 @@ class FamoApiClient {
       {},
       'خطا در بارگذاری جزئیات کارنامه'
     );
-    const raw = res.data;
-    const rawSubjects = Array.isArray(raw?.subjects) ? raw.subjects : [];
-    const subjects: SubjectResult[] = rawSubjects.map((sub) => ({
-      ...sub,
-      subject: safeTrim(sub.subject),
-      chapter: sub.chapter ? safeTrim(sub.chapter) : null,
-      total_q: safeNumber(sub.total_q),
-      correct: safeNumber(sub.correct),
-      wrong: safeNumber(sub.wrong),
-      skipped: safeNumber(sub.skipped),
-      percentage: safeNumber(sub.percentage),
-    }));
     return {
       ...res,
-      data: {
-        ...raw,
-        avg_percentage: safeNumber(raw?.avg_percentage),
-        subjects,
-      },
+      data: normalizeExamDetails(res.data),
     };
   }
 
