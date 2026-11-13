@@ -10,6 +10,7 @@ import {
   Printer,
   MessageSquarePlus,
   Trash2,
+  TrendingUp,
 } from 'lucide-react';
 import API from '../lib/api';
 import { formatJalaliLong, formatGregorianToJalali } from '../lib/jalali';
@@ -18,6 +19,7 @@ import {
   formatFixed,
   createInitialTeacherFeedbacks,
   type TeacherFeedbackRow,
+  type StudentExamTrendPoint,
 } from '../lib/exam-math';
 import type {
   ExamDateSummary,
@@ -26,7 +28,7 @@ import type {
   PageId,
   ToastType,
 } from '../types';
-import { RadialGauge } from '../components/Charts';
+import { RadialGauge, StudentExamTrendChart } from '../components/Charts';
 import { ActionButton } from '../components/FormControls';
 
 interface ExamsPageProps {
@@ -48,6 +50,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
   const [detailsCache, setDetailsCache] = useState<Record<string, ExamDetailsResponse>>({});
   const [teacherFeedbacks, setTeacherFeedbacks] = useState<TeacherFeedbackRow[]>([]);
   const [counselorNote, setCounselorNote] = useState('');
+  const [trendPoints, setTrendPoints] = useState<StudentExamTrendPoint[]>([]);
+  const [trendLoading, setTrendLoading] = useState(false);
 
   const loadDates = useCallback(
     async (month = monthFilter) => {
@@ -125,6 +129,22 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
     setCounselorNote('');
   };
 
+  const loadStudentTrend = async (
+    studentId: number,
+    examDate: string,
+    detailData: ExamDetailsResponse | null
+  ) => {
+    setTrendLoading(true);
+    try {
+      const pts = await API.getStudentExamTrend(studentId, examDate, detailData);
+      setTrendPoints(pts);
+    } catch {
+      setTrendPoints([]);
+    } finally {
+      setTrendLoading(false);
+    }
+  };
+
   const handleSelectStudentDetails = async (
     examDate: string,
     studentId: number,
@@ -132,10 +152,12 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
   ) => {
     const cacheKey = `${examDate}:${studentId}`;
     if (detailsCache[cacheKey]) {
-      applyDetailsState(detailsCache[cacheKey]);
+      const cached = detailsCache[cacheKey];
+      applyDetailsState(cached);
       setView('details');
+      await loadStudentTrend(studentId, examDate, cached);
       if (autoPrint) {
-        setTimeout(() => window.print(), 120);
+        setTimeout(() => window.print(), 150);
       }
       return;
     }
@@ -148,8 +170,9 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
       if (res.data) {
         setDetailsCache((prev) => ({ ...prev, [cacheKey]: res.data }));
       }
+      await loadStudentTrend(studentId, examDate, res.data);
       if (autoPrint && res.data) {
-        setTimeout(() => window.print(), 150);
+        setTimeout(() => window.print(), 180);
       }
     } catch {
       showToast('خطا در بارگذاری جزئیات کارنامه', 'error');
@@ -550,12 +573,26 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
               </div>
             </div>
 
+            {/* Visual Trend Line Chart (Last 5 Exams via Recharts) */}
+            <div className="print-avoid-break rounded-xl border border-slate-300 bg-slate-50/40 print:bg-white p-4 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-bold text-sm sm:text-base text-[#344868] flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-[#445D84]" aria-hidden="true" />
+                  <span>۲. نمودار روند تغییرات درصد در ۵ آزمون اخیر:</span>
+                </h3>
+                <span className="text-[11px] text-slate-500">
+                  محاسبه بر اساس فرمول کنکوری (با احتساب نمره منفی)
+                </span>
+              </div>
+              <StudentExamTrendChart data={trendPoints} loading={trendLoading} />
+            </div>
+
             {/* Per-Subject Instructor Comments & Feedback Inputs */}
             <div className="space-y-3 pt-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="font-bold text-sm sm:text-base text-[#344868]">
-                    ۲. نظرات، تحلیل و تکالیف پیشنهادی اساتید هر درس:
+                    ۳. نظرات، تحلیل و تکالیف پیشنهادی اساتید هر درس:
                   </h3>
                   <p className="text-xs text-slate-500 no-print mt-0.5">
                     می‌توانید نظرات اساتید را قبل از چاپ در کادرهای زیر تایپ کنید یا کارنامه را خام چاپ کنید تا هر استاد دستی یادداشت کند.
@@ -678,7 +715,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
             <div className="print-avoid-break grid grid-cols-1 sm:grid-cols-12 gap-3 pt-2 border-t border-slate-200">
               <div className="sm:col-span-8 rounded-xl border border-slate-300 p-3 bg-slate-50/40 print:bg-white">
                 <label className="block text-xs font-bold text-[#344868] mb-1.5">
-                  ۳. جمع‌بندی و توصیه مشاور / پشتیبان آموزشی:
+                  ۴. جمع‌بندی و توصیه مشاور / پشتیبان آموزشی:
                 </label>
                 <textarea
                   rows={2}

@@ -1,5 +1,16 @@
 import React from 'react';
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ReferenceLine,
+} from 'recharts';
 import type { FieldAvgStat, ReportDayStat } from '../types';
+import type { StudentExamTrendPoint } from '../lib/exam-math';
 
 const BAR_COLORS = ['#445D84', '#5a779e', '#6D8B9E', '#8B786D'];
 
@@ -265,3 +276,199 @@ export const RadialGauge: React.FC<{ percentage: number }> = ({ percentage }) =>
     </div>
   );
 };
+
+interface TrendTooltipProps {
+  active?: boolean;
+  payload?: Array<{ payload: StudentExamTrendPoint }>;
+}
+
+const CustomTrendTooltip: React.FC<TrendTooltipProps> = ({ active, payload }) => {
+  if (!active || !payload || payload.length === 0) return null;
+  const item = payload[0].payload;
+  const isPositive = item.avg_percentage >= 50;
+
+  return (
+    <div
+      dir="rtl"
+      className="bg-white border border-slate-200 rounded-xl shadow-md px-3.5 py-2.5 text-xs space-y-1.5 min-w-[165px]"
+    >
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-1">
+        <span className="text-slate-500 font-medium">تاریخ آزمون:</span>
+        <span className="font-bold text-slate-800 tabular-nums">{item.jalali_date}</span>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-slate-500 font-medium">میانگین درصد:</span>
+        <span
+          dir="ltr"
+          className={`font-extrabold tabular-nums ${
+            isPositive ? 'text-emerald-600' : 'text-red-600'
+          }`}
+        >
+          {item.avg_percentage.toFixed(1)}%
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-slate-500 font-medium">تعداد دروس:</span>
+        <span className="font-semibold text-slate-700 tabular-nums">{item.subject_count} درس</span>
+      </div>
+      {item.delta !== null && (
+        <div className="flex items-center justify-between gap-3 pt-0.5 border-t border-slate-100">
+          <span className="text-slate-500 font-medium">تغییر نسبت به قبل:</span>
+          <span
+            dir="ltr"
+            className={`font-bold tabular-nums ${
+              item.delta > 0
+                ? 'text-emerald-600'
+                : item.delta < 0
+                  ? 'text-red-600'
+                  : 'text-slate-500'
+            }`}
+          >
+            {item.delta > 0 ? `+${item.delta.toFixed(1)}%` : `${item.delta.toFixed(1)}%`}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export const StudentExamTrendChart: React.FC<{
+  data: StudentExamTrendPoint[];
+  loading?: boolean;
+}> = ({ data, loading = false }) => {
+  if (loading) {
+    return (
+      <div className="h-[230px] rounded-xl bg-slate-100 animate-pulse flex items-center justify-center text-xs text-slate-400">
+        در حال بارگذاری نمودار روند ۵ آزمون اخیر...
+      </div>
+    );
+  }
+
+  if (!data || data.length === 0) {
+    return (
+      <div className="h-[180px] rounded-xl border border-dashed border-slate-200 flex items-center justify-center text-slate-400 text-xs">
+        سابقه‌ای برای نمایش نمودار روند درصد وجود ندارد
+      </div>
+    );
+  }
+
+  const minVal = Math.min(0, ...data.map((d) => d.avg_percentage));
+  const yMin = minVal < 0 ? Math.max(-40, Math.floor((minVal - 5) / 10) * 10) : 0;
+  const latestPoint = data[data.length - 1];
+  const bestPct = Math.max(...data.map((d) => d.avg_percentage));
+
+  return (
+    <div className="w-full space-y-3" dir="rtl">
+      {/* Compact KPI summary strip above the trend line */}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg font-medium tabular-nums">
+            تعداد آزمون‌های بررسی‌شده: <strong>{data.length}</strong> آزمون اخیر
+          </span>
+          <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg font-medium tabular-nums">
+            بالاترین درصد اخیر:{' '}
+            <strong dir="ltr" className="inline-block text-[#344868]">
+              {bestPct.toFixed(1)}%
+            </strong>
+          </span>
+        </div>
+
+        {latestPoint && latestPoint.delta !== null && (
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg">
+            <span className="text-slate-500">تغییر در آخرین آزمون:</span>
+            <span
+              dir="ltr"
+              className={`font-extrabold tabular-nums ${
+                latestPoint.delta > 0
+                  ? 'text-emerald-600'
+                  : latestPoint.delta < 0
+                    ? 'text-red-600'
+                    : 'text-slate-600'
+              }`}
+            >
+              {latestPoint.delta > 0
+                ? `+${latestPoint.delta.toFixed(1)}%`
+                : `${latestPoint.delta.toFixed(1)}%`}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Recharts LineChart */}
+      <div className="w-full h-[230px] print:h-[190px]" dir="ltr">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 14, right: 24, left: 4, bottom: 8 }}>
+            <CartesianGrid strokeDasharray="4 4" stroke="#e2e8f0" vertical={false} />
+            <XAxis
+              dataKey="jalali_date"
+              tick={{ fontSize: 11, fill: '#475569', fontWeight: 600 }}
+              axisLine={{ stroke: '#cbd5e1' }}
+              tickLine={false}
+              dy={6}
+            />
+            <YAxis
+              domain={[yMin, 100]}
+              tickFormatter={(val: number) => `${val}%`}
+              tick={{ fontSize: 11, fill: '#64748b' }}
+              axisLine={false}
+              tickLine={false}
+              width={44}
+            />
+            <Tooltip content={<CustomTrendTooltip />} />
+            {yMin < 0 && (
+              <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" strokeWidth={1} />
+            )}
+            <ReferenceLine
+              y={50}
+              stroke="#10b981"
+              strokeDasharray="4 4"
+              strokeOpacity={0.45}
+            />
+            <Line
+              type="monotone"
+              dataKey="avg_percentage"
+              name="میانگین درصد"
+              stroke="#445D84"
+              strokeWidth={3}
+              activeDot={{ r: 7, fill: '#344868', stroke: '#ffffff', strokeWidth: 2 }}
+              dot={(props: {
+                cx?: number;
+                cy?: number;
+                payload?: StudentExamTrendPoint;
+                index?: number;
+              }) => {
+                const { cx, cy, payload, index } = props;
+                if (typeof cx !== 'number' || typeof cy !== 'number') return <g key={index} />;
+                const isCurrent = Boolean(payload?.is_current);
+                const pct = Number(payload?.avg_percentage ?? 0);
+                const fill = pct >= 50 ? '#10b981' : '#ef4444';
+                return (
+                  <g key={`dot-${payload?.exam_date || index}`}>
+                    {isCurrent && (
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={9}
+                        fill={fill}
+                        fillOpacity={0.2}
+                      />
+                    )}
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={isCurrent ? 6 : 4.5}
+                      fill={fill}
+                      stroke="#ffffff"
+                      strokeWidth={2}
+                    />
+                  </g>
+                );
+              }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+};
+
