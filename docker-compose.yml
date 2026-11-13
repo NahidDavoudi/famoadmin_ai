@@ -2,7 +2,7 @@ services:
   famo-admin:
     # آدرس ایمیج ساخته شده در GitHub Container Registry (یا Docker Hub) با تگ latest
     # مقدار OWNER/REPO را با نام اکانت و ریپازیتوری گیت‌هاب خود جایگزین کنید (با حروف کوچک)
-    image: ${FAMO_ADMIN_IMAGE:-ghcr.io/owner/famo-admin-panel:latest}
+    image: ${FAMO_ADMIN_IMAGE:-ghcr.io/owner/famoadmin_ai:latest}
     container_name: famo-admin-panel
     pull_policy: always
     restart: unless-stopped
