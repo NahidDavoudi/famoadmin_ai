@@ -1,7 +1,10 @@
 node_modules
 dist
 .git
+.github
 .gitignore
 .env
 .playwright-cli
+docker-compose.yml
+fix.sh
 npm-debug.log*
