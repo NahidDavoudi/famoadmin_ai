@@ -486,6 +486,47 @@ test('normalizeExamSubject and normalizeExamDetails recompute Konkur negative ma
   assert.equal(feedbacks[1].percentage, -6.7);
   assert.equal(feedbacks[2].subject, 'زیست‌شناسی');
   assert.equal(feedbacks[2].percentage, 40);
+
+  // Test buildStudentExamTrend: groups by exam_date, sorts chronologically, caps at last 5 exams, computes Konkur % and deltas
+  const { buildStudentExamTrend } = await import('./exam-math');
+  const historyRows = [
+    { exam_date: '2026-01-01', subject: 'ریاضی', total_q: 20, correct: 5, wrong: 3 }, // (15-3)/60 = 20%
+    { exam_date: '2026-01-08', subject: 'ریاضی', total_q: 20, correct: 8, wrong: 6 }, // (24-6)/60 = 30%
+    { exam_date: '2026-01-15', subject: 'ریاضی', total_q: 15, correct: 0, wrong: 5 }, // -11.1%
+    { exam_date: '2026-01-22', subject: 'ریاضی', total_q: 20, correct: 10, wrong: 0 }, // 50%
+    { exam_date: '2026-01-29', subject: 'ریاضی', total_q: 20, correct: 12, wrong: 0 }, // 60%
+    { exam_date: '2026-02-05', subject: 'ریاضی', total_q: 20, correct: 15, wrong: 3 }, // (45-3)/60 = 70%
+    { exam_date: '2026-02-05', subject: 'فیزیک', total_q: 20, correct: 10, wrong: 0 }, // 50% -> avg on 2026-02-05 is (70+50)/2 = 60%
+  ];
+
+  const trend = buildStudentExamTrend(historyRows, {
+    currentExamDate: '2026-02-05',
+    limit: 5,
+  });
+
+  // Should only keep the last 5 distinct exam dates (2026-01-08 through 2026-02-05)
+  assert.equal(trend.length, 5);
+  assert.equal(trend[0].exam_date, '2026-01-08');
+  assert.equal(trend[0].avg_percentage, 30);
+  assert.equal(trend[0].delta, null);
+
+  assert.equal(trend[1].exam_date, '2026-01-15');
+  assert.equal(trend[1].avg_percentage, -11.1);
+  assert.equal(trend[1].delta, -41.1);
+
+  assert.equal(trend[2].exam_date, '2026-01-22');
+  assert.equal(trend[2].avg_percentage, 50);
+  assert.equal(trend[2].delta, 61.1);
+
+  assert.equal(trend[3].exam_date, '2026-01-29');
+  assert.equal(trend[3].avg_percentage, 60);
+  assert.equal(trend[3].delta, 10);
+
+  assert.equal(trend[4].exam_date, '2026-02-05');
+  assert.equal(trend[4].subject_count, 2);
+  assert.equal(trend[4].avg_percentage, 60);
+  assert.equal(trend[4].delta, 0);
+  assert.equal(trend[4].is_current, true);
 });
 
 test('Activity log describes API mutations, normalizes server logs, merges logs, and filters by actor/category/action', async () => {
