@@ -36,7 +36,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: TypeScript type check (Lint)
         run: npm run lint
@@ -51,6 +51,10 @@ jobs:
     name: Build & Push Docker Image (:latest)
     needs: test-and-verify
     runs-on: ubuntu-latest
+    env:
+      # secrets are not available in step-level `if`, so expose them via env
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -74,19 +78,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log in to Docker Hub (Optional - if secrets are configured)
-        if: github.event_name != 'pull_request' && secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != ''
+      - name: Log in to Docker Hub (optional)
+        if: github.event_name != 'pull_request' && env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
 
       - name: Assemble Docker tags
         id: tags
         run: |
           TAGS="${{ steps.meta_vars.outputs.ghcr_image }}:latest,${{ steps.meta_vars.outputs.ghcr_image }}:sha-${{ steps.meta_vars.outputs.short_sha }}"
-          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
-            DH_USER_LC=$(echo "${{ secrets.DOCKERHUB_USERNAME }}" | tr '[:upper:]' '[:lower:]')
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            DH_USER_LC=$(echo "$DOCKERHUB_USERNAME" | tr '[:upper:]' '[:lower:]')
             TAGS="${TAGS},${DH_USER_LC}/famo-admin-panel:latest,${DH_USER_LC}/famo-admin-panel:sha-${{ steps.meta_vars.outputs.short_sha }}"
           fi
           echo "list=${TAGS}" >> "$GITHUB_OUTPUT"
