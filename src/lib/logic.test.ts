@@ -476,4 +476,14 @@ test('normalizeExamSubject and normalizeExamDetails recompute Konkur negative ma
   assert.equal(reportCard.subjects[1].percentage, -6.7);
   assert.equal(reportCard.subjects[2].percentage, 40);
   assert.equal(reportCard.avg_percentage, 7.4);
+
+  const { createInitialTeacherFeedbacks } = await import('./exam-math');
+  const feedbacks = createInitialTeacherFeedbacks(reportCard);
+  assert.equal(feedbacks.length, 3);
+  assert.equal(feedbacks[0].subject, 'شیمی');
+  assert.equal(feedbacks[0].percentage, -11.1);
+  assert.equal(feedbacks[1].subject, 'فیزیک');
+  assert.equal(feedbacks[1].percentage, -6.7);
+  assert.equal(feedbacks[2].subject, 'زیست‌شناسی');
+  assert.equal(feedbacks[2].percentage, 40);
 });

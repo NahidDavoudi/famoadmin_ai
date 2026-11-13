@@ -123,6 +123,46 @@ export function normalizeExamDetails(
   };
 }
 
+export interface TeacherFeedbackRow {
+  id: string;
+  subject: string;
+  chapter: string;
+  percentage: number | null;
+  instructorName: string;
+  comment: string;
+}
+
+/**
+ * Creates initial teacher feedback rows for a student's printable report card,
+ * generating one entry per subject in the exam (or default rows if empty).
+ */
+export function createInitialTeacherFeedbacks(
+  details: Pick<ExamDetailsResponse, 'subjects'> | null | undefined
+): TeacherFeedbackRow[] {
+  const subjects = details?.subjects || [];
+  if (subjects.length === 0) {
+    return [
+      {
+        id: 'feedback-0',
+        subject: '',
+        chapter: '',
+        percentage: null,
+        instructorName: '',
+        comment: '',
+      },
+    ];
+  }
+
+  return subjects.map((sub, idx) => ({
+    id: `feedback-${idx}-${safeTrim(sub.subject)}`,
+    subject: safeTrim(sub.subject),
+    chapter: safeTrim(sub.chapter),
+    percentage: safeNumber(sub.percentage),
+    instructorName: '',
+    comment: '',
+  }));
+}
+
 /**
  * Safely converts any value (string, number, null, undefined) to a trimmed string.
  */
