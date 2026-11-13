@@ -145,10 +145,26 @@ body {
 @media print {
   @page {
     size: A4 portrait;
-    margin: 10mm;
+    margin: 8mm;
   }
 
-  body {
+  html,
+  body,
+  #root,
+  #mainPanel,
+  #mainPanel > main,
+  #mainPanel > main > div,
+  #page-exams,
+  #printable-report-card {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
     background: #ffffff !important;
     color: #0f172a !important;
     -webkit-print-color-adjust: exact;
@@ -158,26 +174,33 @@ body {
   aside,
   nav,
   header,
+  #mobileHeader,
+  #sidebar,
+  #sidebarOverlay,
   .no-print {
     display: none !important;
   }
 
-  #mainPanel {
-    display: block !important;
-    min-height: 0 !important;
-    background: #ffffff !important;
+  #printable-report-card * {
+    max-width: 100% !important;
   }
 
-  #mainPanel > main {
-    margin: 0 !important;
-    padding: 0 !important;
+  #printable-report-card .overflow-x-auto,
+  #printable-report-card .overflow-hidden {
+    overflow: visible !important;
+  }
+
+  #printable-report-card table {
     width: 100% !important;
-    max-width: 100% !important;
+    border-collapse: collapse !important;
+    table-layout: auto !important;
   }
 
-  #mainPanel > main > div {
-    padding: 0 !important;
-    max-width: 100% !important;
+  #printable-report-card th,
+  #printable-report-card td {
+    border: 1px solid #cbd5e1 !important;
+    padding: 5px 8px !important;
+    font-size: 11px !important;
   }
 
   .print-avoid-break {
@@ -185,3 +208,4 @@ body {
     page-break-inside: avoid;
   }
 }
+

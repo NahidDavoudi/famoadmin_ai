@@ -11,6 +11,7 @@ import {
   CalendarClock,
   Newspaper,
   LineChart,
+  History,
   LogOut,
   Loader2,
   Menu,
@@ -41,6 +42,7 @@ const NAV_ITEMS: { id: PageId; label: string; icon: React.ComponentType<{ classN
   { id: 'supporters', label: 'پشتیبان‌ها', icon: Headset },
   { id: 'blog', label: 'وبلاگ', icon: Newspaper },
   { id: 'reports', label: 'گزارش‌ها', icon: LineChart },
+  { id: 'activity_logs', label: 'لاگ فعالیت‌ها', icon: History },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({

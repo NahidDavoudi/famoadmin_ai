@@ -487,3 +487,86 @@ test('normalizeExamSubject and normalizeExamDetails recompute Konkur negative ma
   assert.equal(feedbacks[2].subject, 'زیست‌شناسی');
   assert.equal(feedbacks[2].percentage, 40);
 });
+
+test('Activity log describes API mutations, normalizes server logs, merges logs, and filters by actor/category/action', async () => {
+  const {
+    describeApiMutation,
+    normalizeServerActivityLog,
+    mergeActivityLogs,
+    filterActivityLogs,
+  } = await import('./activity-log');
+
+  const studentCreate = describeApiMutation('POST', '/students', {
+    name: 'امیرمحمد رضایی',
+    grade: 12,
+    field: 'تجربی',
+  });
+  assert.ok(studentCreate);
+  assert.equal(studentCreate.category, 'students');
+  assert.equal(studentCreate.action_type, 'create');
+  assert.ok(studentCreate.description.includes('امیرمحمد رضایی'));
+
+  const examBatch = describeApiMutation('POST', '/exams/batch', {
+    student_id: 14,
+    exam_date: '2026-02-20',
+    subjects: [{ subject: 'ریاضی' }, { subject: 'فیزیک' }],
+  });
+  assert.ok(examBatch);
+  assert.equal(examBatch.category, 'exams');
+  assert.equal(examBatch.action_type, 'create');
+  assert.ok(examBatch.description.includes('2 درس'));
+
+  const smsSend = describeApiMutation('POST', '/appointments/sms/send', {
+    student_ids: [1, 2, 3],
+    week_start: '2026-02-21',
+  });
+  assert.ok(smsSend);
+  assert.equal(smsSend.category, 'appointments');
+  assert.equal(smsSend.action_type, 'send_sms');
+
+  // GET requests should never be logged as mutations
+  assert.equal(describeApiMutation('GET', '/students'), null);
+
+  const serverRow = normalizeServerActivityLog({
+    id: 99,
+    actor_name: 'سارا کریمی',
+    actor_role: 'پشتیبان',
+    action_type: 'update',
+    category: 'appointments',
+    title: 'ویرایش نوبت هفتگی',
+    description: 'علی رضایی - ساعت 16:30',
+    created_at: '2026-02-22T12:30:00.000Z',
+  });
+  assert.ok(serverRow);
+  assert.equal(serverRow.actor_name, 'سارا کریمی');
+  assert.equal(serverRow.category, 'appointments');
+  assert.equal(serverRow.source, 'server');
+
+  const merged = mergeActivityLogs(
+    [serverRow],
+    [],
+    [
+      {
+        id: 'local-2',
+        actor_name: 'مدیر سیستم',
+        actor_role: 'مدیر کل',
+        action_type: 'delete',
+        category: 'students',
+        category_label: 'دانش‌آموزان',
+        title: 'حذف دانش‌آموز',
+        description: 'دانش‌آموز شناسه 18 حذف شد',
+        created_at: '2026-02-22T14:00:00.000Z',
+        jalali_datetime: '1404/12/03 - 14:00',
+        source: 'client',
+      },
+    ]
+  );
+
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].id, 'local-2'); // newer first
+
+  assert.equal(filterActivityLogs(merged, { category: 'students' }).length, 1);
+  assert.equal(filterActivityLogs(merged, { actionType: 'update' }).length, 1);
+  assert.equal(filterActivityLogs(merged, { search: 'سارا کریمی' }).length, 1);
+});
+

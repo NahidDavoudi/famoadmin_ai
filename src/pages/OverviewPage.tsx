@@ -1,26 +1,35 @@
 import React, { useEffect, useState } from 'react';
-import { Users, ClipboardList, UserX, BarChart3 } from 'lucide-react';
+import { Users, ClipboardList, UserX, BarChart3, History, UserCheck, ChevronLeft } from 'lucide-react';
 import API from '../lib/api';
-import type { DashboardStats, ToastType } from '../types';
+import type { DashboardStats, PageId, ToastType } from '../types';
+import type { ActivityLogItem } from '../lib/activity-log';
+import { getActionBadgeStyle } from './ActivityLogsPage';
 import { AvgByFieldBarChart } from '../components/Charts';
 
 interface OverviewPageProps {
   showToast: (message: string, type?: ToastType) => void;
+  onNavigate?: (page: PageId) => void;
 }
 
-export const OverviewPage: React.FC<OverviewPageProps> = ({ showToast }) => {
+export const OverviewPage: React.FC<OverviewPageProps> = ({ showToast, onNavigate }) => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [recentLogs, setRecentLogs] = useState<ActivityLogItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
     setLoading(true);
-    API.getDashboardStats()
-      .then((res) => {
-        if (mounted) setStats(res.data);
-      })
-      .catch(() => {
-        if (mounted) showToast('خطا در بارگذاری آمار داشبورد', 'error');
+    Promise.allSettled([API.getDashboardStats(), API.getActivityLogs()])
+      .then(([statsRes, logsRes]) => {
+        if (!mounted) return;
+        if (statsRes.status === 'fulfilled') {
+          setStats(statsRes.value.data);
+        } else {
+          showToast('خطا در بارگذاری آمار داشبورد', 'error');
+        }
+        if (logsRes.status === 'fulfilled') {
+          setRecentLogs(logsRes.value.slice(0, 6));
+        }
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -114,6 +123,76 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ showToast }) => {
           )}
         </div>
       </div>
+
+      {/* Recent Activities Log Widget */}
+      <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="flex items-center gap-2 text-base font-bold text-[#445D84]">
+            <History className="w-5 h-5 text-[#445D84]" aria-hidden="true" />
+            <span>فعالیت‌های اخیر سیستم (کی چیکار کرد؟)</span>
+          </h2>
+          {onNavigate && (
+            <button
+              type="button"
+              onClick={() => onNavigate('activity_logs')}
+              className="inline-flex items-center gap-1 text-xs font-bold text-[#445D84] hover:text-[#344868] cursor-pointer"
+            >
+              <span>مشاهده همه لاگ‌ها</span>
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {loading ? (
+          <div className="space-y-2.5">
+            {[1, 2, 3].map((n) => (
+              <div key={n} className="h-12 rounded-xl bg-slate-100 animate-pulse" />
+            ))}
+          </div>
+        ) : recentLogs.length === 0 ? (
+          <div className="py-8 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
+            هنوز فعالیتی در این نشست ثبت نشده است.
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {recentLogs.map((item) => {
+              const badge = getActionBadgeStyle(item.action_type);
+              return (
+                <div
+                  key={item.id}
+                  className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                >
+                  <div className="flex items-start sm:items-center gap-3 min-w-0">
+                    <span className="w-8 h-8 rounded-lg bg-[#445D84]/10 text-[#445D84] flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
+                      <UserCheck className="w-4 h-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-slate-800 text-xs sm:text-sm">
+                          {item.actor_name}
+                        </span>
+                        <span
+                          className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${badge.bg} ${badge.text}`}
+                        >
+                          {badge.label}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-700">{item.title}</span>
+                      </div>
+                      {item.description && (
+                        <p className="text-xs text-slate-500 mt-0.5 truncate">{item.description}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-slate-400 tabular-nums whitespace-nowrap self-end sm:self-center">
+                    {item.jalali_datetime}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
+

@@ -16,6 +16,7 @@ import { SupportersPage } from './pages/SupportersPage';
 import { AppointmentsPage } from './pages/AppointmentsPage';
 import { BlogPage } from './pages/BlogPage';
 import { ReportsPage } from './pages/ReportsPage';
+import { ActivityLogsPage } from './pages/ActivityLogsPage';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<PageId>('overview');
@@ -115,7 +116,9 @@ export default function App() {
 
       <main className="flex-1 min-w-0 md:mr-72 pt-16 md:pt-0">
         <div className="p-4 md:p-8 max-w-7xl mx-auto">
-          {currentPage === 'overview' && <OverviewPage showToast={showToast} />}
+          {currentPage === 'overview' && (
+            <OverviewPage showToast={showToast} onNavigate={(page) => setCurrentPage(page)} />
+          )}
           {currentPage === 'students' && (
             <StudentsPage showToast={showToast} searchInputRef={studentSearchRef} />
           )}
@@ -132,6 +135,7 @@ export default function App() {
             <BlogPage showToast={showToast} />
           )}
           {currentPage === 'reports' && <ReportsPage showToast={showToast} />}
+          {currentPage === 'activity_logs' && <ActivityLogsPage showToast={showToast} />}
         </div>
       </main>
 

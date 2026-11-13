@@ -10,7 +10,8 @@ export type PageId =
   | 'appointments'
   | 'blog'
   | 'blog-editor'
-  | 'reports';
+  | 'reports'
+  | 'activity_logs';
 
 export type AcademicField =
   | 'ریاضی'
