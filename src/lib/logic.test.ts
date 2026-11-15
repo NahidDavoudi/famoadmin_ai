@@ -607,6 +607,75 @@ test('Activity log describes API mutations, normalizes server logs, merges logs,
   assert.equal(filterActivityLogs(merged, { category: 'students' }).length, 1);
   assert.equal(filterActivityLogs(merged, { actionType: 'update' }).length, 1);
   assert.equal(filterActivityLogs(merged, { search: 'سارا کریمی' }).length, 1);
+
+  // Test staff_activity_logs backend record normalization & stats endpoint normalization
+  const { normalizeActivityLogsStats } = await import('./activity-log');
+  const staffLog = normalizeServerActivityLog({
+    id: 501,
+    actor_user_id: 12,
+    actor_linked_id: 4,
+    actor_name: 'مهندس حسینی',
+    role: 'teacher',
+    module: 'tutoring',
+    action: 'start_session',
+    target_id: 88,
+    summary: 'شروع جلسه رفع اشکال فیزیک برای دانش‌آموز علی رضایی',
+    details: JSON.stringify({ student_id: 101, classroom_id: 3, password: '***' }),
+    created_at: '2026-03-10 16:45:00',
+  });
+  assert.equal(staffLog.actor_user_id, 12);
+  assert.equal(staffLog.actor_linked_id, 4);
+  assert.equal(staffLog.actor_role, 'teacher');
+  assert.equal(staffLog.category, 'tutoring');
+  assert.equal(staffLog.action_type, 'start_session');
+  assert.equal(staffLog.target_id, 88);
+  assert.equal(staffLog.title, 'شروع جلسه رفع اشکال فیزیک برای دانش‌آموز علی رضایی');
+  assert.ok(staffLog.details_json);
+  assert.equal(staffLog.details_json?.student_id, 101);
+
+  const filteredByRoleAndIds = filterActivityLogs([serverRow, staffLog], {
+    role: 'teacher',
+    actorUserId: 12,
+    actorLinkedId: 4,
+    from: '2026-03-01',
+    to: '2026-03-15',
+  });
+  assert.equal(filteredByRoleAndIds.length, 1);
+  assert.equal(filteredByRoleAndIds[0].id, 'srv-501');
+
+  const statsNormalized = normalizeActivityLogsStats(
+    {
+      total_logs: 145,
+      today_logs: 18,
+      by_role: { admin: 60, supporter: 55, teacher: 30 },
+      by_module: [
+        { module: 'appointments', count: 50 },
+        { module: 'tutoring', count: 40 },
+        { module: 'exams', count: 35 },
+      ],
+      active_actors: [
+        {
+          actor_user_id: 12,
+          actor_linked_id: 4,
+          actor_name: 'مهندس حسینی',
+          role: 'teacher',
+          total_actions: 30,
+          last_activity_at: '2026-03-10 16:45:00',
+        },
+      ],
+    },
+    [staffLog]
+  );
+  assert.equal(statsNormalized.total_logs, 145);
+  assert.equal(statsNormalized.today_logs, 18);
+  assert.equal(statsNormalized.by_role.admin, 60);
+  assert.equal(statsNormalized.by_role.supporter, 55);
+  assert.equal(statsNormalized.by_role.teacher, 30);
+  assert.equal(statsNormalized.by_module[0].module, 'appointments');
+  assert.equal(statsNormalized.by_module[0].count, 50);
+  assert.equal(statsNormalized.active_actors.length, 1);
+  assert.equal(statsNormalized.active_actors[0].actor_name, 'مهندس حسینی');
+  assert.equal(statsNormalized.active_actors[0].total_actions, 30);
 });
 
 test('DataTable resolveVisibleColumns hides columns with hideWhenEmpty when all rows are "-" or empty', async () => {

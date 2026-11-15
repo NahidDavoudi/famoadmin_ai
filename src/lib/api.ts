@@ -52,10 +52,14 @@ import {
   recordClientActivityLog,
   getLocalActivityLogs,
   normalizeServerActivityLog,
+  normalizeActivityLogsStats,
+  filterActivityLogs,
   mergeActivityLogs,
   formatActivityJalaliDateTime,
   CATEGORY_LABELS,
   type ActivityLogItem,
+  type ActivityLogQueryParams,
+  type ActivityLogsStats,
 } from './activity-log';
 
 export interface ApiErrorObject {
@@ -269,29 +273,138 @@ class FamoApiClient {
     return json.data;
   }
 
-  async getActivityLogs(): Promise<ActivityLogItem[]> {
-    const serverLogs: ActivityLogItem[] = [];
-    const smsActivityLogs: ActivityLogItem[] = [];
+  /**
+   * GET /api/v1/admin/activity-logs (and fallback /api/v1/admin/stats/activity-logs)
+   * Supports filtering by: role, actor_user_id, actor_linked_id, module, action, q, from, to, page, per_page
+   */
+  async getAdminActivityLogs(params: ActivityLogQueryParams = {}): Promise<{
+    items: ActivityLogItem[];
+    pagination: {
+      page: number;
+      per_page: number;
+      total: number;
+      total_pages: number;
+    };
+  }> {
+    const page = Math.max(1, safeNumber(params.page, 1));
+    const perPage = Math.max(1, safeNumber(params.per_page, 50));
+    const query = new URLSearchParams({
+      page: String(page),
+      per_page: String(perPage),
+    });
 
-    // 1. Try server-side audit endpoint (/api/v1/activity-logs) if implemented on backend
-    try {
-      const res = await this.fetch('/activity-logs?per_page=100');
-      if (res.ok) {
-        const json = (await res.json()) as ApiEnvelope<
-          { logs?: Record<string, unknown>[] } | Record<string, unknown>[]
-        >;
-        if (json.success && json.data) {
-          const rows = Array.isArray(json.data) ? json.data : json.data.logs || [];
-          for (const r of rows) {
-            serverLogs.push(normalizeServerActivityLog(r));
+    if (safeTrim(params.role)) query.set('role', safeTrim(params.role));
+    if (
+      params.actor_user_id !== undefined &&
+      params.actor_user_id !== null &&
+      safeTrim(params.actor_user_id) !== ''
+    ) {
+      query.set('actor_user_id', safeTrim(params.actor_user_id));
+    }
+    if (
+      params.actor_linked_id !== undefined &&
+      params.actor_linked_id !== null &&
+      safeTrim(params.actor_linked_id) !== ''
+    ) {
+      query.set('actor_linked_id', safeTrim(params.actor_linked_id));
+    }
+    if (safeTrim(params.module)) query.set('module', safeTrim(params.module));
+    if (safeTrim(params.action)) query.set('action', safeTrim(params.action));
+    if (safeTrim(params.q)) query.set('q', safeTrim(params.q));
+    if (safeTrim(params.from)) query.set('from', safeTrim(params.from));
+    if (safeTrim(params.to)) query.set('to', safeTrim(params.to));
+
+    const qs = query.toString();
+    const serverLogs: ActivityLogItem[] = [];
+    let serverPagination: {
+      page: number;
+      per_page: number;
+      total: number;
+      total_pages: number;
+    } | null = null;
+    let fetchedFromServer = false;
+
+    const candidateEndpoints = [
+      `/admin/activity-logs?${qs}`,
+      `/admin/stats/activity-logs?${qs}`,
+    ];
+
+    for (const ep of candidateEndpoints) {
+      try {
+        const res = await this.fetch(ep);
+        if (res.ok) {
+          const json = (await res.json()) as ApiEnvelope<
+            | {
+                items?: Record<string, unknown>[];
+                logs?: Record<string, unknown>[];
+                rows?: Record<string, unknown>[];
+                pagination?: {
+                  page?: number;
+                  per_page?: number;
+                  total?: number;
+                  total_pages?: number;
+                };
+                total?: number;
+                page?: number;
+                per_page?: number;
+                total_pages?: number;
+              }
+            | Record<string, unknown>[]
+          >;
+          if (json.success !== false && json.data) {
+            fetchedFromServer = true;
+            const rows = Array.isArray(json.data)
+              ? json.data
+              : json.data.items || json.data.logs || json.data.rows || [];
+            for (const r of rows) {
+              serverLogs.push(normalizeServerActivityLog(r));
+            }
+            const rawPag =
+              json.pagination ||
+              (!Array.isArray(json.data) ? json.data.pagination : undefined) ||
+              (!Array.isArray(json.data) && json.data.total !== undefined
+                ? {
+                    page: json.data.page,
+                    per_page: json.data.per_page,
+                    total: json.data.total,
+                    total_pages: json.data.total_pages,
+                  }
+                : undefined);
+            if (rawPag) {
+              const totalCount = safeNumber(rawPag.total, serverLogs.length);
+              const perPageVal = Math.max(1, safeNumber(rawPag.per_page, perPage));
+              serverPagination = {
+                page: Math.max(1, safeNumber(rawPag.page, page)),
+                per_page: perPageVal,
+                total: totalCount,
+                total_pages: Math.max(
+                  1,
+                  safeNumber(rawPag.total_pages, Math.ceil(totalCount / perPageVal))
+                ),
+              };
+            }
+            break;
           }
         }
+      } catch {
+        // Try next candidate endpoint or fallback
       }
-    } catch {
-      // Backend /activity-logs endpoint is optional
     }
 
-    // 2. Also pull recent SMS dispatch logs from existing /appointments/sms/log endpoint
+    if (fetchedFromServer) {
+      return {
+        items: serverLogs,
+        pagination: serverPagination || {
+          page,
+          per_page: perPage,
+          total: serverLogs.length,
+          total_pages: 1,
+        },
+      };
+    }
+
+    // Fallback: merge local client logs + SMS dispatch logs when server is unreachable
+    const smsActivityLogs: ActivityLogItem[] = [];
     try {
       const smsRes = await this.getAppointmentsSmsLog({ per_page: 25 });
       const items = smsRes.data?.items || [];
@@ -324,7 +437,82 @@ class FamoApiClient {
     }
 
     const clientLogs = getLocalActivityLogs();
-    return mergeActivityLogs(serverLogs, smsActivityLogs, clientLogs);
+    const merged = mergeActivityLogs(serverLogs, smsActivityLogs, clientLogs);
+    const filtered = filterActivityLogs(merged, {
+      search: params.q,
+      role: params.role,
+      category: params.module,
+      actionType: params.action,
+      actorUserId: params.actor_user_id,
+      actorLinkedId: params.actor_linked_id,
+      from: params.from,
+      to: params.to,
+    });
+
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / perPage));
+    const startIdx = (page - 1) * perPage;
+    const pagedItems = filtered.slice(startIdx, startIdx + perPage);
+
+    return {
+      items: pagedItems,
+      pagination: serverPagination || {
+        page,
+        per_page: perPage,
+        total,
+        total_pages: totalPages,
+      },
+    };
+  }
+
+  /**
+   * GET /api/v1/admin/activity-logs/stats (and fallback /api/v1/admin/stats/activity-logs/stats)
+   * Returns total_logs, today_logs, by_role, by_module, and active_actors.
+   */
+  async getAdminActivityLogsStats(
+    params: {
+      from?: string;
+      to?: string;
+      role?: string;
+      module?: string;
+    } = {},
+    fallbackItems: ActivityLogItem[] = []
+  ): Promise<ActivityLogsStats> {
+    const query = new URLSearchParams();
+    if (safeTrim(params.from)) query.set('from', safeTrim(params.from));
+    if (safeTrim(params.to)) query.set('to', safeTrim(params.to));
+    if (safeTrim(params.role)) query.set('role', safeTrim(params.role));
+    if (safeTrim(params.module)) query.set('module', safeTrim(params.module));
+    const qs = query.toString();
+
+    const candidateEndpoints = [
+      `/admin/activity-logs/stats${qs ? `?${qs}` : ''}`,
+      `/admin/stats/activity-logs/stats${qs ? `?${qs}` : ''}`,
+    ];
+
+    for (const ep of candidateEndpoints) {
+      try {
+        const res = await this.fetch(ep);
+        if (res.ok) {
+          const json = (await res.json()) as ApiEnvelope<Record<string, unknown>> &
+            Record<string, unknown>;
+          if (json.success !== false) {
+            const payload =
+              json.data && typeof json.data === 'object' ? json.data : json;
+            return normalizeActivityLogsStats(payload, fallbackItems);
+          }
+        }
+      } catch {
+        // Fallback to next endpoint or computed stats
+      }
+    }
+
+    return normalizeActivityLogsStats(null, fallbackItems);
+  }
+
+  async getActivityLogs(params: ActivityLogQueryParams = {}): Promise<ActivityLogItem[]> {
+    const res = await this.getAdminActivityLogs(params);
+    return res.items;
   }
 
   async login(
