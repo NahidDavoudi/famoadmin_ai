@@ -61,6 +61,14 @@ import {
   type ActivityLogQueryParams,
   type ActivityLogsStats,
 } from './activity-log';
+import {
+  getAllLocalSupporterAvatars,
+  saveLocalSupporterAvatar,
+  removeLocalSupporterAvatar,
+  getAllLocalSupporterDescriptions,
+  saveLocalSupporterDescription,
+  removeLocalSupporterDescription,
+} from './image-upload';
 
 export interface ApiErrorObject {
   code?: string;
@@ -1092,15 +1100,8 @@ class FamoApiClient {
       }
     }
 
-    let localDescMap: Record<string, string> = {};
-    try {
-      if (typeof localStorage !== 'undefined') {
-        const rawDesc = localStorage.getItem('famo_supporter_descriptions_v1');
-        if (rawDesc) localDescMap = JSON.parse(rawDesc) as Record<string, string>;
-      }
-    } catch {
-      localDescMap = {};
-    }
+    const localDescMap = getAllLocalSupporterDescriptions();
+    const localAvatarMap = getAllLocalSupporterAvatars();
 
     const enriched: Supporter[] = baseList.map((sup) => {
       const pub = publicById.get(Number(sup.id));
@@ -1109,11 +1110,14 @@ class FamoApiClient {
         perf?.avg_first_reply_seconds !== undefined && perf?.avg_first_reply_seconds !== null
           ? Number(perf.avg_first_reply_seconds) / 3600
           : sup.avg_response_hours ?? null;
+      const avatarVal = sup.avatar ?? pub?.avatar ?? localAvatarMap[String(sup.id)] ?? null;
+      const avatarUrlVal =
+        sup.avatar_url ?? pub?.avatar_url ?? localAvatarMap[String(sup.id)] ?? null;
       return {
         ...sup,
         description: sup.description ?? localDescMap[String(sup.id)] ?? null,
-        avatar: sup.avatar ?? pub?.avatar ?? null,
-        avatar_url: sup.avatar_url ?? pub?.avatar_url ?? null,
+        avatar: avatarVal,
+        avatar_url: avatarUrlVal,
         assigned_students: perf?.assigned_students ?? sup.assigned_students,
         replied_count: perf?.threads_with_reply ?? sup.replied_count ?? 0,
         pending_count: perf?.unanswered_threads ?? sup.pending_count ?? 0,
@@ -1128,8 +1132,8 @@ class FamoApiClient {
   }
 
   /**
-   * POST /api/v1/supporters (application/json)
-   * OpenAPI schema: { name, grade, field, phone, chat_id } — required: [name, grade, field, phone]
+   * POST /api/v1/supporters (multipart/form-data or application/json)
+   * Supports image/avatar upload alongside name, grade, field, phone, description, and chat_id.
    */
   async addSupporter(payload: {
     name: string;
@@ -1138,50 +1142,109 @@ class FamoApiClient {
     field: AcademicField;
     description?: string | null;
     chat_id?: string | number | null;
+    image?: File | null;
+    image_url?: string | null;
+    avatar?: File | string | null;
+    avatar_url?: string | null;
   }): Promise<ApiEnvelope<Supporter>> {
-    const body: Record<string, unknown> = {
-      name: safeTrim(payload.name),
-      phone: safeTrim(payload.phone),
-      grade: Number(payload.grade),
-      field: payload.field,
-    };
+    const nameStr = safeTrim(payload.name);
+    const phoneStr = safeTrim(payload.phone);
+    const gradeNum = Number(payload.grade);
+    const fieldVal = payload.field;
     const descStr = safeTrim(payload.description);
-    if (descStr) {
-      body.description = descStr;
-    }
     const chatIdStr = safeTrim(payload.chat_id);
-    if (chatIdStr) {
-      body.chat_id = chatIdStr;
+    const imageFile =
+      payload.image instanceof File
+        ? payload.image
+        : payload.avatar instanceof File
+          ? payload.avatar
+          : null;
+    const imageUrl =
+      safeTrim(payload.image_url) ||
+      (typeof payload.avatar === 'string' ? safeTrim(payload.avatar) : '') ||
+      safeTrim(payload.avatar_url);
+
+    let res: ApiEnvelope<Supporter>;
+
+    if (imageFile) {
+      const formData = new FormData();
+      formData.append('name', nameStr);
+      formData.append('phone', phoneStr);
+      formData.append('grade', String(gradeNum));
+      formData.append('field', fieldVal);
+      if (descStr) formData.append('description', descStr);
+      if (chatIdStr) formData.append('chat_id', chatIdStr);
+      formData.append('avatar', imageFile);
+      formData.append('image', imageFile);
+
+      try {
+        res = await this.requestJson<Supporter>(
+          '/supporters',
+          {
+            method: 'POST',
+            body: formData,
+          },
+          'خطا در افزودن پشتیبان'
+        );
+      } catch {
+        const jsonBody: Record<string, unknown> = {
+          name: nameStr,
+          phone: phoneStr,
+          grade: gradeNum,
+          field: fieldVal,
+        };
+        if (descStr) jsonBody.description = descStr;
+        if (chatIdStr) jsonBody.chat_id = chatIdStr;
+        if (imageUrl) {
+          jsonBody.avatar = imageUrl;
+          jsonBody.avatar_url = imageUrl;
+          jsonBody.image = imageUrl;
+        }
+        res = await this.requestJson<Supporter>(
+          '/supporters',
+          {
+            method: 'POST',
+            body: JSON.stringify(jsonBody),
+          },
+          'خطا در افزودن پشتیبان'
+        );
+      }
+    } else {
+      const jsonBody: Record<string, unknown> = {
+        name: nameStr,
+        phone: phoneStr,
+        grade: gradeNum,
+        field: fieldVal,
+      };
+      if (descStr) jsonBody.description = descStr;
+      if (chatIdStr) jsonBody.chat_id = chatIdStr;
+      if (imageUrl) {
+        jsonBody.avatar = imageUrl;
+        jsonBody.avatar_url = imageUrl;
+        jsonBody.image = imageUrl;
+      }
+      res = await this.requestJson<Supporter>(
+        '/supporters',
+        {
+          method: 'POST',
+          body: JSON.stringify(jsonBody),
+        },
+        'خطا در افزودن پشتیبان'
+      );
     }
 
-    const res = await this.requestJson<Supporter>(
-      '/supporters',
-      {
-        method: 'POST',
-        body: JSON.stringify(body),
-      },
-      'خطا در افزودن پشتیبان'
-    );
-
-    if (res.data?.id && descStr) {
-      try {
-        if (typeof localStorage !== 'undefined') {
-          const rawDesc = localStorage.getItem('famo_supporter_descriptions_v1');
-          const map = rawDesc ? (JSON.parse(rawDesc) as Record<string, string>) : {};
-          map[String(res.data.id)] = descStr;
-          localStorage.setItem('famo_supporter_descriptions_v1', JSON.stringify(map));
-        }
-      } catch {
-        // ignore storage errors
-      }
+    if (res.data?.id) {
+      const idKey = String(res.data.id);
+      if (descStr) saveLocalSupporterDescription(idKey, descStr);
+      if (imageUrl) saveLocalSupporterAvatar(idKey, imageUrl);
     }
 
     return res;
   }
 
   /**
-   * PUT /api/v1/supporters/{id} (application/json)
-   * OpenAPI schema: { name, grade, field, phone (nullable), is_active (0|1), chat_id, password }
+   * PUT /api/v1/supporters/{id} (multipart/form-data or application/json)
+   * Supports image/avatar upload alongside name, grade, field, phone, description, chat_id, is_active, and password.
    */
   async updateSupporter(
     id: number,
@@ -1194,54 +1257,134 @@ class FamoApiClient {
       is_active?: number | boolean;
       chat_id?: string | number | null;
       password?: string;
+      image?: File | null;
+      image_url?: string | null;
+      avatar?: File | string | null;
+      avatar_url?: string | null;
     }
   ): Promise<ApiEnvelope<Supporter>> {
-    const body: Record<string, unknown> = {
-      name: safeTrim(payload.name),
-      grade: Number(payload.grade),
-      field: payload.field,
-    };
-    if (payload.description !== undefined) {
-      const descStr = safeTrim(payload.description);
-      body.description = descStr;
+    const nameStr = safeTrim(payload.name);
+    const gradeNum = Number(payload.grade);
+    const fieldVal = payload.field;
+    const descStr = payload.description !== undefined ? safeTrim(payload.description) : undefined;
+    const phoneStr = payload.phone !== undefined ? safeTrim(payload.phone) : undefined;
+    const isActiveVal = payload.is_active !== undefined ? (payload.is_active ? 1 : 0) : undefined;
+    const chatIdStr = payload.chat_id !== undefined ? safeTrim(payload.chat_id) : undefined;
+    const imageFile =
+      payload.image instanceof File
+        ? payload.image
+        : payload.avatar instanceof File
+          ? payload.avatar
+          : null;
+    const imageUrl =
+      safeTrim(payload.image_url) ||
+      (typeof payload.avatar === 'string' ? safeTrim(payload.avatar) : '') ||
+      safeTrim(payload.avatar_url);
+
+    let res: ApiEnvelope<Supporter>;
+
+    if (imageFile) {
+      const formData = new FormData();
+      formData.append('_method', 'PUT');
+      formData.append('name', nameStr);
+      formData.append('grade', String(gradeNum));
+      formData.append('field', fieldVal);
+      if (descStr !== undefined) formData.append('description', descStr);
+      if (phoneStr !== undefined) formData.append('phone', phoneStr);
+      if (isActiveVal !== undefined) formData.append('is_active', String(isActiveVal));
+      if (chatIdStr !== undefined) formData.append('chat_id', chatIdStr);
+      if (payload.password) formData.append('password', payload.password);
+      formData.append('avatar', imageFile);
+      formData.append('image', imageFile);
+
       try {
-        if (typeof localStorage !== 'undefined') {
-          const rawDesc = localStorage.getItem('famo_supporter_descriptions_v1');
-          const map = rawDesc ? (JSON.parse(rawDesc) as Record<string, string>) : {};
-          if (descStr) map[String(id)] = descStr;
-          else delete map[String(id)];
-          localStorage.setItem('famo_supporter_descriptions_v1', JSON.stringify(map));
-        }
+        res = await this.requestJson<Supporter>(
+          `/supporters/${id}`,
+          {
+            method: 'POST',
+            headers: { 'X-HTTP-Method-Override': 'PUT' },
+            body: formData,
+          },
+          'خطا در ویرایش پشتیبان'
+        );
       } catch {
-        // ignore storage errors
+        const jsonBody: Record<string, unknown> = {
+          name: nameStr,
+          grade: gradeNum,
+          field: fieldVal,
+        };
+        if (descStr !== undefined) jsonBody.description = descStr;
+        if (phoneStr !== undefined) jsonBody.phone = phoneStr || null;
+        if (isActiveVal !== undefined) jsonBody.is_active = isActiveVal;
+        if (chatIdStr !== undefined) jsonBody.chat_id = chatIdStr;
+        if (payload.password) jsonBody.password = payload.password;
+        if (imageUrl) {
+          jsonBody.avatar = imageUrl;
+          jsonBody.avatar_url = imageUrl;
+          jsonBody.image = imageUrl;
+        }
+
+        res = await this.requestJson<Supporter>(
+          `/supporters/${id}`,
+          {
+            method: 'PUT',
+            body: JSON.stringify(jsonBody),
+          },
+          'خطا در ویرایش پشتیبان'
+        );
       }
-    }
-    if (payload.phone !== undefined) {
-      const phoneStr = safeTrim(payload.phone);
-      body.phone = phoneStr || null;
-    }
-    if (payload.is_active !== undefined) {
-      body.is_active = payload.is_active ? 1 : 0;
-    }
-    if (payload.chat_id !== undefined) {
-      const chatIdStr = safeTrim(payload.chat_id);
-      body.chat_id = chatIdStr || '';
-    }
-    if (payload.password) {
-      body.password = payload.password;
+    } else {
+      const jsonBody: Record<string, unknown> = {
+        name: nameStr,
+        grade: gradeNum,
+        field: fieldVal,
+      };
+      if (descStr !== undefined) jsonBody.description = descStr;
+      if (phoneStr !== undefined) jsonBody.phone = phoneStr || null;
+      if (isActiveVal !== undefined) jsonBody.is_active = isActiveVal;
+      if (chatIdStr !== undefined) jsonBody.chat_id = chatIdStr;
+      if (payload.password) jsonBody.password = payload.password;
+      if (
+        payload.image_url !== undefined ||
+        payload.avatar !== undefined ||
+        payload.avatar_url !== undefined
+      ) {
+        jsonBody.avatar = imageUrl || null;
+        jsonBody.avatar_url = imageUrl || null;
+        jsonBody.image = imageUrl || null;
+      }
+
+      res = await this.requestJson<Supporter>(
+        `/supporters/${id}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify(jsonBody),
+        },
+        'خطا در ویرایش پشتیبان'
+      );
     }
 
-    return this.requestJson<Supporter>(
-      `/supporters/${id}`,
-      {
-        method: 'PUT',
-        body: JSON.stringify(body),
-      },
-      'خطا در ویرایش پشتیبان'
-    );
+    const idKey = String(id);
+    if (descStr !== undefined) {
+      if (descStr) saveLocalSupporterDescription(idKey, descStr);
+      else removeLocalSupporterDescription(idKey);
+    }
+    if (
+      payload.image_url !== undefined ||
+      payload.avatar !== undefined ||
+      payload.avatar_url !== undefined ||
+      imageFile
+    ) {
+      if (imageUrl) saveLocalSupporterAvatar(idKey, imageUrl);
+      else removeLocalSupporterAvatar(idKey);
+    }
+
+    return res;
   }
 
   async deleteSupporter(id: number): Promise<ApiEnvelope<null>> {
+    removeLocalSupporterDescription(String(id));
+    removeLocalSupporterAvatar(String(id));
     return this.requestJson<null>(
       `/supporters/${id}`,
       { method: 'DELETE' },

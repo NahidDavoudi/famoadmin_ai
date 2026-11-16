@@ -80,3 +80,70 @@ export function fileToAvatarDataUrl(file: File, maxDimension = 320): Promise<str
     reader.readAsDataURL(file);
   });
 }
+
+export const SUPPORTER_AVATARS_STORAGE_KEY = 'famo_supporter_avatars_v1';
+export const SUPPORTER_DESCRIPTIONS_STORAGE_KEY = 'famo_supporter_descriptions_v1';
+
+export function getAllLocalSupporterAvatars(): Record<string, string> {
+  try {
+    if (typeof localStorage === 'undefined') return {};
+    const raw = localStorage.getItem(SUPPORTER_AVATARS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveLocalSupporterAvatar(id: string | number, avatar: string): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const map = getAllLocalSupporterAvatars();
+    map[String(id)] = avatar;
+    localStorage.setItem(SUPPORTER_AVATARS_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore storage quota
+  }
+}
+
+export function removeLocalSupporterAvatar(id: string | number): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const map = getAllLocalSupporterAvatars();
+    delete map[String(id)];
+    localStorage.setItem(SUPPORTER_AVATARS_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore
+  }
+}
+
+export function getAllLocalSupporterDescriptions(): Record<string, string> {
+  try {
+    if (typeof localStorage === 'undefined') return {};
+    const raw = localStorage.getItem(SUPPORTER_DESCRIPTIONS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveLocalSupporterDescription(id: string | number, desc: string): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const map = getAllLocalSupporterDescriptions();
+    map[String(id)] = desc;
+    localStorage.setItem(SUPPORTER_DESCRIPTIONS_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore storage quota
+  }
+}
+
+export function removeLocalSupporterDescription(id: string | number): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const map = getAllLocalSupporterDescriptions();
+    delete map[String(id)];
+    localStorage.setItem(SUPPORTER_DESCRIPTIONS_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore
+  }
+}

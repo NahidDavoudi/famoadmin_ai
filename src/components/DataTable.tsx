@@ -156,7 +156,11 @@ export function DataTable<T>({
                 <th
                   key={col.key}
                   className={`px-3.5 py-3.5 text-start font-semibold min-w-0 break-words first:rounded-ss-2xl last:rounded-se-2xl ${
-                    isActionCol ? 'w-28 shrink-0 whitespace-nowrap' : ''
+                    isActionCol
+                      ? col.headerClassName
+                        ? 'shrink-0 whitespace-nowrap'
+                        : 'w-28 shrink-0 whitespace-nowrap'
+                      : ''
                   } ${col.headerClassName || ''}`}
                 >
                   {col.header}
@@ -182,7 +186,11 @@ export function DataTable<T>({
                     <td
                       key={col.key}
                       className={`px-3.5 py-3.5 text-start align-middle min-w-0 ${
-                        isActionCol ? 'w-28 shrink-0 whitespace-nowrap' : 'break-words'
+                        isActionCol
+                          ? col.cellClassName
+                            ? 'shrink-0 whitespace-nowrap'
+                            : 'w-28 shrink-0 whitespace-nowrap'
+                          : 'break-words'
                       } ${
                         col.priority === 'primary' ? 'font-semibold text-slate-800' : ''
                       } ${col.cellClassName || ''}`}

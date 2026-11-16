@@ -149,16 +149,16 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
       key: 'display_order',
       header: 'ترتیب',
       priority: 'desktop-only',
-      headerClassName: 'w-16',
-      cellClassName: 'w-16 tabular-nums font-medium text-slate-600',
+      headerClassName: 'hidden lg:table-cell w-16',
+      cellClassName: 'hidden lg:table-cell w-16 tabular-nums font-medium text-slate-600',
       cell: (i) => i.display_order,
     },
     {
       key: 'name',
       header: 'نام',
       priority: 'primary',
-      headerClassName: 'w-48 xl:w-56',
-      cellClassName: 'w-48 xl:w-56 font-semibold text-slate-800 whitespace-normal break-words',
+      headerClassName: 'w-36 lg:w-48 xl:w-56',
+      cellClassName: 'w-36 lg:w-48 xl:w-56 font-semibold text-slate-800 whitespace-normal break-words',
       cell: (i) => {
         const imgSrc = resolveEntityImageUrl(i.image_url);
         return (
@@ -185,8 +185,8 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
       key: 'title',
       header: 'عنوان / سمت',
       priority: 'secondary',
-      headerClassName: 'w-40 xl:w-48',
-      cellClassName: 'w-40 xl:w-48 text-slate-600 whitespace-normal break-words',
+      headerClassName: 'w-28 lg:w-40 xl:w-48',
+      cellClassName: 'w-28 lg:w-40 xl:w-48 text-slate-600 whitespace-normal break-words',
       value: (i) => i.title,
       cell: (i) => (
         <div className="whitespace-normal break-words">{i.title || '—'}</div>
@@ -196,7 +196,8 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
       key: 'description',
       header: 'توضیحات',
       priority: 'desktop-only',
-      cellClassName: 'min-w-0 text-slate-600',
+      headerClassName: 'hidden lg:table-cell',
+      cellClassName: 'hidden lg:table-cell min-w-0 text-slate-600',
       cell: (i) => (
         <div className="whitespace-normal break-words line-clamp-2 max-w-prose text-xs text-slate-600 leading-relaxed">
           {i.description || '—'}
@@ -257,8 +258,8 @@ export const InstructorsPage: React.FC<InstructorsPageProps> = ({ showToast }) =
             rowKey={(i) => i.id}
             ariaLabel="جدول اساتید"
             actionsHeader="عملیات"
-            actionsHeaderClassName="w-28"
-            actionsCellClassName="w-28 shrink-0"
+            actionsHeaderClassName="w-20 lg:w-28"
+            actionsCellClassName="w-20 lg:w-28 shrink-0"
             renderActions={(i) => (
               <div className="flex items-center gap-1 shrink-0">
                 <ActionButton

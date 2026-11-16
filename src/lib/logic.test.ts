@@ -755,5 +755,49 @@ test('resolveEntityImageUrl resolves data URLs, full HTTP URLs, and relative API
     resolveEntityImageUrl('uploads/supporters/2.png'),
     'https://api.famoacademy.ir/uploads/supporters/2.png'
   );
+  assert.equal(
+    resolveEntityImageUrl('supporters/2/6ae0fd38b645b3.96909346.webp'),
+    'https://api.famoacademy.ir/supporters/2/6ae0fd38b645b3.96909346.webp'
+  );
+});
+
+test('Supporter avatar and description persistence helpers save, retrieve, and remove locally cached data', async () => {
+  const {
+    saveLocalSupporterAvatar,
+    getAllLocalSupporterAvatars,
+    removeLocalSupporterAvatar,
+    saveLocalSupporterDescription,
+    getAllLocalSupporterDescriptions,
+    removeLocalSupporterDescription,
+  } = await import('./image-upload');
+
+  // Test when localStorage is mocked or available in environment
+  const store: Record<string, string> = {};
+  const mockStorage = {
+    getItem: (k: string) => store[k] || null,
+    setItem: (k: string, v: string) => {
+      store[k] = v;
+    },
+    removeItem: (k: string) => {
+      delete store[k];
+    },
+  };
+
+  (globalThis as unknown as { localStorage: typeof mockStorage }).localStorage = mockStorage;
+
+  saveLocalSupporterAvatar(2, 'data:image/jpeg;base64,supporter2avatar');
+  assert.equal(getAllLocalSupporterAvatars()['2'], 'data:image/jpeg;base64,supporter2avatar');
+
+  saveLocalSupporterDescription(2, 'مشاور تحصیلی ارشد کنکور تجربی');
+  assert.equal(
+    getAllLocalSupporterDescriptions()['2'],
+    'مشاور تحصیلی ارشد کنکور تجربی'
+  );
+
+  removeLocalSupporterAvatar(2);
+  assert.equal(getAllLocalSupporterAvatars()['2'], undefined);
+
+  removeLocalSupporterDescription(2);
+  assert.equal(getAllLocalSupporterDescriptions()['2'], undefined);
 });
 

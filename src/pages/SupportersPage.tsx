@@ -8,10 +8,12 @@ import {
   Trash2,
   Eye,
   EyeOff,
+  Upload,
+  X,
 } from 'lucide-react';
 import API from '../lib/api';
 import { validateSupporterForm, type FieldErrors } from '../lib/form-validation';
-import { resolveEntityImageUrl } from '../lib/image-upload';
+import { fileToAvatarDataUrl, resolveEntityImageUrl } from '../lib/image-upload';
 import type { AcademicField, Supporter, ToastType } from '../types';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -42,6 +44,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
   const [editingSupporter, setEditingSupporter] = useState<Supporter | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Supporter | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
 
   const [formState, setFormState] = useState({
     name: '',
@@ -49,6 +52,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
     grade: '12',
     field: '' as AcademicField | '',
     description: '',
+    image_url: '',
     is_active: 1,
     chat_id: '',
     password: '',
@@ -76,12 +80,14 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
 
   const openAdd = () => {
     setErrors({});
+    setSelectedImageFile(null);
     setFormState({
       name: '',
       phone: '',
       grade: '12',
       field: '',
       description: '',
+      image_url: '',
       is_active: 1,
       chat_id: '',
       password: '',
@@ -92,6 +98,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
 
   const openEdit = (s: Supporter) => {
     setErrors({});
+    setSelectedImageFile(null);
     setEditingSupporter(s);
     setFormState({
       name: String(s.name ?? ''),
@@ -99,11 +106,24 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       grade: String(s.grade ?? '12'),
       field: (s.field as AcademicField) || '',
       description: String(s.description ?? ''),
+      image_url: String(s.avatar_url || s.avatar || ''),
       is_active: s.is_active === false || s.is_active === 0 ? 0 : 1,
       chat_id: s.chat_id !== null && s.chat_id !== undefined ? String(s.chat_id) : '',
       password: '',
     });
     setShowPassword(false);
+  };
+
+  const handleImageFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file);
+      setSelectedImageFile(file);
+      setFormState((prev) => ({ ...prev, image_url: dataUrl }));
+    } catch (err) {
+      showToast((err as Error).message || 'خطا در بارگذاری تصویر', 'error');
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -133,8 +153,13 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
           is_active: formState.is_active ? 1 : 0,
           chat_id: trimmedChatId || null,
           password: formState.password || undefined,
+          image: selectedImageFile,
+          image_url: formState.image_url,
+          avatar: selectedImageFile || formState.image_url,
+          avatar_url: formState.image_url,
         });
         setEditingSupporter(null);
+        setSelectedImageFile(null);
         showToast('اطلاعات پشتیبان ذخیره شد', 'success');
       } else {
         await API.addSupporter({
@@ -144,8 +169,13 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
           field: formState.field as AcademicField,
           description: trimmedDescription,
           chat_id: trimmedChatId || null,
+          image: selectedImageFile,
+          image_url: formState.image_url,
+          avatar: selectedImageFile || formState.image_url,
+          avatar_url: formState.image_url,
         });
         setIsAddOpen(false);
+        setSelectedImageFile(null);
         showToast('پشتیبان جدید اضافه شد', 'success');
       }
       setErrors({});
@@ -174,20 +204,20 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       key: 'name',
       header: 'نام پشتیبان',
       priority: 'primary',
-      headerClassName: 'w-40 xl:w-52',
-      cellClassName: 'w-40 xl:w-52 font-semibold text-slate-800 whitespace-normal break-words',
+      headerClassName: 'w-32 lg:w-44 xl:w-56',
+      cellClassName: 'w-32 lg:w-44 xl:w-56 font-semibold text-slate-800 whitespace-normal break-words',
       cell: (s) => {
         const imgSrc = resolveEntityImageUrl(s.avatar_url || s.avatar);
         return (
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             {imgSrc ? (
               <img
                 src={imgSrc}
                 alt={s.name}
-                className="hidden md:block w-9 h-9 rounded-full object-cover border border-slate-200 shrink-0 bg-slate-100"
+                className="w-8 h-8 rounded-full object-cover border border-slate-200 shrink-0 bg-slate-100"
               />
             ) : (
-              <div className="hidden md:flex w-9 h-9 rounded-full bg-[#E2D9C6] items-center justify-center text-[#445D84] font-bold text-xs shrink-0">
+              <div className="w-8 h-8 rounded-full bg-[#E2D9C6] flex items-center justify-center text-[#445D84] font-bold text-xs shrink-0">
                 {s.name.charAt(0)}
               </div>
             )}
@@ -201,8 +231,8 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       header: 'شماره تماس',
       priority: 'secondary',
       mobileLabel: 'شماره تماس',
-      headerClassName: 'w-28 xl:w-32',
-      cellClassName: 'w-28 xl:w-32 tabular-nums text-slate-600',
+      headerClassName: 'hidden lg:table-cell w-28 xl:w-32',
+      cellClassName: 'hidden lg:table-cell w-28 xl:w-32 tabular-nums text-slate-600',
       value: (s) => s.phone || '-',
       cell: (s) => (
         <span dir="ltr" className="inline-block break-all">
@@ -215,8 +245,8 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       header: 'پایه و رشته',
       priority: 'secondary',
       mobileLabel: 'پایه و رشته',
-      headerClassName: 'w-28 xl:w-32',
-      cellClassName: 'w-28 xl:w-32 text-slate-600 whitespace-normal break-words',
+      headerClassName: 'w-24 lg:w-28 xl:w-32',
+      cellClassName: 'w-24 lg:w-28 xl:w-32 text-slate-600 whitespace-normal break-words',
       cell: (s) => (
         <span className="whitespace-normal break-words">
           پایه {s.grade} • {s.field}
@@ -227,7 +257,8 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       key: 'description',
       header: 'توضیحات',
       priority: 'desktop-only',
-      cellClassName: 'min-w-0 text-slate-600',
+      headerClassName: 'hidden lg:table-cell',
+      cellClassName: 'hidden lg:table-cell min-w-0 text-slate-600',
       cell: (s) => (
         <div className="whitespace-normal break-words line-clamp-2 max-w-prose text-xs text-slate-600 leading-relaxed">
           {s.description || '—'}
@@ -239,13 +270,13 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       header: 'وضعیت',
       priority: 'secondary',
       mobileLabel: 'وضعیت',
-      headerClassName: 'w-20',
-      cellClassName: 'w-20',
+      headerClassName: 'w-16 lg:w-20',
+      cellClassName: 'w-16 lg:w-20',
       cell: (s) => {
         const active = s.is_active !== false && s.is_active !== 0;
         return (
           <span
-            className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-semibold ${
+            className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold ${
               active ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
             }`}
           >
@@ -258,8 +289,8 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       key: 'reports',
       header: 'گزارش‌ها',
       priority: 'desktop-only',
-      headerClassName: 'w-24',
-      cellClassName: 'w-24 tabular-nums',
+      headerClassName: 'hidden xl:table-cell w-20 xl:w-24',
+      cellClassName: 'hidden xl:table-cell w-20 xl:w-24 tabular-nums',
       cell: (s) => (
         <span>
           <span className="text-emerald-600 font-semibold">{s.replied_count ?? 0}</span>
@@ -269,6 +300,9 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
       ),
     },
   ];
+
+  const previewInitial = formState.name ? formState.name.trim().charAt(0) : 'پ';
+  const resolvedPreview = resolveEntityImageUrl(formState.image_url);
 
   return (
     <div id="page-supporters" className="space-y-6">
@@ -361,8 +395,8 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
             rowKey={(s) => s.id}
             ariaLabel="جدول پشتیبان‌ها"
             actionsHeader="عملیات"
-            actionsHeaderClassName="w-28"
-            actionsCellClassName="w-28 shrink-0"
+            actionsHeaderClassName="w-20 lg:w-28"
+            actionsCellClassName="w-20 lg:w-28 shrink-0"
             renderActions={(s) => (
               <div className="flex items-center gap-1 shrink-0">
                 <ActionButton
@@ -398,6 +432,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
           if (!submitting) {
             setIsAddOpen(false);
             setEditingSupporter(null);
+            setSelectedImageFile(null);
             setErrors({});
           }
         }}
@@ -422,6 +457,7 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
               onClick={() => {
                 setIsAddOpen(false);
                 setEditingSupporter(null);
+                setSelectedImageFile(null);
                 setErrors({});
               }}
               className="py-2.5 px-5"
@@ -432,6 +468,49 @@ export const SupportersPage: React.FC<SupportersPageProps> = ({ showToast }) => 
         }
       >
         <form id="supporterModalForm" noValidate onSubmit={handleSave} className="space-y-4">
+          {/* Avatar / Image Upload */}
+          <div className="flex items-center gap-4 p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+            {resolvedPreview ? (
+              <img
+                src={resolvedPreview}
+                alt="پیش‌نمایش تصویر پشتیبان"
+                className="w-14 h-14 rounded-full object-cover border border-slate-200 shrink-0 bg-white"
+              />
+            ) : (
+              <div className="w-14 h-14 rounded-full bg-[#E2D9C6] flex items-center justify-center text-[#445D84] font-bold text-lg shrink-0">
+                {previewInitial}
+              </div>
+            )}
+            <div className="flex-1 min-w-0 space-y-1.5">
+              <div className="text-xs font-bold text-slate-700">تصویر پروفایل پشتیبان (اختیاری)</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#445D84] hover:bg-[#344868] text-white text-xs font-semibold cursor-pointer transition-colors">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>انتخاب تصویر</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageFileSelect}
+                    className="hidden"
+                  />
+                </label>
+                {formState.image_url && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedImageFile(null);
+                      setFormState((prev) => ({ ...prev, image_url: '' }));
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-rose-600 hover:bg-rose-50 text-xs font-semibold cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>حذف تصویر</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">
               نام و نام خانوادگی <span className="text-red-500">*</span>
