@@ -107,7 +107,8 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({
       });
 
       showToast('پروفایل با موفقیت به‌روزرسانی شد', 'success');
-      const updatedName = res.data?.full_name || res.data?.username || profileForm.full_name.trim();
+      const data = (res.data || {}) as Record<string, unknown>;
+      const updatedName = String(data.full_name || data.username || profileForm.full_name.trim());
       onProfileUpdated?.(updatedName);
       onClose();
     } catch (err) {

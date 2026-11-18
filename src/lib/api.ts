@@ -300,6 +300,36 @@ class FamoApiClient {
     return json.data;
   }
 
+  async updateProfile(payload: {
+    full_name?: string;
+    name?: string;
+    phone?: string;
+    current_password?: string;
+  }): Promise<ApiEnvelope<Record<string, unknown>>> {
+    return this.requestJson<Record<string, unknown>>(
+      '/auth/profile',
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      },
+      'خطا در به‌روزرسانی پروفایل'
+    );
+  }
+
+  async changePassword(payload: {
+    current_password: string;
+    new_password: string;
+  }): Promise<ApiEnvelope<Record<string, unknown>>> {
+    return this.requestJson<Record<string, unknown>>(
+      '/auth/change-password',
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      },
+      'خطا در تغییر رمز عبور'
+    );
+  }
+
   /**
    * GET /api/v1/admin/activity-logs (and fallback /api/v1/admin/stats/activity-logs)
    * Supports filtering by: role, actor_user_id, actor_linked_id, module, action, q, from, to, page, per_page
