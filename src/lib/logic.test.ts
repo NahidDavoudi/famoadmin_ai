@@ -17,7 +17,7 @@ import {
   validateExamEntryForm,
   validateReportDateFilter,
 } from './form-validation';
-import type { Student } from '../types';
+import type { Student, Supporter } from '../types';
 
 test('Jalali to Gregorian round-trip conversion works accurately', () => {
   const [jy, jm, jd] = toJalali(2025, 2, 6);
@@ -1098,11 +1098,11 @@ test('Student-to-Supporter assignments helpers normalize rows, history, initial-
   );
 
   // Categorize supporters for a grade 12 تجربی student
-  const mockSupporters = [
-    { id: 1, name: 'سارا کریمی', grade: 12, field: 'تجربی' as const, is_active: 1 },
-    { id: 2, name: 'امیر حسینی', grade: 11, field: 'تجربی' as const, is_active: 1 },
-    { id: 3, name: 'زهرا علوی', grade: 12, field: 'ریاضی' as const, is_active: 1 },
-    { id: 4, name: 'پشتیبان غیرفعال', grade: 12, field: 'تجربی' as const, is_active: 0 },
+  const mockSupporters: Supporter[] = [
+    { id: 1, name: 'سارا کریمی', grade: 12, field: 'تجربی' as const, is_active: 1, phone: null, chat_id: null, description: null },
+    { id: 2, name: 'امیر حسینی', grade: 11, field: 'تجربی' as const, is_active: 1, phone: null, chat_id: null, description: null },
+    { id: 3, name: 'زهرا علوی', grade: 12, field: 'ریاضی' as const, is_active: 1, phone: null, chat_id: null, description: null },
+    { id: 4, name: 'پشتیبان غیرفعال', grade: 12, field: 'تجربی' as const, is_active: 0, phone: null, chat_id: null, description: null },
   ];
   const categorized = categorizeSupportersForStudent(
     {
