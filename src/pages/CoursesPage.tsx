@@ -17,6 +17,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import API from '../lib/api';
+import { JalaliDatePicker } from '../components/JalaliDatePicker';
 import { validateCourseForm, type FieldErrors } from '../lib/form-validation';
 import {
   SUBSCRIPTION_STATUS_OPTIONS,
@@ -1303,28 +1304,23 @@ export const CoursesPage: React.FC<CoursesPageProps> = ({
               <label className="block text-xs font-medium text-slate-600 mb-1">
                 تاریخ شروع (اختیاری)
               </label>
-              <input
-                type="date"
+              <JalaliDatePicker
                 value={subForm.started_at}
-                onChange={(e) => setSubForm({ ...subForm, started_at: e.target.value })}
-                className={getFieldClass(false)}
+                onChange={(val) => setSubForm({ ...subForm, started_at: val })}
               />
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">
                 تاریخ پایان (اختیاری)
               </label>
-              <input
-                type="date"
-                aria-invalid={Boolean(subFormErrors.end_at)}
+              <JalaliDatePicker
                 value={subForm.end_at}
-                onChange={(e) => {
-                  setSubForm({ ...subForm, end_at: e.target.value });
+                onChange={(val) => {
+                  setSubForm({ ...subForm, end_at: val });
                   if (subFormErrors.end_at) {
                     setSubFormErrors((prev) => ({ ...prev, end_at: undefined }));
                   }
                 }}
-                className={getFieldClass(Boolean(subFormErrors.end_at))}
               />
               <FieldError message={subFormErrors.end_at} />
             </div>

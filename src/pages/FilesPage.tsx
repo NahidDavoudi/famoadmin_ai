@@ -7,6 +7,7 @@ import type { ExamFile, Student, ToastType } from '../types';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
 import { DataTable, type Column } from '../components/DataTable';
+import { JalaliDatePicker } from '../components/JalaliDatePicker';
 
 interface FilesPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -135,15 +136,12 @@ export const FilesPage: React.FC<FilesPageProps> = ({ showToast }) => {
               <label className="block mb-1.5 text-xs font-medium text-slate-600">
                 تاریخ آزمون <span className="text-red-500">*</span>
               </label>
-              <input
-                type="date"
-                aria-invalid={Boolean(errors.examDate)}
+              <JalaliDatePicker
                 value={examDate}
-                onChange={(e) => {
-                  setExamDate(e.target.value);
+                onChange={(val) => {
+                  setExamDate(val);
                   if (errors.examDate) setErrors((prev) => ({ ...prev, examDate: undefined }));
                 }}
-                className={getFieldClass(Boolean(errors.examDate))}
               />
               <FieldError message={errors.examDate} />
             </div>

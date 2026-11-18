@@ -5,6 +5,7 @@ import { validateReportDateFilter, type FieldErrors } from '../lib/form-validati
 import type { ReportDayStat, ToastType } from '../types';
 import { DailyReportsAreaChart } from '../components/Charts';
 import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
+import { JalaliDatePicker } from '../components/JalaliDatePicker';
 
 interface ReportsPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -74,33 +75,25 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ showToast }) => {
       >
         <div className="flex flex-col sm:flex-row flex-wrap gap-3 items-stretch sm:items-start">
           <div className="flex-1 min-w-0">
-            <input
+            <JalaliDatePicker
               id="reportDateFrom"
-              type="date"
-              aria-label="از تاریخ"
-              aria-invalid={Boolean(errors.dateFrom)}
               value={dateFrom}
-              onChange={(e) => {
-                setDateFrom(e.target.value);
+              onChange={(val) => {
+                setDateFrom(val);
                 if (errors.dateFrom) setErrors((prev) => ({ ...prev, dateFrom: undefined }));
               }}
-              className={getFieldClass(Boolean(errors.dateFrom))}
             />
             <FieldError message={errors.dateFrom} />
           </div>
           <span className="text-slate-500 text-center text-sm sm:pt-2.5">تا</span>
           <div className="flex-1 min-w-0">
-            <input
+            <JalaliDatePicker
               id="reportDateTo"
-              type="date"
-              aria-label="تا تاریخ"
-              aria-invalid={Boolean(errors.dateTo)}
               value={dateTo}
-              onChange={(e) => {
-                setDateTo(e.target.value);
+              onChange={(val) => {
+                setDateTo(val);
                 if (errors.dateTo) setErrors((prev) => ({ ...prev, dateTo: undefined }));
               }}
-              className={getFieldClass(Boolean(errors.dateTo))}
             />
             <FieldError message={errors.dateTo} />
           </div>

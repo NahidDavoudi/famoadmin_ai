@@ -51,6 +51,7 @@ import type {
   Student,
 } from '../types';
 import { API } from '../lib/api';
+import { JalaliDatePicker } from '../components/JalaliDatePicker';
 import {
   formatGregorianToJalali,
   getTodayGregorianIso,
@@ -1632,22 +1633,12 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                 })}
               </div>
 
-              {/* Direct Date Input fallback */}
-              <div className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1 self-start lg:self-auto shrink-0">
-                <Calendar className="w-3.5 h-3.5 text-[#445D84]" />
-                <input
-                  type="date"
-                  aria-label="تاریخ دقیق نوبت"
-                  value={selectedDayIso}
-                  onChange={(e) => {
-                    if (e.target.value) setSelectedDayIso(e.target.value);
-                  }}
-                  className="text-xs font-bold text-slate-700 bg-transparent focus:outline-none min-h-[32px] tabular-nums"
-                />
-                <span className="text-[11px] text-slate-500 tabular-nums">
-                  ({toPersianDigits(selectedDayMeta.jalali)})
-                </span>
-              </div>
+              {/* Jalali Date Picker */}
+              <JalaliDatePicker
+                value={selectedDayIso}
+                onChange={(iso) => setSelectedDayIso(iso)}
+                className="bg-white border border-slate-200 rounded-xl px-2.5 py-1 self-start lg:self-auto shrink-0"
+              />
             </div>
 
             {/* Step 2: Field Tabs (تجربی | ریاضی | انسانی) + Search + Primary Send CTA */}
@@ -2195,20 +2186,12 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                 ))}
               </div>
 
-              {/* Date Selector for Daily Attendance (/api/v1/attendance?date=...) */}
-              <div className="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
-                <Calendar className="w-3.5 h-3.5 text-[#445D84]" />
-                <input
-                  type="date"
-                  aria-label="تاریخ حضور و رفع اشکال"
-                  value={remedialDate}
-                  onChange={(e) => setRemedialDate(e.target.value)}
-                  className="text-xs font-bold text-slate-700 bg-transparent focus:outline-none min-h-[34px]"
-                />
-                <span className="text-[11px] text-slate-500">
-                  ({toPersianDigits(formatGregorianToJalali(remedialDate))})
-                </span>
-              </div>
+              {/* Jalali Date Picker for Daily Attendance */}
+              <JalaliDatePicker
+                value={remedialDate}
+                onChange={(iso) => setRemedialDate(iso)}
+                className="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1"
+              />
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -3303,11 +3286,9 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   تاریخ یکی از روزهای هفته *
                 </label>
-                <input
-                  type="date"
+                <JalaliDatePicker
                   value={newWeekForm.week_date}
-                  onChange={(e) => {
-                    const iso = e.target.value;
+                  onChange={(iso) => {
                     const sat = getSaturdayOfWeek(iso);
                     const fri = addDaysIso(sat, 6);
                     const sJal = formatGregorianToJalali(sat);
@@ -3319,7 +3300,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                       end_date_jalali: eJal,
                     });
                   }}
-                  className={MOBILE_INPUT_CLASS(false)}
+                  className="w-full"
                 />
               </div>
 

@@ -27,6 +27,7 @@ import {
 import { Modal } from './Modal';
 import { ConfirmModal } from './ConfirmModal';
 import { ActionButton, FieldError, getFieldClass } from './FormControls';
+import { JalaliDatePicker } from './JalaliDatePicker';
 
 interface StudentSubscriptionsModalProps {
   student: Student | null;
@@ -356,27 +357,20 @@ export const StudentSubscriptionsModal: React.FC<StudentSubscriptionsModalProps>
                 <label className="block text-xs font-medium text-slate-600 mb-1">
                   تاریخ شروع (اختیاری)
                 </label>
-                <input
-                  type="date"
-                  value={startedAt}
-                  onChange={(e) => setStartedAt(e.target.value)}
-                  className={getFieldClass(false, 'bg-white')}
-                />
+                <JalaliDatePicker value={startedAt} onChange={setStartedAt} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">
                   تاریخ پایان (اختیاری)
                 </label>
-                <input
-                  type="date"
+                <JalaliDatePicker
                   value={endAt}
-                  onChange={(e) => {
-                    setEndAt(e.target.value);
+                  onChange={(val) => {
+                    setEndAt(val);
                     if (formErrors.end_at) {
                       setFormErrors((prev) => ({ ...prev, end_at: undefined }));
                     }
                   }}
-                  className={getFieldClass(Boolean(formErrors.end_at), 'bg-white')}
                 />
                 <FieldError message={formErrors.end_at} />
               </div>

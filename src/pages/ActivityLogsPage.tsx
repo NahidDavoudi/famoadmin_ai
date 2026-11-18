@@ -17,6 +17,7 @@ import {
   Award,
 } from 'lucide-react';
 import API from '../lib/api';
+import { JalaliDatePicker } from '../components/JalaliDatePicker';
 import {
   CATEGORY_LABELS,
   ACTION_TYPE_LABELS,
@@ -634,31 +635,29 @@ export const ActivityLogsPage: React.FC<ActivityLogsPageProps> = ({ showToast })
           <div className="flex items-center gap-2">
             <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
             <label className="text-xs text-slate-600 shrink-0">از تاریخ:</label>
-            <input
-              type="date"
-              value={fromDate}
-              onChange={(e) => {
-                setFromDate(e.target.value);
-                setPage(1);
-              }}
-              aria-label="از تاریخ"
-              className="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs bg-white focus:outline-none focus:border-[#445D84] tabular-nums"
-            />
+            <div className="flex-1">
+              <JalaliDatePicker
+                value={fromDate}
+                onChange={(val) => {
+                  setFromDate(val);
+                  setPage(1);
+                }}
+              />
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
             <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
             <label className="text-xs text-slate-600 shrink-0">تا تاریخ:</label>
-            <input
-              type="date"
-              value={toDate}
-              onChange={(e) => {
-                setToDate(e.target.value);
-                setPage(1);
-              }}
-              aria-label="تا تاریخ"
-              className="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs bg-white focus:outline-none focus:border-[#445D84] tabular-nums"
-            />
+            <div className="flex-1">
+              <JalaliDatePicker
+                value={toDate}
+                onChange={(val) => {
+                  setToDate(val);
+                  setPage(1);
+                }}
+              />
+            </div>
           </div>
 
           <input
