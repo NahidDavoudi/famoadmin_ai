@@ -11,6 +11,8 @@ import {
   Users,
   ChevronRight,
   ChevronLeft,
+  BookOpen,
+  Headset,
 } from 'lucide-react';
 import API from '../lib/api';
 import { validateStudentForm, type FieldErrors } from '../lib/form-validation';
@@ -19,6 +21,8 @@ import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
 import { DataTable, type Column } from '../components/DataTable';
+import { StudentSubscriptionsModal } from '../components/StudentSubscriptionsModal';
+import { StudentAssignmentModal } from '../components/StudentAssignmentModal';
 
 interface StudentsPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -72,6 +76,8 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     field: 'تجربی' as AcademicField | '',
   });
   const [editErrors, setEditErrors] = useState<FieldErrors<StudentFieldKey>>({});
+  const [subscriptionStudent, setSubscriptionStudent] = useState<Student | null>(null);
+  const [assignmentStudent, setAssignmentStudent] = useState<Student | null>(null);
 
   // Confirmation Dialog State
   const [confirmState, setConfirmState] = useState<{
@@ -323,8 +329,8 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       header: 'تماس / کد ملی',
       priority: 'secondary',
       mobileLabel: 'شماره تماس',
-      headerClassName: 'w-32 xl:w-36 text-center',
-      cellClassName: 'w-32 xl:w-36 text-center tabular-nums',
+      headerClassName: 'w-28 xl:w-36 text-center',
+      cellClassName: 'w-28 xl:w-36 text-center tabular-nums',
       value: (s) => s.phone || s.national_id || '-',
       cell: (s) => (
         <div className="flex flex-col md:items-center text-xs tabular-nums" dir="ltr">
@@ -337,8 +343,8 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       key: 'grade',
       header: 'پایه',
       priority: 'desktop-only',
-      headerClassName: 'w-20 text-center',
-      cellClassName: 'w-20 text-center text-slate-600 tabular-nums',
+      headerClassName: 'hidden lg:table-cell w-20 text-center',
+      cellClassName: 'hidden lg:table-cell w-20 text-center text-slate-600 tabular-nums',
       cell: (s) => `پایه ${s.grade}`,
     },
     {
@@ -350,7 +356,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       cellClassName: 'w-24 xl:w-28 text-center font-medium text-slate-700',
       cell: (s) => (
         <span>
-          <span className="md:hidden">پایه {s.grade} • </span>
+          <span className="lg:hidden">پایه {s.grade} • </span>
           {s.field}
         </span>
       ),
@@ -360,8 +366,8 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
       header: 'حساب',
       priority: 'secondary',
       mobileLabel: 'وضعیت حساب',
-      headerClassName: 'w-20 xl:w-24 text-center',
-      cellClassName: 'w-20 xl:w-24 text-center',
+      headerClassName: 'hidden lg:table-cell w-20 xl:w-24 text-center',
+      cellClassName: 'hidden lg:table-cell w-20 xl:w-24 text-center',
       cell: (s) => {
         const isActive = Number(s.status ?? s.is_active ?? 1) === 1;
         return (
@@ -381,7 +387,27 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     const isActive = Number(s.status ?? s.is_active ?? 1) === 1;
     const hasAccount = s.user_id !== undefined ? Boolean(s.user_id) : true;
     return (
-      <div className="flex items-center justify-center gap-1 shrink-0">
+      <div className="flex flex-wrap items-center justify-center gap-1 shrink-0">
+        <ActionButton
+          type="button"
+          variant="ghost"
+          onClick={() => setAssignmentStudent(s)}
+          className="min-w-11 min-h-11 p-2.5 rounded-xl text-indigo-600 hover:bg-indigo-50"
+          title="تخصیص پشتیبان و تاریخچه"
+          aria-label={`پشتیبان دانش‌آموز ${s.name}`}
+        >
+          <Headset className="w-4 h-4" />
+        </ActionButton>
+        <ActionButton
+          type="button"
+          variant="ghost"
+          onClick={() => setSubscriptionStudent(s)}
+          className="min-w-11 min-h-11 p-2.5 rounded-xl text-[#445D84] hover:bg-slate-100"
+          title="دوره‌ها و اشتراک‌های دانش‌آموز"
+          aria-label={`دوره‌های دانش‌آموز ${s.name}`}
+        >
+          <BookOpen className="w-4 h-4" />
+        </ActionButton>
         <ActionButton
           type="button"
           variant="ghost"
@@ -576,8 +602,8 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
             rowKey={(s) => s.id}
             ariaLabel="جدول دانش‌آموزان"
             actionsHeader="عملیات"
-            actionsHeaderClassName="w-48 text-center"
-            actionsCellClassName="w-48 shrink-0"
+            actionsHeaderClassName="w-48 lg:w-60 text-center"
+            actionsCellClassName="w-48 lg:w-60 shrink-0"
             renderActions={renderStudentActions}
           />
 
@@ -917,6 +943,31 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
         variant={confirmState.variant}
         onConfirm={confirmState.onConfirm}
         onCancel={() => setConfirmState((prev) => ({ ...prev, isOpen: false }))}
+      />
+
+      <StudentSubscriptionsModal
+        student={subscriptionStudent}
+        isOpen={Boolean(subscriptionStudent)}
+        onClose={() => setSubscriptionStudent(null)}
+        showToast={showToast}
+      />
+
+      <StudentAssignmentModal
+        student={
+          assignmentStudent
+            ? {
+                student_id: assignmentStudent.id,
+                name: assignmentStudent.name,
+                phone: assignmentStudent.phone,
+                grade: assignmentStudent.grade,
+                field: assignmentStudent.field,
+              }
+            : null
+        }
+        isOpen={Boolean(assignmentStudent)}
+        onClose={() => setAssignmentStudent(null)}
+        showToast={showToast}
+        onAssignmentChanged={() => fetchStudents(page)}
       />
     </div>
   );

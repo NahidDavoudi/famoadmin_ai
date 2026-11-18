@@ -39,6 +39,12 @@ const SIZE_CLASSES: Record<ButtonSize, string> = {
   lg: 'px-5 py-3 text-base',
 };
 
+const SIZE_TEXT_CLASSES: Record<ButtonSize, string> = {
+  sm: 'text-xs',
+  md: 'text-sm',
+  lg: 'text-base',
+};
+
 export const ActionButton: React.FC<ActionButtonProps> = ({
   loading = false,
   loadingText,
@@ -59,6 +65,8 @@ export const ActionButton: React.FC<ActionButtonProps> = ({
 
   const isBusy = loading || internalLoading;
   const isDisabled = Boolean(disabled || isBusy || cooldownLocked);
+  const hasCustomPadding = /\b!?p[xytbselr]?-[\d[\]]/.test(className);
+  const sizeClass = hasCustomPadding ? SIZE_TEXT_CLASSES[size] : SIZE_CLASSES[size];
 
   const handleClick = async (e: React.MouseEvent<HTMLButtonElement>) => {
     if (isDisabled || lockRef.current) {
@@ -102,7 +110,7 @@ export const ActionButton: React.FC<ActionButtonProps> = ({
       disabled={isDisabled}
       aria-busy={isBusy}
       onClick={handleClick}
-      className={`inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-all duration-150 cursor-pointer select-none disabled:opacity-55 disabled:cursor-not-allowed ${SIZE_CLASSES[size]} ${VARIANT_CLASSES[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-all duration-150 cursor-pointer select-none disabled:opacity-55 disabled:cursor-not-allowed ${sizeClass} ${VARIANT_CLASSES[variant]} ${className}`}
       {...rest}
     >
       {isBusy ? (

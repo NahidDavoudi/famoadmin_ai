@@ -918,4 +918,264 @@ test('Exam comments and 14-day share link helpers validate, compose, normalize, 
   assert.equal(revokeLog?.title, 'ابطال لینک اشتراک کارنامه');
 });
 
+test('Course subscriptions helpers normalize statuses, validate forms, compute stats, filter, and log mutations', async () => {
+  const {
+    normalizeSubscriptionStatus,
+    normalizeSubscription,
+    validateSubscriptionForm,
+    computeSubscriptionStats,
+    filterSubscriptions,
+    getSubscriptionStatusLabel,
+  } = await import('./subscriptions');
+  const { describeApiMutation } = await import('./activity-log');
+
+  assert.equal(normalizeSubscriptionStatus('active'), 'active');
+  assert.equal(normalizeSubscriptionStatus('canceled'), 'cancelled');
+  assert.equal(normalizeSubscriptionStatus('suspended'), 'pending');
+  assert.equal(getSubscriptionStatusLabel('pending'), 'در انتظار تأیید (معلق)');
+  assert.equal(getSubscriptionStatusLabel('active', 0), 'معلق (غیرفعال)');
+
+  const sub1 = normalizeSubscription({
+    id: 1,
+    course_id: 10,
+    student_id: 101,
+    status: 'active',
+    is_active: 1,
+    note: 'پرداخت نقدی',
+    started_at: '2026-11-01T00:00:00Z',
+    end_at: '2027-03-01T00:00:00Z',
+    course: { id: 10, name: 'دوره جامع کنکور تجربی', price: 4500000 },
+    student: { id: 101, name: 'علی رضایی', phone: '09121112233', grade: 12, field: 'تجربی' },
+  });
+  assert.equal(sub1.status, 'active');
+  assert.equal(sub1.is_active, 1);
+  assert.equal(sub1.course.name, 'دوره جامع کنکور تجربی');
+  assert.equal(sub1.student.name, 'علی رضایی');
+
+  const sub2 = normalizeSubscription({
+    id: 2,
+    course_id: 11,
+    student_id: 102,
+    status: 'pending',
+    is_active: 0,
+    course_name: 'همایش جمع‌بندی فیزیک',
+    student_name: 'سارا محمدی',
+    student_phone: '09123334455',
+  });
+  assert.equal(sub2.status, 'pending');
+  assert.equal(sub2.is_active, 0);
+  assert.equal(sub2.course.name, 'همایش جمع‌بندی فیزیک');
+  assert.equal(sub2.student.name, 'سارا محمدی');
+
+  const sub3 = normalizeSubscription({
+    id: 3,
+    course_id: 10,
+    student_id: 103,
+    status: 'canceled',
+    is_active: 0,
+    course: { id: 10, name: 'دوره جامع کنکور تجربی' },
+    student: { id: 103, name: 'امیر کریمی' },
+  });
+  assert.equal(sub3.status, 'cancelled');
+
+  // Form validation checks
+  const invalidEmpty = validateSubscriptionForm({ student_id: '', course_id: '' });
+  assert.ok(invalidEmpty.student_id);
+  assert.ok(invalidEmpty.course_id);
+
+  const invalidDates = validateSubscriptionForm({
+    student_id: 101,
+    course_id: 10,
+    started_at: '2026-12-10',
+    end_at: '2026-11-01',
+  });
+  assert.ok(invalidDates.end_at);
+
+  const validForm = validateSubscriptionForm({
+    student_id: 101,
+    course_id: 10,
+    started_at: '2026-11-01',
+    end_at: '2026-12-10',
+    note: 'ثبت‌نام ترم پاییز',
+  });
+  assert.equal(Object.keys(validForm).length, 0);
+
+  // Stats & filtering
+  const list = [sub1, sub2, sub3];
+  const stats = computeSubscriptionStats(list);
+  assert.equal(stats.total, 3);
+  assert.equal(stats.active, 1);
+  assert.equal(stats.pending, 1);
+  assert.equal(stats.cancelled, 1);
+
+  assert.equal(filterSubscriptions(list, { course_id: 10 }).length, 2);
+  assert.equal(filterSubscriptions(list, { status: 'pending' }).length, 1);
+  assert.equal(filterSubscriptions(list, { search: 'سارا' }).length, 1);
+  assert.equal(filterSubscriptions(list, { is_active: 1 }).length, 1);
+
+  // Activity log mutation descriptions
+  const createSubLog = describeApiMutation('POST', '/subscriptions', {
+    student_id: 101,
+    course_id: 10,
+  });
+  assert.equal(createSubLog?.action_type, 'create');
+  assert.equal(createSubLog?.category, 'courses');
+
+  const patchStatusLog = describeApiMutation('PATCH', '/subscriptions/1/status', {
+    status: 'cancelled',
+  });
+  assert.equal(patchStatusLog?.action_type, 'status_change');
+  assert.equal(patchStatusLog?.category, 'courses');
+});
+
+test('Student-to-Supporter assignments helpers normalize rows, history, initial-fill report, categorize supporters, filter, and log mutations', async () => {
+  const {
+    normalizeAssignmentStudentRow,
+    normalizeAssignmentHistoryEntry,
+    normalizeInitialFillReport,
+    categorizeSupportersForStudent,
+    computeAssignmentStats,
+    filterAssignmentStudents,
+  } = await import('./assignments');
+  const { describeApiMutation } = await import('./activity-log');
+
+  const assignedStudent = normalizeAssignmentStudentRow({
+    id: 101,
+    name: 'علی رضایی',
+    phone: '09121112233',
+    national_id: '0012345678',
+    grade: 12,
+    field: 'تجربی',
+    status: 1,
+    assignment: {
+      assignment_id: 55,
+      student_id: 101,
+      supporter_id: 5,
+      supporter_name: 'سارا کریمی',
+      supporter_grade: 12,
+      supporter_field: 'تجربی',
+      assigned_at: '2026-05-01 10:00:00',
+      is_active: 1,
+      note: 'تخصیص اولیه',
+    },
+  });
+
+  assert.equal(assignedStudent.student_id, 101);
+  assert.equal(assignedStudent.supporter_id, 5);
+  assert.equal(assignedStudent.supporter_name, 'سارا کریمی');
+
+  const unassignedStudent = normalizeAssignmentStudentRow({
+    id: 102,
+    name: 'مریم محمدی',
+    phone: '09129998877',
+    grade: 11,
+    field: 'ریاضی',
+    status: 1,
+    assignment: null,
+  });
+  assert.equal(unassignedStudent.supporter_id, null);
+
+  const stats = computeAssignmentStats([assignedStudent, unassignedStudent]);
+  assert.equal(stats.total, 2);
+  assert.equal(stats.assigned, 1);
+  assert.equal(stats.unassigned, 1);
+
+  assert.equal(
+    filterAssignmentStudents([assignedStudent, unassignedStudent], { status: 'assigned' }).length,
+    1
+  );
+  assert.equal(
+    filterAssignmentStudents([assignedStudent, unassignedStudent], { status: 'unassigned' }).length,
+    1
+  );
+  assert.equal(
+    filterAssignmentStudents([assignedStudent, unassignedStudent], { supporter_id: 5 }).length,
+    1
+  );
+  assert.equal(
+    filterAssignmentStudents([assignedStudent, unassignedStudent], { search: 'مریم' }).length,
+    1
+  );
+
+  // Categorize supporters for a grade 12 تجربی student
+  const mockSupporters = [
+    { id: 1, name: 'سارا کریمی', grade: 12, field: 'تجربی' as const, is_active: 1 },
+    { id: 2, name: 'امیر حسینی', grade: 11, field: 'تجربی' as const, is_active: 1 },
+    { id: 3, name: 'زهرا علوی', grade: 12, field: 'ریاضی' as const, is_active: 1 },
+    { id: 4, name: 'پشتیبان غیرفعال', grade: 12, field: 'تجربی' as const, is_active: 0 },
+  ];
+  const categorized = categorizeSupportersForStudent(
+    {
+      grade: 12,
+      field: 'تجربی',
+    },
+    mockSupporters
+  );
+  assert.equal(categorized.exactMatches.length, 1);
+  assert.equal(categorized.exactMatches[0].id, 1);
+  assert.equal(categorized.fieldMatches.length, 1);
+  assert.equal(categorized.fieldMatches[0].id, 2);
+  assert.equal(categorized.otherSupporters.length, 1);
+  assert.equal(categorized.otherSupporters[0].id, 3);
+
+  const historyEntry = normalizeAssignmentHistoryEntry({
+    id: 10,
+    student_id: 101,
+    supporter_id: 5,
+    supporter_name: 'سارا کریمی',
+    assigned_by_name: 'مدیر سیستم',
+    assigned_at: '2026-05-01 10:00:00',
+    unassigned_at: null,
+    is_active: 1,
+    note: 'تخصیص اول',
+  });
+  assert.equal(historyEntry.is_active, true);
+  assert.equal(historyEntry.supporter_name, 'سارا کریمی');
+
+  const fillReport = normalizeInitialFillReport({
+    dry_run: true,
+    total_candidates: 12,
+    assigned_count: 8,
+    no_match_count: 3,
+    ambiguous_count: 1,
+    skipped_count: 0,
+    items: [
+      {
+        student_id: 101,
+        student_name: 'علی رضایی',
+        grade: 12,
+        field: 'تجربی',
+        supporter_id: 5,
+        supporter_name: 'سارا کریمی',
+        action: 'would_assign',
+      },
+    ],
+  });
+  assert.equal(fillReport.dry_run, true);
+  assert.equal(fillReport.assigned_count, 8);
+  assert.equal(fillReport.no_match_count, 3);
+  assert.equal(fillReport.items.length, 1);
+  assert.equal(fillReport.items[0].outcome, 'would_assign');
+
+  // Activity log mutation descriptions
+  const assignLog = describeApiMutation('POST', '/assignments', {
+    student_id: 101,
+    supporter_id: 5,
+  });
+  assert.equal(assignLog?.category, 'assignments');
+  assert.equal(assignLog?.action_type, 'create');
+
+  const unassignLog = describeApiMutation('DELETE', '/assignments/101');
+  assert.equal(unassignLog?.category, 'assignments');
+  assert.equal(unassignLog?.action_type, 'delete');
+
+  const initialFillLog = describeApiMutation('POST', '/assignments/initial-fill', {
+    dry_run: false,
+  });
+  assert.equal(initialFillLog?.category, 'assignments');
+  assert.equal(initialFillLog?.title, 'اجرای تخصیص خودکار اولیه پشتیبان بر اساس پایه و رشته');
+});
+
+
+
 

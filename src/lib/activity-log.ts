@@ -100,7 +100,7 @@ export const CATEGORY_LABELS: Record<ActivityLogCategory, string> = {
   attendance: 'حضور و غیاب',
   tutoring: 'کلاس‌های رفع اشکال',
   exams: 'آزمون و کارنامه',
-  assignments: 'تکالیف و تمرین‌ها',
+  assignments: 'تخصیص پشتیبان',
   courses: 'دوره‌های آموزشی',
   instructors: 'اساتید',
   supporters: 'پشتیبان‌ها',
@@ -174,7 +174,7 @@ export function normalizeModuleKey(rawModule: unknown): ActivityLogCategory {
   if (m.includes('student') || m.includes('parent')) return 'students';
   if (m.includes('exam') || m.includes('score')) return 'exams';
   if (m.includes('assign') || m.includes('homework')) return 'assignments';
-  if (m.includes('course')) return 'courses';
+  if (m.includes('course') || m.includes('subscri')) return 'courses';
   if (m.includes('instruct') || m.includes('teacher')) return 'instructors';
   if (m.includes('support')) return 'supporters';
   if (m.includes('blog') || m.includes('post')) return 'blog';
@@ -654,6 +654,60 @@ export function describeApiMutation(
     };
   }
 
+  // 6b. Subscriptions (/api/v1/subscriptions*)
+  if (cleanPath.startsWith('/subscriptions')) {
+    const subId = cleanPath.split('/')[2];
+    const studentId = safeTrim(body.student_id);
+    const courseId = safeTrim(body.course_id);
+    const status = safeTrim(body.status);
+
+    if (cleanPath.endsWith('/status')) {
+      return {
+        action_type: 'status_change',
+        category: 'courses',
+        category_label: CATEGORY_LABELS.courses,
+        title: 'تغییر وضعیت اشتراک دوره',
+        description: `وضعیت اشتراک شناسه ${subId || '-'}${status ? ` به «${status}»` : ''} تغییر یافت`,
+        method,
+        endpoint: cleanPath,
+      };
+    }
+
+    if (method === 'DELETE') {
+      return {
+        action_type: 'delete',
+        category: 'courses',
+        category_label: CATEGORY_LABELS.courses,
+        title: 'حذف / لغو اشتراک دوره',
+        description: `اشتراک دوره شناسه ${subId || '-'} حذف شد`,
+        method,
+        endpoint: cleanPath,
+      };
+    }
+
+    if (method === 'POST') {
+      return {
+        action_type: 'create',
+        category: 'courses',
+        category_label: CATEGORY_LABELS.courses,
+        title: 'ثبت‌نام دانش‌آموز در دوره (ایجاد اشتراک)',
+        description: `اشتراک دوره (دانش‌آموز: ${studentId || '-'}، دوره: ${courseId || '-'}) ثبت شد`,
+        method,
+        endpoint: cleanPath,
+      };
+    }
+
+    return {
+      action_type: 'update',
+      category: 'courses',
+      category_label: CATEGORY_LABELS.courses,
+      title: 'ویرایش اشتراک دوره',
+      description: `اطلاعات اشتراک شناسه ${subId || '-'} بروزرسانی شد`,
+      method,
+      endpoint: cleanPath,
+    };
+  }
+
   // 7. Instructors
   if (cleanPath.startsWith('/instructors')) {
     const instName = safeTrim(body.name);
@@ -699,6 +753,51 @@ export function describeApiMutation(
       category_label: CATEGORY_LABELS.supporters,
       title: method === 'POST' ? 'افزودن پشتیبان جدید' : 'ویرایش اطلاعات پشتیبان',
       description: `پشتیبان ${suppName ? `«${suppName}»` : `شناسه ${cleanPath.split('/')[2]}`} ذخیره شد`,
+      method,
+      endpoint: cleanPath,
+    };
+  }
+
+  // 8b. Student → Supporter Assignments (/api/v1/assignments*)
+  if (cleanPath.startsWith('/assignments')) {
+    const studentId = safeTrim(body.student_id) || cleanPath.split('/')[2];
+    const supporterId = safeTrim(body.supporter_id);
+
+    if (cleanPath.endsWith('/initial-fill')) {
+      const dryRun = body.dry_run !== false;
+      return {
+        action_type: dryRun ? 'other' : 'create',
+        category: 'assignments',
+        category_label: CATEGORY_LABELS.assignments,
+        title: dryRun
+          ? 'پیش‌نمایش تخصیص خودکار پشتیبان'
+          : 'اجرای تخصیص خودکار اولیه پشتیبان بر اساس پایه و رشته',
+        description: dryRun
+          ? 'پیش‌نمایش آزمایشی تخصیص خودکار اولیه دانش‌آموزان به پشتیبان اجرا شد'
+          : 'تخصیص خودکار اولیه دانش‌آموزان بدون پشتیبان بر اساس پایه و رشته اعمال شد',
+        method,
+        endpoint: cleanPath,
+      };
+    }
+
+    if (method === 'DELETE') {
+      return {
+        action_type: 'delete',
+        category: 'assignments',
+        category_label: CATEGORY_LABELS.assignments,
+        title: 'لغو تخصیص پشتیبان دانش‌آموز',
+        description: `تخصیص پشتیبان دانش‌آموز شناسه ${studentId || '-'} لغو شد`,
+        method,
+        endpoint: cleanPath,
+      };
+    }
+
+    return {
+      action_type: 'create',
+      category: 'assignments',
+      category_label: CATEGORY_LABELS.assignments,
+      title: 'تخصیص / تغییر پشتیبان دانش‌آموز',
+      description: `دانش‌آموز شناسه ${studentId || '-'} به پشتیبان شناسه ${supporterId || '-'} تخصیص یافت`,
       method,
       endpoint: cleanPath,
     };

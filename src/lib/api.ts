@@ -39,7 +39,26 @@ import type {
   TutoringSession,
   TutoringBoardClass,
   TeacherTutoringStatus,
+  Subscription,
+  SubscriptionListQuery,
+  SubscriptionCreateRequest,
+  SubscriptionUpdateRequest,
+  SubscriptionStatusUpdateRequest,
+  SupportAssignment,
+  AssignmentStudentRow,
+  AssignmentStudentsQuery,
+  AssignStudentRequest,
+  AssignmentHistoryEntry,
+  AssignmentInitialFillRequest,
+  AssignmentInitialFillReport,
 } from '../types';
+import { normalizeSubscription } from './subscriptions';
+import {
+  normalizeAssignmentStudentRow,
+  normalizeSupportAssignment,
+  normalizeAssignmentHistoryEntry,
+  normalizeInitialFillReport,
+} from './assignments';
 import {
   safeTrim,
   safeNumber,
@@ -961,6 +980,221 @@ class FamoApiClient {
     return this.requestJson<null>(`/courses/${id}`, { method: 'DELETE' }, 'خطا در حذف دوره');
   }
 
+  // Subscriptions (/api/v1/subscriptions* & /api/v1/students/{id}/subscriptions)
+  async getSubscriptions(
+    params?: SubscriptionListQuery
+  ): Promise<ApiEnvelope<Subscription[]>> {
+    const query = new URLSearchParams();
+    if (params?.page) query.set('page', String(params.page));
+    query.set('per_page', String(params?.per_page || 50));
+    if (params?.student_id !== undefined && params.student_id !== '') {
+      query.set('student_id', String(params.student_id));
+    }
+    if (params?.course_id !== undefined && params.course_id !== '') {
+      query.set('course_id', String(params.course_id));
+    }
+    if (safeTrim(params?.status)) {
+      query.set('status', safeTrim(params?.status));
+    }
+    if (params?.is_active === 0 || params?.is_active === 1) {
+      query.set('is_active', String(params.is_active));
+    }
+    if (safeTrim(params?.search)) {
+      query.set('search', safeTrim(params?.search));
+    }
+
+    const qs = query.toString();
+    const res = await this.requestJson<unknown>(
+      `/subscriptions${qs ? `?${qs}` : ''}`,
+      {},
+      'خطا در بارگذاری لیست اشتراک‌های دوره'
+    );
+
+    const rawData = res.data;
+    const rawList: Array<Record<string, unknown>> = Array.isArray(rawData)
+      ? (rawData as Array<Record<string, unknown>>)
+      : rawData &&
+          typeof rawData === 'object' &&
+          Array.isArray((rawData as Record<string, unknown>).items)
+        ? ((rawData as Record<string, unknown>).items as Array<Record<string, unknown>>)
+        : rawData &&
+            typeof rawData === 'object' &&
+            Array.isArray((rawData as Record<string, unknown>).subscriptions)
+          ? ((rawData as Record<string, unknown>).subscriptions as Array<Record<string, unknown>>)
+          : [];
+
+    return {
+      ...res,
+      data: rawList.map((item) => normalizeSubscription(item)),
+    };
+  }
+
+  async getStudentSubscriptions(
+    studentId: number,
+    onlyActive?: boolean
+  ): Promise<ApiEnvelope<Subscription[]>> {
+    const query = new URLSearchParams();
+    if (onlyActive) {
+      query.set('only_active', '1');
+    }
+    const qs = query.toString();
+    const res = await this.requestJson<unknown>(
+      `/students/${studentId}/subscriptions${qs ? `?${qs}` : ''}`,
+      {},
+      'خطا در بارگذاری دوره‌های دانش‌آموز'
+    );
+
+    const rawData = res.data;
+    const rawList: Array<Record<string, unknown>> = Array.isArray(rawData)
+      ? (rawData as Array<Record<string, unknown>>)
+      : rawData &&
+          typeof rawData === 'object' &&
+          Array.isArray((rawData as Record<string, unknown>).items)
+        ? ((rawData as Record<string, unknown>).items as Array<Record<string, unknown>>)
+        : rawData &&
+            typeof rawData === 'object' &&
+            Array.isArray((rawData as Record<string, unknown>).subscriptions)
+          ? ((rawData as Record<string, unknown>).subscriptions as Array<Record<string, unknown>>)
+          : [];
+
+    return {
+      ...res,
+      data: rawList.map((item) => normalizeSubscription(item)),
+    };
+  }
+
+  async getSubscriptionById(id: number): Promise<ApiEnvelope<Subscription>> {
+    const res = await this.requestJson<Record<string, unknown>>(
+      `/subscriptions/${id}`,
+      {},
+      'خطا در دریافت اطلاعات اشتراک'
+    );
+    return {
+      ...res,
+      data: normalizeSubscription(res.data || {}),
+    };
+  }
+
+  async createSubscription(
+    payload: SubscriptionCreateRequest
+  ): Promise<ApiEnvelope<Subscription>> {
+    const body: Record<string, unknown> = {
+      student_id: Number(payload.student_id),
+      course_id: Number(payload.course_id),
+    };
+    if (payload.status) body.status = payload.status;
+    if (payload.is_active === 0 || payload.is_active === 1) {
+      body.is_active = payload.is_active;
+    }
+    if (payload.note !== undefined) {
+      body.note = safeTrim(payload.note) || null;
+    }
+    if (payload.started_at !== undefined) {
+      body.started_at = safeTrim(payload.started_at) || null;
+    }
+    if (payload.end_at !== undefined) {
+      body.end_at = safeTrim(payload.end_at) || null;
+    }
+
+    const res = await this.requestJson<Record<string, unknown>>(
+      '/subscriptions',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      'خطا در ثبت اشتراک دوره برای دانش‌آموز'
+    );
+
+    return {
+      ...res,
+      data: normalizeSubscription(res.data || body),
+    };
+  }
+
+  async updateSubscription(
+    id: number,
+    payload: SubscriptionUpdateRequest
+  ): Promise<ApiEnvelope<Subscription>> {
+    const body: Record<string, unknown> = {};
+    if (payload.student_id !== undefined) body.student_id = Number(payload.student_id);
+    if (payload.course_id !== undefined) body.course_id = Number(payload.course_id);
+    if (payload.status !== undefined) body.status = payload.status;
+    if (payload.is_active === 0 || payload.is_active === 1) {
+      body.is_active = payload.is_active;
+    }
+    if (payload.note !== undefined) {
+      body.note = safeTrim(payload.note) || null;
+    }
+    if (payload.started_at !== undefined) {
+      body.started_at = safeTrim(payload.started_at) || null;
+    }
+    if (payload.end_at !== undefined) {
+      body.end_at = safeTrim(payload.end_at) || null;
+    }
+
+    const res = await this.requestJson<Record<string, unknown>>(
+      `/subscriptions/${id}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      },
+      'خطا در ویرایش اطلاعات اشتراک دوره'
+    );
+
+    return {
+      ...res,
+      data: normalizeSubscription(res.data || { id, ...body }),
+    };
+  }
+
+  async updateSubscriptionStatus(
+    id: number,
+    payload: SubscriptionStatusUpdateRequest
+  ): Promise<ApiEnvelope<Subscription>> {
+    const body: Record<string, unknown> = {
+      status: payload.status,
+    };
+    if (payload.note !== undefined) {
+      body.note = safeTrim(payload.note) || null;
+    }
+
+    try {
+      const res = await this.requestJson<Record<string, unknown>>(
+        `/subscriptions/${id}/status`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(body),
+        },
+        'خطا در تغییر وضعیت اشتراک دوره'
+      );
+      return {
+        ...res,
+        data: normalizeSubscription(res.data || { id, ...body }),
+      };
+    } catch {
+      const res = await this.requestJson<Record<string, unknown>>(
+        `/subscriptions/${id}/status`,
+        {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        },
+        'خطا در تغییر وضعیت اشتراک دوره'
+      );
+      return {
+        ...res,
+        data: normalizeSubscription(res.data || { id, ...body }),
+      };
+    }
+  }
+
+  async deleteSubscription(id: number): Promise<ApiEnvelope<null>> {
+    return this.requestJson<null>(
+      `/subscriptions/${id}`,
+      { method: 'DELETE' },
+      'خطا در حذف اشتراک دوره'
+    );
+  }
+
   // Instructors (/api/v1/instructors*)
   async getInstructors(): Promise<ApiEnvelope<Instructor[]>> {
     return this.requestJson<Instructor[]>(
@@ -1390,6 +1624,175 @@ class FamoApiClient {
       { method: 'DELETE' },
       'خطا در حذف پشتیبان'
     );
+  }
+
+  // Student → Supporter Assignments (/api/v1/assignments*)
+  async getAssignmentStudents(
+    params?: AssignmentStudentsQuery
+  ): Promise<ApiEnvelope<AssignmentStudentRow[]>> {
+    const query = new URLSearchParams();
+    query.set('status', params?.status || 'all');
+    if (params?.page) query.set('page', String(params.page));
+    query.set('per_page', String(params?.per_page || 100));
+    if (safeTrim(params?.search)) query.set('search', safeTrim(params?.search));
+    if (safeTrim(params?.field)) query.set('field', safeTrim(params?.field));
+    if (params?.grade !== undefined && params.grade !== '') {
+      query.set('grade', String(params.grade));
+    }
+    if (params?.supporter_id !== undefined && params.supporter_id !== '') {
+      query.set('supporter_id', String(params.supporter_id));
+    }
+    if (params?.include_inactive) {
+      query.set('include_inactive', 'true');
+    }
+
+    const qs = query.toString();
+    const res = await this.requestJson<unknown>(
+      `/assignments/students${qs ? `?${qs}` : ''}`,
+      {},
+      'خطا در بارگذاری لیست وضعیت پشتیبان دانش‌آموزان'
+    );
+
+    const rawData = res.data;
+    const rawList: Array<Record<string, unknown>> = Array.isArray(rawData)
+      ? (rawData as Array<Record<string, unknown>>)
+      : rawData &&
+          typeof rawData === 'object' &&
+          Array.isArray((rawData as Record<string, unknown>).items)
+        ? ((rawData as Record<string, unknown>).items as Array<Record<string, unknown>>)
+        : rawData &&
+            typeof rawData === 'object' &&
+            Array.isArray((rawData as Record<string, unknown>).students)
+          ? ((rawData as Record<string, unknown>).students as Array<Record<string, unknown>>)
+          : [];
+
+    return {
+      ...res,
+      data: rawList.map((item) => normalizeAssignmentStudentRow(item)),
+    };
+  }
+
+  async assignStudentToSupporter(
+    payload: AssignStudentRequest
+  ): Promise<ApiEnvelope<SupportAssignment>> {
+    const body: Record<string, unknown> = {
+      student_id: Number(payload.student_id),
+      supporter_id: Number(payload.supporter_id),
+    };
+    if (payload.note !== undefined) {
+      body.note = safeTrim(payload.note) || null;
+    }
+
+    const res = await this.requestJson<Record<string, unknown>>(
+      '/assignments',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      'خطا در تخصیص دانش‌آموز به پشتیبان'
+    );
+
+    return {
+      ...res,
+      data: normalizeSupportAssignment(res.data || body),
+    };
+  }
+
+  async unassignStudentSupporter(
+    studentId: number
+  ): Promise<ApiEnvelope<SupportAssignment>> {
+    const res = await this.requestJson<Record<string, unknown>>(
+      `/assignments/${studentId}`,
+      { method: 'DELETE' },
+      'خطا در لغو تخصیص پشتیبان دانش‌آموز'
+    );
+    return {
+      ...res,
+      data: normalizeSupportAssignment(res.data || { student_id: studentId, supporter_id: null }),
+    };
+  }
+
+  async getSupporterAssignedStudents(
+    supporterId: number
+  ): Promise<ApiEnvelope<AssignmentStudentRow[]>> {
+    const res = await this.requestJson<unknown>(
+      `/assignments/supporters/${supporterId}/students`,
+      {},
+      'خطا در بارگذاری لیست دانش‌آموزان پشتیبان'
+    );
+
+    const rawData = res.data;
+    const rawList: Array<Record<string, unknown>> = Array.isArray(rawData)
+      ? (rawData as Array<Record<string, unknown>>)
+      : rawData &&
+          typeof rawData === 'object' &&
+          Array.isArray((rawData as Record<string, unknown>).items)
+        ? ((rawData as Record<string, unknown>).items as Array<Record<string, unknown>>)
+        : rawData &&
+            typeof rawData === 'object' &&
+            Array.isArray((rawData as Record<string, unknown>).students)
+          ? ((rawData as Record<string, unknown>).students as Array<Record<string, unknown>>)
+          : [];
+
+    return {
+      ...res,
+      data: rawList.map((item) => normalizeAssignmentStudentRow(item)),
+    };
+  }
+
+  async getStudentAssignmentHistory(
+    studentId: number
+  ): Promise<ApiEnvelope<AssignmentHistoryEntry[]>> {
+    const res = await this.requestJson<unknown>(
+      `/assignments/history/${studentId}`,
+      {},
+      'خطا در بارگذاری تاریخچه پشتیبان دانش‌آموز'
+    );
+
+    const rawData = res.data;
+    const rawList: Array<Record<string, unknown>> = Array.isArray(rawData)
+      ? (rawData as Array<Record<string, unknown>>)
+      : rawData &&
+          typeof rawData === 'object' &&
+          Array.isArray((rawData as Record<string, unknown>).items)
+        ? ((rawData as Record<string, unknown>).items as Array<Record<string, unknown>>)
+        : rawData &&
+            typeof rawData === 'object' &&
+            Array.isArray((rawData as Record<string, unknown>).history)
+          ? ((rawData as Record<string, unknown>).history as Array<Record<string, unknown>>)
+          : [];
+
+    return {
+      ...res,
+      data: rawList.map((item, idx) => normalizeAssignmentHistoryEntry(item, idx)),
+    };
+  }
+
+  async runAssignmentInitialFill(
+    payload?: AssignmentInitialFillRequest
+  ): Promise<ApiEnvelope<AssignmentInitialFillReport>> {
+    const dryRun = payload?.dry_run ?? true;
+    const body: Record<string, unknown> = {
+      dry_run: dryRun,
+      only_unassigned: payload?.only_unassigned ?? true,
+    };
+    if (Array.isArray(payload?.student_ids) && payload.student_ids.length > 0) {
+      body.student_ids = payload.student_ids.map((id) => Number(id));
+    }
+
+    const res = await this.requestJson<Record<string, unknown>>(
+      '/assignments/initial-fill',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      'خطا در اجرای تخصیص خودکار اولیه پشتیبان'
+    );
+
+    return {
+      ...res,
+      data: normalizeInitialFillReport(res.data || {}, dryRun),
+    };
   }
 
   // Exams (/api/v1/exams*)

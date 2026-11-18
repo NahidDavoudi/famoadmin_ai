@@ -816,4 +816,162 @@ export interface TutoringBoardClass {
   open_session_id?: number | null;
 }
 
+// ============================================================================
+// Course Subscriptions (/api/v1/subscriptions* & /api/v1/students/{id}/subscriptions)
+// ============================================================================
+
+export type SubscriptionStatus = 'pending' | 'active' | 'expired' | 'cancelled' | 'rejected';
+
+export interface SubscriptionCourseInfo {
+  id: number;
+  name: string | null;
+  price?: number | string | null;
+  icon?: string | null;
+  description?: string | null;
+}
+
+export interface SubscriptionStudentInfo {
+  id: number;
+  name: string | null;
+  phone?: string | null;
+  grade?: number | null;
+  field?: string | null;
+}
+
+export interface Subscription {
+  id: number;
+  course_id: number;
+  student_id: number;
+  status: SubscriptionStatus;
+  is_active: 0 | 1;
+  note: string | null;
+  started_at: string | null;
+  end_at: string | null;
+  created_at?: string;
+  updated_at?: string;
+  course: SubscriptionCourseInfo;
+  student: SubscriptionStudentInfo;
+}
+
+export interface SubscriptionListQuery {
+  page?: number;
+  per_page?: number;
+  student_id?: number | string;
+  course_id?: number | string;
+  status?: SubscriptionStatus | '';
+  is_active?: 0 | 1 | '';
+  search?: string;
+}
+
+export interface SubscriptionCreateRequest {
+  student_id: number;
+  course_id: number;
+  status?: SubscriptionStatus;
+  is_active?: 0 | 1;
+  note?: string | null;
+  started_at?: string | null;
+  end_at?: string | null;
+}
+
+export interface SubscriptionUpdateRequest {
+  student_id?: number;
+  course_id?: number;
+  status?: SubscriptionStatus;
+  is_active?: 0 | 1;
+  note?: string | null;
+  started_at?: string | null;
+  end_at?: string | null;
+}
+
+export interface SubscriptionStatusUpdateRequest {
+  status: SubscriptionStatus;
+  note?: string | null;
+}
+
+// ============================================================================
+// Student → Supporter Assignments (/api/v1/assignments*)
+// ============================================================================
+
+export type AssignmentFilterStatus = 'all' | 'assigned' | 'unassigned';
+
+export interface SupportAssignment {
+  student_id: number;
+  supporter_id: number | null;
+  supporter_name: string | null;
+  assigned_at: string | null;
+  note?: string | null;
+}
+
+export interface AssignmentStudentRow {
+  student_id: number;
+  name: string;
+  phone: string;
+  national_id?: string | null;
+  grade: number;
+  field: AcademicField | string;
+  is_active: 0 | 1;
+  supporter_id: number | null;
+  supporter_name: string | null;
+  assigned_at: string | null;
+  note: string | null;
+}
+
+export interface AssignmentStudentsQuery {
+  status?: AssignmentFilterStatus;
+  search?: string;
+  field?: string;
+  grade?: number | string;
+  supporter_id?: number | string;
+  include_inactive?: boolean;
+  page?: number;
+  per_page?: number;
+}
+
+export interface AssignStudentRequest {
+  student_id: number;
+  supporter_id: number;
+  note?: string | null;
+}
+
+export interface AssignmentHistoryEntry {
+  id: number;
+  student_id: number;
+  supporter_id: number | null;
+  supporter_name: string | null;
+  assigned_at: string | null;
+  unassigned_at: string | null;
+  is_active: boolean;
+  assigned_by_name?: string | null;
+  note: string | null;
+}
+
+export interface AssignmentInitialFillRequest {
+  dry_run?: boolean;
+  only_unassigned?: boolean;
+  student_ids?: number[];
+}
+
+export interface AssignmentInitialFillItem {
+  student_id: number;
+  student_name: string;
+  grade: number | null;
+  field: string | null;
+  supporter_id: number | null;
+  supporter_name: string | null;
+  outcome: 'assigned' | 'would_assign' | 'skipped' | 'ambiguous' | 'no_match';
+  reason?: string | null;
+}
+
+export interface AssignmentInitialFillReport {
+  dry_run: boolean;
+  total_candidates: number;
+  assigned_count: number;
+  skipped_count: number;
+  ambiguous_count: number;
+  no_match_count: number;
+  items: AssignmentInitialFillItem[];
+}
+
+
+
 
