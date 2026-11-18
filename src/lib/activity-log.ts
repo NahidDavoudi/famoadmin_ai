@@ -591,6 +591,31 @@ export function describeApiMutation(
         endpoint: cleanPath,
       };
     }
+    if (cleanPath.startsWith('/exams/share-links')) {
+      if (method === 'DELETE' || cleanPath.endsWith('/revoke')) {
+        const linkId = cleanPath.split('/')[3] || '-';
+        return {
+          action_type: 'delete',
+          category: 'exams',
+          category_label: CATEGORY_LABELS.exams,
+          title: 'ابطال لینک اشتراک کارنامه',
+          description: `لینک اشتراک‌گذاری کارنامه (شناسه ${linkId}) ابطال شد`,
+          method,
+          endpoint: cleanPath,
+        };
+      }
+      const isSms = cleanPath.endsWith('/send-sms') || Boolean(body.send_sms);
+      const examDate = safeTrim(body.exam_date);
+      return {
+        action_type: isSms ? 'send_sms' : 'create',
+        category: 'exams',
+        category_label: CATEGORY_LABELS.exams,
+        title: isSms ? 'ارسال پیامک لینک کارنامه به والد' : 'ساخت لینک ۱۴ روزه اشتراک کارنامه',
+        description: `${isSms ? 'ساخت و ارسال پیامک لینک کارنامه' : 'صدور لینک اختصاصی ۱۴ روزه کارنامه'} برای دانش‌آموز شناسه ${safeTrim(body.student_id)} (آزمون ${examDate ? formatGregorianToJalali(examDate) : '-'})`,
+        method,
+        endpoint: cleanPath,
+      };
+    }
     const subjectsCount = Array.isArray(body.subjects) ? body.subjects.length : 0;
     const examDate = safeTrim(body.exam_date);
     return {

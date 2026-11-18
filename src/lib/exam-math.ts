@@ -1,4 +1,12 @@
-import type { AcademicField, ExamDetailsResponse, SubjectResult, Student } from '../types';
+import type {
+  AcademicField,
+  ExamComment,
+  ExamDetailsResponse,
+  ExamShareLinkItem,
+  ExamShareLinkStatus,
+  SubjectResult,
+  Student,
+} from '../types';
 import { formatGregorianToJalali } from './jalali';
 
 export interface SubjectDraft {
@@ -426,3 +434,166 @@ export function filterStudentsList(students: Student[], criteria: StudentFilterC
     return true;
   });
 }
+
+/**
+ * Resolves the Persian role label for an exam comment author role.
+ */
+export function getAuthorRoleLabel(role?: string | null): string {
+  switch (safeTrim(role).toLowerCase()) {
+    case 'teacher':
+      return 'استاد';
+    case 'supporter':
+      return 'پشتیبان';
+    case 'admin':
+      return 'مدیر آموزشگاه';
+    default:
+      return 'کادر آموزشی';
+  }
+}
+
+export const getExamCommentRoleLabel = getAuthorRoleLabel;
+
+/**
+ * Normalizes an ExamComment item from the backend.
+ */
+export function normalizeExamComment(raw: Partial<ExamComment> | null | undefined): ExamComment {
+  const roleRaw = safeTrim(raw?.author_role).toLowerCase();
+  const author_role: 'teacher' | 'supporter' | 'admin' | undefined =
+    roleRaw === 'teacher' || roleRaw === 'supporter' || roleRaw === 'admin'
+      ? roleRaw
+      : undefined;
+
+  return {
+    id: safeNumber(raw?.id),
+    student_id: safeNumber(raw?.student_id),
+    exam_date: safeTrim(raw?.exam_date),
+    teacher_user_id: safeNumber(raw?.teacher_user_id),
+    author_name: safeTrim(raw?.author_name) || getAuthorRoleLabel(author_role),
+    author_role,
+    body: safeTrim(raw?.body),
+    created_at: safeTrim(raw?.created_at),
+    updated_at: safeTrim(raw?.updated_at || raw?.created_at),
+  };
+}
+
+/**
+ * Validates an exam comment body according to ExamCommentUpsertRequest (1..2000 chars).
+ */
+export function validateExamCommentBody(body: unknown): string | null {
+  const text = safeTrim(body);
+  if (!text) {
+    return 'متن نظر استاد یا مشاور نمی‌تواند خالی باشد';
+  }
+  if (text.length > 2000) {
+    return 'متن نظر نمی‌تواند بیشتر از ۲۰۰۰ کاراکتر باشد';
+  }
+  return null;
+}
+
+/**
+ * Combines filled per-subject teacher feedback rows and counselor note into a single
+ * clean Persian comment string suitable for saving via PUT /api/v1/exams/comments.
+ */
+export function buildCombinedExamCommentBody(
+  feedbacks: TeacherFeedbackRow[],
+  counselorNote: string
+): string {
+  const parts: string[] = [];
+
+  for (const row of feedbacks || []) {
+    const commentText = safeTrim(row.comment);
+    if (!commentText) continue;
+    const subj = safeTrim(row.subject) || 'درس';
+    const inst = safeTrim(row.instructorName);
+    const header = inst ? `• ${subj} (استاد ${inst}):` : `• ${subj}:`;
+    parts.push(`${header} ${commentText}`);
+  }
+
+  const cleanCounselor = safeTrim(counselorNote);
+  if (cleanCounselor) {
+    parts.push(`جمع‌بندی مشاور: ${cleanCounselor}`);
+  }
+
+  return parts.join('\n').slice(0, 2000);
+}
+
+export const composeCombinedExamComment = buildCombinedExamCommentBody;
+
+/**
+ * Determines the effective status ('active' | 'expired' | 'revoked') of an ExamShareLinkItem.
+ */
+export function resolveShareLinkStatus(
+  link: Partial<ExamShareLinkItem> | null | undefined,
+  nowMs = Date.now()
+): ExamShareLinkStatus {
+  const rawStatus = safeTrim(link?.status).toLowerCase();
+  if (rawStatus === 'revoked' || safeTrim(link?.revoked_at) !== '') {
+    return 'revoked';
+  }
+  if (rawStatus === 'expired') {
+    return 'expired';
+  }
+  const expiresAtStr = safeTrim(link?.expires_at);
+  if (expiresAtStr) {
+    const expMs = Date.parse(expiresAtStr);
+    if (Number.isFinite(expMs) && expMs <= nowMs) {
+      return 'expired';
+    }
+  }
+  return 'active';
+}
+
+/**
+ * Normalizes an ExamShareLinkItem from GET /api/v1/exams/share-links or revoke responses.
+ */
+export function normalizeExamShareLinkItem(
+  raw: Partial<ExamShareLinkItem> | null | undefined,
+  nowMs = Date.now()
+): ExamShareLinkItem {
+  return {
+    id: safeNumber(raw?.id),
+    student_id: safeNumber(raw?.student_id),
+    student_name: safeTrim(raw?.student_name) || undefined,
+    exam_date: safeTrim(raw?.exam_date),
+    status: resolveShareLinkStatus(raw, nowMs),
+    expires_at: safeTrim(raw?.expires_at),
+    revoked_at: safeTrim(raw?.revoked_at) || null,
+    sms_sent_at: safeTrim(raw?.sms_sent_at) || null,
+    last_viewed_at: safeTrim(raw?.last_viewed_at) || null,
+    created_by: raw?.created_by !== null && raw?.created_by !== undefined ? safeNumber(raw.created_by) : null,
+    created_at: safeTrim(raw?.created_at) || undefined,
+  };
+}
+
+
+/**
+ * Filters ExamShareLinkItem list by status ('active' | 'expired' | 'revoked') and search query.
+ */
+export function filterExamShareLinks(
+  links: ExamShareLinkItem[],
+  options?: {
+    status?: '' | ExamShareLinkStatus;
+    search?: string;
+  }
+): ExamShareLinkItem[] {
+  const statusFilter = safeTrim(options?.status);
+  const q = safeTrim(options?.search).toLowerCase();
+
+  return (links || []).filter((item) => {
+    if (statusFilter && item.status !== statusFilter) {
+      return false;
+    }
+    if (q) {
+      const nameMatch = safeTrim(item.student_name).toLowerCase().includes(q);
+      const dateMatch = safeTrim(item.exam_date).toLowerCase().includes(q);
+      const jalaliMatch = formatGregorianToJalali(item.exam_date).includes(q);
+      const idMatch = String(item.id).includes(q) || String(item.student_id).includes(q);
+      if (!nameMatch && !dateMatch && !jalaliMatch && !idMatch) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+

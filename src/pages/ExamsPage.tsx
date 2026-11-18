@@ -11,6 +11,8 @@ import {
   MessageSquarePlus,
   Trash2,
   TrendingUp,
+  Share2,
+  Link2,
 } from 'lucide-react';
 import API from '../lib/api';
 import { formatJalaliLong, formatGregorianToJalali } from '../lib/jalali';
@@ -18,10 +20,12 @@ import {
   safeNumber,
   formatFixed,
   createInitialTeacherFeedbacks,
+  getAuthorRoleLabel,
   type TeacherFeedbackRow,
   type StudentExamTrendPoint,
 } from '../lib/exam-math';
 import type {
+  ExamComment,
   ExamDateSummary,
   ExamDetailsResponse,
   ExamStudentSummary,
@@ -36,6 +40,8 @@ import {
 } from '../components/Charts';
 import { ActionButton } from '../components/FormControls';
 import { DataTable, type Column } from '../components/DataTable';
+import { ExamShareLinksModal } from '../components/ExamShareLinksModal';
+import { ExamCommentsSection } from '../components/ExamCommentsSection';
 
 interface ExamsPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -58,6 +64,13 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
   const [counselorNote, setCounselorNote] = useState('');
   const [trendPoints, setTrendPoints] = useState<StudentExamTrendPoint[]>([]);
   const [trendLoading, setTrendLoading] = useState(false);
+
+  const [shareModalState, setShareModalState] = useState<{
+    isOpen: boolean;
+    studentId?: number | null;
+    studentName?: string | null;
+    examDate?: string | null;
+  }>({ isOpen: false });
 
   const loadDates = useCallback(
     async (month = monthFilter) => {
@@ -132,7 +145,9 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
   const applyDetailsState = (data: ExamDetailsResponse | null) => {
     setDetails(data);
     setTeacherFeedbacks(createInitialTeacherFeedbacks(data));
-    setCounselorNote('');
+    const firstCommentBody =
+      data?.comments && data.comments.length > 0 ? String(data.comments[0].body || '').trim() : '';
+    setCounselorNote(firstCommentBody);
   };
 
   const loadStudentTrend = async (
@@ -219,6 +234,21 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
     setTeacherFeedbacks((prev) => prev.filter((item) => item.id !== id));
   };
 
+  const handleCommentsUpdated = (nextComments: ExamComment[]) => {
+    setDetails((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, comments: nextComments };
+      const dateKey = selectedDate || prev.exam_date || '';
+      if (dateKey && prev.student?.id) {
+        setDetailsCache((cache) => ({
+          ...cache,
+          [`${dateKey}:${prev.student.id}`]: updated,
+        }));
+      }
+      return updated;
+    });
+  };
+
   const handleGoBack = async () => {
     if (view === 'details' && selectedDate) {
       setView('students');
@@ -263,13 +293,48 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
 
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           {view === 'details' && details && (
+            <>
+              <ActionButton
+                type="button"
+                onClick={() =>
+                  setShareModalState({
+                    isOpen: true,
+                    studentId: details.student?.id,
+                    studentName: details.student?.name,
+                    examDate: activeExamDate,
+                  })
+                }
+                icon={<Share2 className="w-4 h-4" />}
+                className="px-4 py-2"
+              >
+                <span>اشتراک با والدین / پیامک</span>
+              </ActionButton>
+              <ActionButton
+                type="button"
+                onClick={handlePrintReportCard}
+                icon={<Printer className="w-4 h-4" />}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                <span>چاپ کارنامه</span>
+              </ActionButton>
+            </>
+          )}
+          {view !== 'details' && (
             <ActionButton
               type="button"
-              onClick={handlePrintReportCard}
-              icon={<Printer className="w-4 h-4" />}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+              variant="secondary"
+              onClick={() =>
+                setShareModalState({
+                  isOpen: true,
+                  studentId: null,
+                  studentName: null,
+                  examDate: selectedDate,
+                })
+              }
+              icon={<Link2 className="w-4 h-4" />}
+              className="px-3.5 py-2"
             >
-              <span>چاپ کارنامه</span>
+              <span>لینک‌های اشتراک کارنامه</span>
             </ActionButton>
           )}
           {view !== 'dates' && (
@@ -371,8 +436,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   key: 'subject_count',
                   header: 'تعداد دروس ثبت‌شده',
                   priority: 'desktop-only',
-                  headerClassName: 'w-36 xl:w-40',
-                  cellClassName: 'w-36 xl:w-40 tabular-nums text-slate-600',
+                  headerClassName: 'hidden lg:table-cell w-36 xl:w-40',
+                  cellClassName: 'hidden lg:table-cell w-36 xl:w-40 tabular-nums text-slate-600',
                   cell: (exam) => `${exam.subject_count} درس`,
                 },
                 {
@@ -380,8 +445,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   header: 'میانگین درصد',
                   mobileLabel: 'میانگین درصد',
                   priority: 'secondary',
-                  headerClassName: 'w-28 xl:w-32',
-                  cellClassName: 'w-28 xl:w-32 tabular-nums',
+                  headerClassName: 'w-24 xl:w-32',
+                  cellClassName: 'w-24 xl:w-32 tabular-nums',
                   cell: (exam) => (
                     <span
                       dir="ltr"
@@ -404,12 +469,13 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                     <ActionButton
                       type="button"
                       variant="ghost"
+                      size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
                         return handleSelectDate(exam.exam_date);
                       }}
                       icon={<Users className="w-4 h-4" />}
-                      className="px-3 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs shrink-0"
+                      className="rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs shrink-0"
                     >
                       <span>مشاهده شرکت‌کنندگان</span>
                     </ActionButton>
@@ -433,17 +499,22 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   priority: 'primary',
                   cellClassName: 'min-w-0 whitespace-normal break-words',
                   cell: (s) => (
-                    <span className="font-semibold text-slate-800 whitespace-normal break-words">
-                      {s.name}
-                    </span>
+                    <div className="min-w-0">
+                      <span className="font-semibold text-slate-800 whitespace-normal break-words">
+                        {s.name}
+                      </span>
+                      <div className="hidden md:block lg:hidden text-xs text-slate-500 font-normal mt-0.5 tabular-nums">
+                        پایه {s.grade} · {s.field}
+                      </div>
+                    </div>
                   ),
                 },
                 {
                   key: 'grade',
                   header: 'پایه',
                   priority: 'desktop-only',
-                  headerClassName: 'w-20',
-                  cellClassName: 'w-20 tabular-nums text-slate-600',
+                  headerClassName: 'hidden lg:table-cell w-20',
+                  cellClassName: 'hidden lg:table-cell w-20 tabular-nums text-slate-600',
                   cell: (s) => `پایه ${s.grade}`,
                 },
                 {
@@ -451,8 +522,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   header: 'رشته',
                   mobileLabel: 'پایه و رشته',
                   priority: 'secondary',
-                  headerClassName: 'w-28',
-                  cellClassName: 'w-28 text-slate-600',
+                  headerClassName: 'hidden lg:table-cell w-28',
+                  cellClassName: 'hidden lg:table-cell w-28 text-slate-600',
                   cell: (s) => (
                     <span>
                       <span className="md:hidden tabular-nums">پایه {s.grade} · </span>
@@ -464,8 +535,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   key: 'subject_count',
                   header: 'تعداد دروس',
                   priority: 'desktop-only',
-                  headerClassName: 'w-28',
-                  cellClassName: 'w-28 tabular-nums text-slate-600',
+                  headerClassName: 'hidden xl:table-cell w-28',
+                  cellClassName: 'hidden xl:table-cell w-28 tabular-nums text-slate-600',
                   cell: (s) => `${s.subject_count} درس`,
                 },
                 {
@@ -473,8 +544,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   header: 'میانگین درصد',
                   mobileLabel: 'میانگین کل',
                   priority: 'secondary',
-                  headerClassName: 'w-28',
-                  cellClassName: 'w-28 tabular-nums',
+                  headerClassName: 'w-20 lg:w-28',
+                  cellClassName: 'w-20 lg:w-28 tabular-nums',
                   cell: (s) => (
                     <span
                       dir="ltr"
@@ -491,36 +562,55 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   header: 'عملیات',
                   priority: 'secondary',
                   isAction: true,
-                  headerClassName: 'w-48',
-                  cellClassName: 'w-48 shrink-0',
+                  headerClassName: 'w-56 lg:w-64',
+                  cellClassName: 'w-56 lg:w-64 shrink-0',
                   cell: (s) => (
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex flex-wrap items-center gap-1">
                       <ActionButton
                         type="button"
                         variant="ghost"
+                        size="sm"
                         onClick={() =>
                           selectedDate
                             ? handleSelectStudentDetails(selectedDate, s.student_id, false)
                             : undefined
                         }
-                        icon={<Eye className="w-4 h-4" />}
-                        className="px-2.5 py-1.5 rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs"
+                        icon={<Eye className="w-3.5 h-3.5" />}
+                        className="rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs"
                       >
                         <span>کارنامه</span>
                       </ActionButton>
                       <ActionButton
                         type="button"
                         variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          setShareModalState({
+                            isOpen: true,
+                            studentId: s.student_id,
+                            studentName: s.name,
+                            examDate: selectedDate,
+                          })
+                        }
+                        icon={<Share2 className="w-3.5 h-3.5" />}
+                        className="rounded-lg text-[#445D84] hover:bg-slate-100 font-medium text-xs"
+                        aria-label={`اشتراک کارنامه ${s.name}`}
+                      >
+                        <span>اشتراک</span>
+                      </ActionButton>
+                      <ActionButton
+                        type="button"
+                        variant="ghost"
+                        size="sm"
                         onClick={() =>
                           selectedDate
                             ? handleSelectStudentDetails(selectedDate, s.student_id, true)
                             : undefined
                         }
-                        icon={<Printer className="w-4 h-4" />}
-                        className="px-2.5 py-1.5 rounded-lg text-emerald-700 hover:bg-emerald-50 font-medium text-xs"
+                        icon={<Printer className="w-3.5 h-3.5" />}
+                        className="rounded-lg text-emerald-700 hover:bg-emerald-50 font-medium text-xs"
                       >
-                        <span className="hidden sm:inline">چاپ کارنامه</span>
-                        <span className="sm:hidden">چاپ</span>
+                        <span>چاپ</span>
                       </ActionButton>
                     </div>
                   ),
@@ -615,8 +705,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                           key: 'row_num',
                           header: 'ردیف',
                           priority: 'desktop-only',
-                          headerClassName: 'text-center w-14',
-                          cellClassName: 'w-14 text-center tabular-nums text-slate-500 text-xs',
+                          headerClassName: 'hidden xl:table-cell text-center w-12',
+                          cellClassName: 'hidden xl:table-cell w-12 text-center tabular-nums text-slate-500 text-xs',
                           cell: (_sub, idx) => idx + 1,
                         },
                         {
@@ -634,8 +724,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                           priority: 'secondary',
                           hideWhenEmpty: true,
                           rawValue: (sub) => sub.chapter,
-                          headerClassName: 'w-32 xl:w-40',
-                          cellClassName: 'w-32 xl:w-40 text-slate-600 whitespace-normal break-words',
+                          headerClassName: 'hidden xl:table-cell w-32',
+                          cellClassName: 'hidden xl:table-cell w-32 text-slate-600 whitespace-normal break-words',
                           cell: (sub) => (
                             <span className="whitespace-normal break-words line-clamp-2 max-w-prose">
                               {sub.chapter || '-'}
@@ -646,46 +736,46 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                           key: 'total_q',
                           header: 'کل سوالات',
                           priority: 'secondary',
-                          headerClassName: 'w-20 text-center',
-                          cellClassName: 'w-20 text-center tabular-nums font-medium',
+                          headerClassName: 'hidden lg:table-cell w-16 text-center',
+                          cellClassName: 'hidden lg:table-cell w-16 text-center tabular-nums font-medium',
                           cell: (sub) => sub.total_q,
                         },
                         {
                           key: 'correct',
                           header: 'صحیح',
                           priority: 'secondary',
-                          headerClassName: 'w-16 text-center',
-                          cellClassName: 'w-16 text-center tabular-nums text-emerald-700 font-bold',
+                          headerClassName: 'w-14 text-center',
+                          cellClassName: 'w-14 text-center tabular-nums text-emerald-700 font-bold',
                           cell: (sub) => sub.correct,
                         },
                         {
                           key: 'wrong',
                           header: 'غلط',
                           priority: 'secondary',
-                          headerClassName: 'w-16 text-center',
-                          cellClassName: 'w-16 text-center tabular-nums text-red-600 font-bold',
+                          headerClassName: 'w-14 text-center',
+                          cellClassName: 'w-14 text-center tabular-nums text-red-600 font-bold',
                           cell: (sub) => sub.wrong,
                         },
                         {
                           key: 'skipped',
                           header: 'نزده',
                           priority: 'secondary',
-                          headerClassName: 'w-16 text-center',
-                          cellClassName: 'w-16 text-center tabular-nums text-slate-600',
+                          headerClassName: 'hidden lg:table-cell w-14 text-center',
+                          cellClassName: 'hidden lg:table-cell w-14 text-center tabular-nums text-slate-600',
                           cell: (sub) => sub.skipped,
                         },
                         {
                           key: 'percentage',
                           header: 'درصد (با نمره منفی)',
                           priority: 'secondary',
-                          headerClassName: 'w-32 text-center',
-                          cellClassName: 'w-32 text-center tabular-nums',
+                          headerClassName: 'w-24 lg:w-28 text-center',
+                          cellClassName: 'w-24 lg:w-28 text-center tabular-nums',
                           cell: (sub) => {
                             const pct = safeNumber(sub.percentage);
                             return (
                               <span
                                 dir="ltr"
-                                className={`inline-block px-2.5 py-1 rounded-lg font-extrabold text-xs ${
+                                className={`inline-block px-2 py-1 rounded-lg font-extrabold text-xs ${
                                   pct >= 50
                                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                                     : 'bg-red-50 text-red-700 border border-red-200'
@@ -700,8 +790,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                           key: 'chart',
                           header: 'نمودار',
                           priority: 'desktop-only',
-                          headerClassName: 'w-24 text-center',
-                          cellClassName: 'w-24 py-1.5 text-center',
+                          headerClassName: 'hidden xl:table-cell w-24 text-center',
+                          cellClassName: 'hidden xl:table-cell w-24 py-1.5 text-center',
                           cell: (sub) => <RadialGauge percentage={safeNumber(sub.percentage)} />,
                         },
                       ] satisfies Column<SubjectResult>[]
@@ -805,7 +895,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                       className="rounded-xl border border-slate-300 bg-slate-50/50 p-3.5 space-y-2.5"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
-                        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[200px]">
+                        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
                           <span className="text-xs font-bold text-[#344868] bg-slate-200/70 px-2 py-0.5 rounded-md tabular-nums">
                             درس {idx + 1}
                           </span>
@@ -815,7 +905,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                             onChange={(e) => handleUpdateFeedback(row.id, 'subject', e.target.value)}
                             placeholder="نام درس..."
                             aria-label={`نام درس ردیف ${idx + 1}`}
-                            className="font-bold text-sm text-slate-800 bg-white border border-slate-200 rounded-lg px-2.5 py-1 focus:outline-none focus:border-[#445D84] min-w-[150px]"
+                            className="font-bold text-sm text-slate-800 bg-white border border-slate-200 rounded-lg px-2.5 py-1 focus:outline-none focus:border-[#445D84] w-28 sm:w-36"
                           />
                           {row.chapter && (
                             <span className="text-xs text-slate-500">({row.chapter})</span>
@@ -846,7 +936,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                             }
                             placeholder="ثبت نام استاد..."
                             aria-label={`نام استاد ردیف ${idx + 1}`}
-                            className="text-xs text-slate-800 bg-white border border-slate-200 rounded-lg px-2.5 py-1 focus:outline-none focus:border-[#445D84] w-40"
+                            className="text-xs text-slate-800 bg-white border border-slate-200 rounded-lg px-2.5 py-1 focus:outline-none focus:border-[#445D84] w-28 sm:w-36"
                           />
                           {teacherFeedbacks.length > 1 && (
                             <button
@@ -887,6 +977,19 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                   className="w-full text-xs sm:text-sm text-slate-800 bg-white border border-slate-200 rounded-lg p-2.5 focus:outline-none focus:border-[#445D84] resize-y"
                 />
               </div>
+
+              {/* 5. Server-Persisted Exam Comments (PUT /api/v1/exams/comments) */}
+              {details.student?.id && activeExamDate && (
+                <ExamCommentsSection
+                  studentId={details.student.id}
+                  examDate={activeExamDate}
+                  comments={details.comments || []}
+                  teacherFeedbacks={teacherFeedbacks}
+                  counselorNote={counselorNote}
+                  onCommentsUpdated={handleCommentsUpdated}
+                  showToast={showToast}
+                />
+              )}
             </div>
 
             {/* =====================================================================
@@ -1160,6 +1263,20 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                         <div className="text-[11px] text-slate-800 whitespace-pre-wrap leading-5">
                           {counselorNote}
                         </div>
+                      ) : details.comments && details.comments.length > 0 ? (
+                        <div className="space-y-1.5">
+                          {details.comments.map((c, idx) => (
+                            <div
+                              key={c.id || idx}
+                              className="text-[11px] text-slate-800 whitespace-pre-wrap leading-5"
+                            >
+                              <span className="font-bold">
+                                {c.author_name || 'کادر آموزشی'} ({getAuthorRoleLabel(c.author_role)}):{' '}
+                              </span>
+                              <span>{c.body}</span>
+                            </div>
+                          ))}
+                        </div>
                       ) : (
                         <div className="space-y-4 py-1">
                           <div className="border-b border-dotted border-slate-300 w-full h-3.5" />
@@ -1186,6 +1303,16 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
           </div>
         )
       )}
+
+      {/* Share Links & Melipayamak SMS Modal */}
+      <ExamShareLinksModal
+        isOpen={shareModalState.isOpen}
+        onClose={() => setShareModalState((prev) => ({ ...prev, isOpen: false }))}
+        studentId={shareModalState.studentId}
+        studentName={shareModalState.studentName}
+        examDate={shareModalState.examDate}
+        showToast={showToast}
+      />
     </div>
   );
 };

@@ -1484,6 +1484,158 @@ class FamoApiClient {
     );
   }
 
+  /**
+   * GET /api/v1/exams/share-links?student_id=...&exam_date=...
+   * OpenAPI operationId: examListShareLinks
+   */
+  async getExamShareLinks(params?: {
+    student_id?: number;
+    exam_date?: string;
+  }): Promise<ApiEnvelope<{ links: import('../types').ExamShareLinkItem[] }>> {
+    const query = new URLSearchParams();
+    if (params?.student_id && Number(params.student_id) > 0) {
+      query.set('student_id', String(params.student_id));
+    }
+    if (params?.exam_date && safeTrim(params.exam_date)) {
+      query.set('exam_date', safeTrim(params.exam_date));
+    }
+    const qs = query.toString();
+    const res = await this.requestJson<
+      { links?: import('../types').ExamShareLinkItem[] } | import('../types').ExamShareLinkItem[]
+    >(
+      `/exams/share-links${qs ? `?${qs}` : ''}`,
+      {},
+      'خطا در بارگذاری لینک‌های اشتراک کارنامه'
+    );
+    const rawLinks = Array.isArray(res.data) ? res.data : res.data?.links || [];
+    const { normalizeExamShareLinkItem } = await import('./exam-math');
+    const links = rawLinks.map((item) => normalizeExamShareLinkItem(item));
+    return {
+      ...res,
+      data: { links },
+    };
+  }
+
+  /**
+   * POST /api/v1/exams/share-links
+   * OpenAPI operationId: examCreateShareLink
+   */
+  async createExamShareLink(
+    payload: import('../types').ExamShareLinkCreateRequest
+  ): Promise<ApiEnvelope<import('../types').ExamShareLinkResponse>> {
+    const body: Record<string, unknown> = {
+      student_id: Number(payload.student_id),
+      exam_date: safeTrim(payload.exam_date),
+      send_sms: Boolean(payload.send_sms),
+    };
+    if (payload.parent_contact_id !== undefined && payload.parent_contact_id !== null) {
+      body.parent_contact_id = Number(payload.parent_contact_id);
+    }
+    if (payload.phone && safeTrim(payload.phone)) {
+      body.phone = safeTrim(payload.phone);
+    }
+
+    return this.requestJson<import('../types').ExamShareLinkResponse>(
+      '/exams/share-links',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      'خطا در ساخت لینک اشتراک کارنامه'
+    );
+  }
+
+  /**
+   * POST /api/v1/exams/share-links/send-sms
+   * OpenAPI operationId: examSendShareLinkSms
+   */
+  async sendExamShareLinkSms(
+    payload: import('../types').ExamShareLinkCreateRequest
+  ): Promise<ApiEnvelope<import('../types').ExamShareLinkResponse>> {
+    const body: Record<string, unknown> = {
+      student_id: Number(payload.student_id),
+      exam_date: safeTrim(payload.exam_date),
+      send_sms: true,
+    };
+    if (payload.parent_contact_id !== undefined && payload.parent_contact_id !== null) {
+      body.parent_contact_id = Number(payload.parent_contact_id);
+    }
+    if (payload.phone && safeTrim(payload.phone)) {
+      body.phone = safeTrim(payload.phone);
+    }
+
+    return this.requestJson<import('../types').ExamShareLinkResponse>(
+      '/exams/share-links/send-sms',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      'خطا در ارسال پیامک لینک کارنامه به والد'
+    );
+  }
+
+  /**
+   * DELETE /api/v1/exams/share-links/{id} (with fallback to POST /api/v1/exams/share-links/{id}/revoke)
+   * OpenAPI operationIds: examRevokeShareLink, examRevokeShareLinkPost
+   */
+  async revokeExamShareLink(
+    id: number
+  ): Promise<ApiEnvelope<{ link: import('../types').ExamShareLinkItem }>> {
+    try {
+      return await this.requestJson<{ link: import('../types').ExamShareLinkItem }>(
+        `/exams/share-links/${Number(id)}`,
+        { method: 'DELETE' },
+        'خطا در ابطال لینک اشتراک کارنامه'
+      );
+    } catch {
+      return this.requestJson<{ link: import('../types').ExamShareLinkItem }>(
+        `/exams/share-links/${Number(id)}/revoke`,
+        { method: 'POST' },
+        'خطا در ابطال لینک اشتراک کارنامه'
+      );
+    }
+  }
+
+  /**
+   * GET /api/v1/public/exam-results/{token}
+   * OpenAPI operationId: publicGetSharedExamResult
+   */
+  async getPublicSharedExamResult(
+    token: string
+  ): Promise<ApiEnvelope<import('../types').PublicSharedExamResult>> {
+    const res = await this.requestJson<import('../types').PublicSharedExamResult>(
+      `/public/exam-results/${encodeURIComponent(safeTrim(token))}`,
+      {},
+      'لینک نتیجه آزمون معتبر نیست یا منقضی شده است'
+    );
+    const { normalizeExamSubject } = await import('./exam-math');
+    const subjects = Array.isArray(res.data?.subjects)
+      ? res.data.subjects.map((s) => normalizeExamSubject(s))
+      : [];
+    const avg_percentage =
+      subjects.length > 0
+        ? Math.round((subjects.reduce((sum, s) => sum + s.percentage, 0) / subjects.length) * 10) /
+          10
+        : safeNumber(res.data?.avg_percentage);
+
+    return {
+      ...res,
+      data: {
+        ...res.data,
+        student_name: safeTrim(res.data?.student_name || res.data?.student?.name),
+        student: {
+          name: safeTrim(res.data?.student?.name || res.data?.student_name),
+          grade: res.data?.student?.grade ?? null,
+          field: res.data?.student?.field ?? null,
+        },
+        exam_date: safeTrim(res.data?.exam_date),
+        subjects,
+        avg_percentage,
+        comments: Array.isArray(res.data?.comments) ? res.data.comments : [],
+      },
+    };
+  }
+
   async getStudentExamTrend(
     studentId: number,
     currentExamDate?: string | null,

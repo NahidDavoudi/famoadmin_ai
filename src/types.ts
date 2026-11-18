@@ -187,6 +187,63 @@ export interface ExamDetailsResponse {
   comments?: ExamComment[];
 }
 
+export type ExamShareLinkStatus = 'active' | 'expired' | 'revoked';
+
+export interface ExamShareLinkCreateRequest {
+  student_id: number;
+  exam_date: string;
+  send_sms?: boolean;
+  parent_contact_id?: number | null;
+  phone?: string | null;
+}
+
+export interface ExamShareLinkResponse {
+  id: number;
+  token: string;
+  url: string;
+  share_path?: string;
+  share_url: string;
+  student_id: number;
+  exam_date: string;
+  expires_at: string;
+  sms_sent?: boolean;
+  sms_sent_at?: string | null;
+  recipient_phone_mask?: string | null;
+}
+
+export interface ExamShareLinkItem {
+  id: number;
+  student_id: number;
+  student_name?: string;
+  exam_date: string;
+  status: ExamShareLinkStatus;
+  expires_at: string;
+  revoked_at?: string | null;
+  sms_sent_at?: string | null;
+  last_viewed_at?: string | null;
+  created_by?: number | null;
+  created_at?: string;
+}
+
+export interface PublicSharedExamResult {
+  student_name: string;
+  student: {
+    name: string;
+    grade?: number | null;
+    field?: string | null;
+  };
+  exam_date: string;
+  subjects: SubjectResult[];
+  avg_percentage: number;
+  comments: Array<{
+    author_name?: string;
+    author_role?: 'teacher' | 'supporter' | 'admin';
+    body: string;
+    created_at?: string;
+    updated_at?: string;
+  }>;
+}
+
 export interface ExamFile {
   id: number;
   student_id: number | null;

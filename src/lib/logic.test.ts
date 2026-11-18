@@ -801,3 +801,121 @@ test('Supporter avatar and description persistence helpers save, retrieve, and r
   assert.equal(getAllLocalSupporterDescriptions()['2'], undefined);
 });
 
+test('Exam comments and 14-day share link helpers validate, compose, normalize, and filter accurately', async () => {
+  const {
+    validateExamCommentBody,
+    buildCombinedExamCommentBody,
+    getAuthorRoleLabel,
+    normalizeExamComment,
+    normalizeExamShareLinkItem,
+    filterExamShareLinks,
+  } = await import('./exam-math');
+  const { describeApiMutation } = await import('./activity-log');
+
+  assert.equal(validateExamCommentBody('   '), 'متن نظر استاد یا مشاور نمی‌تواند خالی باشد');
+  assert.equal(validateExamCommentBody('تحلیل عالی آزمون'), null);
+  assert.equal(
+    validateExamCommentBody('الف'.repeat(2001)),
+    'متن نظر نمی‌تواند بیشتر از ۲۰۰۰ کاراکتر باشد'
+  );
+
+  const combined = buildCombinedExamCommentBody(
+    [
+      {
+        id: '1',
+        subject: 'فیزیک',
+        chapter: 'دینامیک',
+        percentage: 72.5,
+        instructorName: 'حسینی',
+        comment: 'تسلط خوب روی تست‌های زمان‌دار.',
+      },
+      {
+        id: '2',
+        subject: 'شیمی',
+        chapter: '',
+        percentage: 45,
+        instructorName: '',
+        comment: 'نیاز به مرور استوکیومتری.',
+      },
+    ],
+    'ساعت مطالعه هفتگی ۱۰ درصد افزایش یابد.'
+  );
+
+  assert.ok(combined.includes('• فیزیک (استاد حسینی): تسلط خوب روی تست‌های زمان‌دار.'));
+  assert.ok(combined.includes('• شیمی: نیاز به مرور استوکیومتری.'));
+  assert.ok(combined.includes('جمع‌بندی مشاور: ساعت مطالعه هفتگی ۱۰ درصد افزایش یابد.'));
+
+  assert.equal(getAuthorRoleLabel('teacher'), 'استاد');
+  assert.equal(getAuthorRoleLabel('supporter'), 'پشتیبان');
+  assert.equal(getAuthorRoleLabel('admin'), 'مدیر آموزشگاه');
+  assert.equal(getAuthorRoleLabel(null), 'کادر آموزشی');
+
+  const normalizedComment = normalizeExamComment({
+    id: 7,
+    student_id: 101,
+    exam_date: '2026-05-08',
+    teacher_user_id: 3,
+    author_role: 'teacher',
+    body: '  پیشرفت عالی در درس فیزیک  ',
+    created_at: '2026-05-08T11:00:00Z',
+  });
+  assert.equal(normalizedComment.author_name, 'استاد');
+  assert.equal(normalizedComment.body, 'پیشرفت عالی در درس فیزیک');
+
+  const nowMs = Date.parse('2026-05-10T10:00:00Z');
+  const activeLink = normalizeExamShareLinkItem(
+    {
+      id: 11,
+      student_id: 101,
+      student_name: 'سارا محمدی',
+      exam_date: '2026-05-08',
+      expires_at: '2026-05-22T10:00:00Z',
+      sms_sent_at: '2026-05-08T12:30:00Z',
+    },
+    nowMs
+  );
+  assert.equal(activeLink.status, 'active');
+
+  const expiredLink = normalizeExamShareLinkItem(
+    {
+      id: 12,
+      student_id: 102,
+      student_name: 'امیر رضایی',
+      exam_date: '2026-04-15',
+      expires_at: '2026-04-29T10:00:00Z',
+    },
+    nowMs
+  );
+  assert.equal(expiredLink.status, 'expired');
+
+  const revokedLink = normalizeExamShareLinkItem(
+    {
+      id: 13,
+      student_id: 103,
+      student_name: 'مریم کریمی',
+      exam_date: '2026-05-08',
+      expires_at: '2026-05-22T10:00:00Z',
+      revoked_at: '2026-05-09T08:00:00Z',
+    },
+    nowMs
+  );
+  assert.equal(revokedLink.status, 'revoked');
+
+  const allLinks = [activeLink, expiredLink, revokedLink];
+  assert.equal(filterExamShareLinks(allLinks, { status: 'active' }).length, 1);
+  assert.equal(filterExamShareLinks(allLinks, { status: 'revoked' }).length, 1);
+  assert.equal(filterExamShareLinks(allLinks, { search: 'سارا' }).length, 1);
+
+  const shareSmsLog = describeApiMutation('POST', '/exams/share-links/send-sms', {
+    student_id: 101,
+    exam_date: '2026-05-08',
+  });
+  assert.equal(shareSmsLog?.action_type, 'send_sms');
+  assert.equal(shareSmsLog?.category, 'exams');
+
+  const revokeLog = describeApiMutation('DELETE', '/exams/share-links/11');
+  assert.equal(revokeLog?.action_type, 'delete');
+  assert.equal(revokeLog?.title, 'ابطال لینک اشتراک کارنامه');
+});
+
+
