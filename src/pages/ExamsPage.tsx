@@ -1284,10 +1284,10 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
               <div className="border-b-2 border-[#344868] pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold text-slate-500 mb-0.5">
-                    آموزشگاه علمی و کنکور فامو
+                    گروه آموزشی فامو
                   </p>
                   <h2 className="text-lg font-extrabold text-[#344868]">
-                    کارنامه تحلیلی آزمون و برگه‌ی ارزیابی اساتید
+                    کارنامه تحلیلی آزمون و فرم ارزیابی اساتید
                   </h2>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2">
@@ -1698,21 +1698,16 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
                   <tr>
                     <td className="border-2 border-slate-700 p-2 bg-slate-100 text-start w-2/3">
                       <div className="text-[10px] font-bold text-slate-600">
-                        آموزشگاه علمی و کنکور فامو
+                        گروه آموزشی فامو
                       </div>
                       <div className="text-sm font-extrabold text-slate-900">
-                        کارنامه تحلیلی آزمون هفتگی و برگه‌ی ارزیابی اساتید
+                        کارنامه تحلیلی آزمون هفتگی و فرم ارزیابی اساتید
                       </div>
                     </td>
-                    <td className="border-2 border-slate-700 p-2 bg-slate-50 text-end w-1/3">
+                    <td className="border-2 border-slate-700 p-2 bg-slate-50 text-end w-1/3 align-middle">
                       <div className="text-[11px] font-bold text-slate-800">
                         تاریخ آزمون: {formatJalaliLong(activeExamDate)}
                       </div>
-                      {activeExamDate && (
-                        <div className="text-[10px] text-slate-600 tabular-nums mt-0.5">
-                          تاریخ عددی: {formatGregorianToJalali(activeExamDate)}
-                        </div>
-                      )}
                     </td>
                   </tr>
                 </tbody>
@@ -1812,75 +1807,65 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
                 </table>
               </div>
 
-              {/* 2. Last 5 Exams Visual Trend Line Chart + Summary Table (100% Print-Safe) */}
+              {/* 2. Last 5 Exams Summary Table (Right) + Visual Trend Line Chart (Left) Side-by-Side */}
               {effectiveTrendPoints.length > 0 && (
                 <div className="mb-3 print-avoid-break">
-                  <div className="text-xs font-extrabold text-slate-900 mb-1">
+                  <div className="text-xs font-extrabold text-slate-900 mb-1.5">
                     ۲. نمودار و روند تغییرات میانگین درصد دانش‌آموز در {effectiveTrendPoints.length}{' '}
                     آزمون اخیر:
                   </div>
-                  <table className="w-full border-collapse mb-1.5">
-                    <tbody>
-                      <tr>
-                        <td className="border border-slate-400 p-2 bg-white" dir="ltr">
-                          <PrintableStudentTrendChart data={effectiveTrendPoints} />
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  <table className="w-full border-collapse text-center text-[10px]">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700">
-                        <th className="border border-slate-400 py-1 px-2 text-start">شاخص</th>
-                        {effectiveTrendPoints.map((pt, i) => (
-                          <th
-                            key={pt.exam_date}
-                            className="border border-slate-400 py-1 px-2 tabular-nums"
-                          >
-                            آزمون {i + 1} ({pt.jalali_date})
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td className="border border-slate-400 py-1 px-2 text-start font-bold">
-                          میانگین درصد
-                        </td>
-                        {effectiveTrendPoints.map((pt) => (
-                          <td
-                            key={pt.exam_date}
-                            className="border border-slate-400 py-1 px-2 font-extrabold tabular-nums"
-                          >
-                            <span dir="ltr" className="inline-block">
-                              {pt.avg_percentage.toFixed(1)}%
-                            </span>
-                          </td>
-                        ))}
-                      </tr>
-                      <tr>
-                        <td className="border border-slate-400 py-1 px-2 text-start font-semibold text-slate-600">
-                          تغییر نسبت به آزمون قبل
-                        </td>
-                        {effectiveTrendPoints.map((pt) => (
-                          <td
-                            key={pt.exam_date}
-                            className="border border-slate-400 py-1 px-2 tabular-nums text-slate-700"
-                          >
-                            {pt.delta === null ? (
-                              '-'
-                            ) : (
-                              <span dir="ltr" className="inline-block font-bold">
-                                {pt.delta > 0
-                                  ? `+${pt.delta.toFixed(1)}%`
-                                  : `${pt.delta.toFixed(1)}%`}
-                              </span>
-                            )}
-                          </td>
-                        ))}
-                      </tr>
-                    </tbody>
-                  </table>
+                  <div className="grid grid-cols-12 gap-2.5 items-stretch" dir="rtl">
+                    {/* Right side in RTL: Trend Metrics Table (جدول شاخص‌ها) */}
+                    <div className="col-span-5">
+                      <table className="w-full h-full border-collapse text-center text-[10px]">
+                        <thead>
+                          <tr className="bg-slate-100 text-slate-700">
+                            <th className="border border-slate-400 py-1 px-1.5 text-start">
+                              شاخص / آزمون
+                            </th>
+                            <th className="border border-slate-400 py-1 px-1.5 w-16">میانگین</th>
+                            <th className="border border-slate-400 py-1 px-1.5 w-16">تغییر</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {effectiveTrendPoints.map((pt, i) => (
+                            <tr key={pt.exam_date}>
+                              <td className="border border-slate-400 py-1 px-1.5 text-start font-bold text-slate-800">
+                                <span>آزمون {i + 1}</span>
+                                <span className="text-[9px] font-normal text-slate-500 tabular-nums mr-1">
+                                  ({pt.jalali_date})
+                                </span>
+                              </td>
+                              <td className="border border-slate-400 py-1 px-1.5 font-extrabold tabular-nums">
+                                <span dir="ltr" className="inline-block">
+                                  {pt.avg_percentage.toFixed(1)}%
+                                </span>
+                              </td>
+                              <td className="border border-slate-400 py-1 px-1.5 tabular-nums text-slate-700">
+                                {pt.delta === null ? (
+                                  '-'
+                                ) : (
+                                  <span dir="ltr" className="inline-block font-bold">
+                                    {pt.delta > 0
+                                      ? `+${pt.delta.toFixed(1)}%`
+                                      : `${pt.delta.toFixed(1)}%`}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Left side in RTL: Trend Line Chart (نمودار روند تغییرات) */}
+                    <div
+                      className="col-span-7 border border-slate-400 p-1.5 bg-white flex items-center justify-center"
+                      dir="ltr"
+                    >
+                      <PrintableStudentTrendChart data={effectiveTrendPoints} compact />
+                    </div>
+                  </div>
                 </div>
               )}
 

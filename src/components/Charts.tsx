@@ -484,18 +484,19 @@ export const StudentExamTrendChart: React.FC<{
  */
 export const PrintableStudentTrendChart: React.FC<{
   data: StudentExamTrendPoint[];
-}> = ({ data }) => {
+  compact?: boolean;
+}> = ({ data, compact = false }) => {
   if (!data || data.length === 0) return null;
 
   const minVal = Math.min(0, ...data.map((d) => d.avg_percentage));
   const yMin = minVal < 0 ? Math.max(-40, Math.floor((minVal - 5) / 10) * 10) : 0;
 
-  const svgW = 660;
-  const svgH = 148;
-  const padL = 46;
-  const padR = 36;
+  const svgW = compact ? 420 : 660;
+  const svgH = compact ? 160 : 148;
+  const padL = compact ? 38 : 46;
+  const padR = compact ? 28 : 36;
   const padT = 24;
-  const padB = 30;
+  const padB = compact ? 34 : 30;
   const plotW = svgW - padL - padR;
   const plotH = svgH - padT - padB;
   const range = 100 - yMin || 100;
@@ -522,7 +523,7 @@ export const PrintableStudentTrendChart: React.FC<{
     <svg
       viewBox={`0 0 ${svgW} ${svgH}`}
       preserveAspectRatio="xMidYMid meet"
-      className="w-full h-[132px] block select-none"
+      className={compact ? 'w-full h-auto max-h-[168px] block select-none' : 'w-full h-[132px] block select-none'}
       role="img"
       aria-label="نمودار خطی روند تغییرات درصد در آزمون‌های اخیر"
     >
@@ -563,9 +564,9 @@ export const PrintableStudentTrendChart: React.FC<{
               strokeOpacity={isTarget ? 0.65 : 1}
             />
             <text
-              x={padL - 6}
+              x={padL - 5}
               y={y + 3}
-              fontSize="9.5"
+              fontSize={compact ? '8.5' : '9.5'}
               fontWeight={isZero || isTarget ? '700' : '500'}
               fill={isTarget ? '#047857' : '#475569'}
               textAnchor="end"
@@ -611,7 +612,7 @@ export const PrintableStudentTrendChart: React.FC<{
         const isPositive = d.avg_percentage >= 50;
         const dotColor = isPositive ? '#059669' : '#dc2626';
         const labelText = `${d.avg_percentage.toFixed(1)}%`;
-        const badgeW = 42;
+        const badgeW = compact ? 38 : 42;
         const badgeH = 15;
         // Place badge above point unless point is very close to top border
         const placeBelow = y < padT + 18;
@@ -667,7 +668,7 @@ export const PrintableStudentTrendChart: React.FC<{
             <text
               x={x}
               y={badgeY + 10.5}
-              fontSize="9.5"
+              fontSize={compact ? '8.5' : '9.5'}
               fontWeight="800"
               fill={isPositive ? '#065f46' : '#991b1b'}
               textAnchor="middle"
@@ -679,7 +680,7 @@ export const PrintableStudentTrendChart: React.FC<{
             <text
               x={x}
               y={padT + plotH + 13}
-              fontSize="9.5"
+              fontSize={compact ? '8.5' : '9.5'}
               fontWeight={d.is_current ? '800' : '600'}
               fill={d.is_current ? '#0f172a' : '#334155'}
               textAnchor="middle"
@@ -689,7 +690,7 @@ export const PrintableStudentTrendChart: React.FC<{
             <text
               x={x}
               y={padT + plotH + 24}
-              fontSize="8.5"
+              fontSize={compact ? '7.8' : '8.5'}
               fill="#64748b"
               textAnchor="middle"
             >
