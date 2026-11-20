@@ -37,11 +37,14 @@ import type {
   AppointmentSmsPreviewSummary,
   AppointmentSmsLogItem,
   AppointmentSmsLogStatus,
+  AppointmentSortKey,
+  AppointmentStatus,
   ParentContactRecord,
   ParentRelationship,
   RemedialAttendanceState,
   RemedialClassColumn,
   RemedialStudentAttendance,
+  SortOrder,
   WeeklySessionInfo,
   ToastType,
   AttendanceEntry,
@@ -52,6 +55,8 @@ import type {
 } from '../types';
 import { API } from '../lib/api';
 import { JalaliDatePicker } from '../components/JalaliDatePicker';
+import { DataTable, type Column } from '../components/DataTable';
+import { useTableSort, type TableSortConfig, type TableSortState } from '../lib/table-sort';
 import {
   formatGregorianToJalali,
   getTodayGregorianIso,
@@ -77,7 +82,38 @@ interface AppointmentsPageProps {
   showToast: (message: string, type?: ToastType) => void;
 }
 
-type MainTab = 'appointments' | 'remedial';
+type MainTab = 'appointments' | 'list' | 'remedial';
+
+const APPOINTMENTS_SORT_CONFIG: TableSortConfig<AppointmentSortKey> = {
+  allowedKeys: ['appointment_date', 'time', 'student', 'status'],
+  defaultSort: 'appointment_date',
+  defaultOrder: 'desc',
+  paginationParam: 'perPage',
+  columns: [
+    { key: 'appointment_date', label: 'تاریخ نوبت', defaultOrder: 'desc' },
+    { key: 'time', label: 'ساعت نوبت', defaultOrder: 'asc' },
+    { key: 'student', label: 'دانش‌آموز', defaultOrder: 'asc' },
+    { key: 'status', label: 'وضعیت', defaultOrder: 'desc' },
+  ],
+};
+
+const APPOINTMENT_STATUS_LABELS: Record<string, { label: string; cls: string }> = {
+  scheduled: { label: 'زمان‌بندی‌شده', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  confirmed: { label: 'تأییدشده', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  pending: { label: 'در انتظار', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  completed: { label: 'انجام‌شده', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  done: { label: 'انجام‌شده', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  cancelled: { label: 'لغوشده', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+  canceled: { label: 'لغوشده', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+  absent: { label: 'غایب', cls: 'bg-slate-100 text-slate-600 border-slate-200' },
+};
+
+function getInitialAppointmentsSubtab(): MainTab {
+  if (typeof window === 'undefined') return 'appointments';
+  const sub = new URLSearchParams(window.location.search).get('subtab');
+  if (sub === 'list' || sub === 'remedial') return sub;
+  return 'appointments';
+}
 
 type SpreadsheetField = 'تجربی' | 'ریاضی' | 'انسانی';
 
@@ -139,7 +175,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
   const initialSatIso = useMemo(() => getSaturdayOfWeek(todayIso), [todayIso]);
 
   // Navigation & Compact Week Selection
-  const [activeTab, setActiveTab] = useState<MainTab>('appointments');
+  const [activeTab, setActiveTab] = useState<MainTab>(getInitialAppointmentsSubtab);
   const [weeks, setWeeks] = useState<WeeklySessionInfo[]>(() => [
     buildWeekSession(initialSatIso, 1, 'هفته جاری'),
   ]);
@@ -154,9 +190,15 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     Record<string, Record<number, string>>
   >({});
   const [allAppointments, setAllAppointments] = useState<AppointmentRecord[]>([]);
+  const [listAppointments, setListAppointments] = useState<AppointmentRecord[]>([]);
+  const [listLoading, setListLoading] = useState<boolean>(false);
+  const [listPage, setListPage] = useState<number>(1);
+  const [listTotalPages, setListTotalPages] = useState<number>(1);
+  const [listTotal, setListTotal] = useState<number>(0);
   const [isSubmittingSheet, setIsSubmittingSheet] = useState<boolean>(false);
   const [isSavingOnly, setIsSavingOnly] = useState<boolean>(false);
   const timeInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
+  const listSortRef = useRef<ReturnType<typeof useTableSort<AppointmentSortKey>> | null>(null);
 
   // Backend Data State
   const [items, setItems] = useState<AppointmentSmsPreviewItem[]>([]);
@@ -459,10 +501,117 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
     fetchWeekData(currentWeek.week_date, false);
   }, [currentWeek.week_date, fetchWeekData]);
 
+  const fetchPaginatedAppointments = useCallback(
+    async (
+      targetPage?: number,
+      sortOverride?: { sort?: AppointmentSortKey; order?: SortOrder },
+      silent = false
+    ) => {
+      const pageToLoad = targetPage ?? listSortRef.current?.page ?? 1;
+      const activeSort = sortOverride?.sort ?? listSortRef.current?.sort ?? 'appointment_date';
+      const activeOrder = sortOverride?.order ?? listSortRef.current?.order ?? 'desc';
+      const guard = listSortRef.current?.startRequest();
+      listSortRef.current?.setPage(pageToLoad);
+
+      if (!silent) {
+        setListLoading(true);
+      }
+      try {
+        const res = await API.getAppointmentsList(
+          {
+            page: pageToLoad,
+            perPage: 20,
+            sort: activeSort,
+            order: activeOrder,
+          },
+          guard?.signal
+        );
+        if (guard && !guard.isLatest()) return;
+
+        const rows = res.data || [];
+        setListAppointments(rows);
+        setListPage(res.pagination?.page || pageToLoad);
+        setListTotalPages(Math.max(1, res.pagination?.total_pages || 1));
+        setListTotal(res.pagination?.total ?? rows.length);
+        listSortRef.current?.syncFromResponse(res.pagination);
+      } catch (err) {
+        if ((err as Error)?.name === 'AbortError' || (guard && !guard.isLatest())) {
+          return;
+        }
+        if (!silent) {
+          showToast((err as Error)?.message || 'خطا در بارگذاری لیست نوبت‌ها', 'error');
+        }
+      } finally {
+        if ((!guard || guard.isLatest()) && !silent) {
+          setListLoading(false);
+        }
+      }
+    },
+    [showToast]
+  );
+
+  const listSortCtrl = useTableSort<AppointmentSortKey>(
+    { ...APPOINTMENTS_SORT_CONFIG, isActive: activeTab === 'list' },
+    useCallback(
+      (next: TableSortState<AppointmentSortKey>) => {
+        fetchPaginatedAppointments(next.page, { sort: next.sort, order: next.order });
+      },
+      [fetchPaginatedAppointments]
+    )
+  );
+  listSortRef.current = listSortCtrl;
+
+  const switchMainTab = useCallback(
+    (nextTab: MainTab) => {
+      setActiveTab(nextTab);
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        if (nextTab === 'appointments') {
+          params.delete('subtab');
+        } else {
+          params.set('subtab', nextTab);
+        }
+        if (nextTab !== 'list') {
+          params.delete('sort');
+          params.delete('order');
+          params.delete('page');
+        }
+        const qs = params.toString();
+        const nextUrl = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`;
+        window.history.replaceState(window.history.state, '', nextUrl);
+      }
+      if (nextTab === 'list') {
+        fetchPaginatedAppointments(listSortRef.current?.page ?? 1, {
+          sort: listSortRef.current?.sort,
+          order: listSortRef.current?.order,
+        });
+      }
+    },
+    [fetchPaginatedAppointments]
+  );
+
   useEffect(() => {
     if (activeTab === 'remedial') {
       fetchRemedialAndAttendanceData(remedialDate);
+    } else if (activeTab === 'list') {
+      fetchPaginatedAppointments(listSortCtrl.page, {
+        sort: listSortCtrl.sort,
+        order: listSortCtrl.order,
+      });
+      // Live polling every 30s reuses current sort/order/page without resetting state
+      const timer = window.setInterval(() => {
+        fetchPaginatedAppointments(
+          listSortRef.current?.page ?? 1,
+          {
+            sort: listSortRef.current?.sort,
+            order: listSortRef.current?.order,
+          },
+          true
+        );
+      }, 30000);
+      return () => window.clearInterval(timer);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, remedialDate, fetchRemedialAndAttendanceData]);
 
   // Navigate to previous / next week dynamically
@@ -1534,11 +1683,11 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
             </button>
           </div>
 
-          {/* Sub-navigation: Appointments Spreadsheet vs Remedial Matrix */}
-          <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200/70">
+          {/* Sub-navigation: Appointments Spreadsheet vs Paginated List vs Remedial Matrix */}
+          <div className="inline-flex flex-wrap p-1 rounded-xl bg-slate-100 border border-slate-200/70">
             <button
               type="button"
-              onClick={() => setActiveTab('appointments')}
+              onClick={() => switchMainTab('appointments')}
               className={`min-h-[40px] flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                 activeTab === 'appointments'
                   ? 'bg-[#445D84] text-white'
@@ -1550,7 +1699,19 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('remedial')}
+              onClick={() => switchMainTab('list')}
+              className={`min-h-[40px] flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'list'
+                  ? 'bg-[#445D84] text-white'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ClipboardList className="w-3.5 h-3.5" />
+              <span>لیست نوبت‌ها</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => switchMainTab('remedial')}
               className={`min-h-[40px] flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                 activeTab === 'remedial'
                   ? 'bg-[#445D84] text-white'
@@ -1576,14 +1737,23 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
 
             <button
               type="button"
-              onClick={() => fetchWeekData(currentWeek.week_date, true)}
-              disabled={isLoading}
+              onClick={() => {
+                if (activeTab === 'list') {
+                  fetchPaginatedAppointments(listSortRef.current?.page ?? 1, {
+                    sort: listSortRef.current?.sort,
+                    order: listSortRef.current?.order,
+                  });
+                } else {
+                  fetchWeekData(currentWeek.week_date, true);
+                }
+              }}
+              disabled={isLoading || listLoading}
               aria-label="بروزرسانی از سرور"
               title="بروزرسانی از سرور"
               className="min-w-[40px] min-h-[40px] rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 inline-flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
             >
               <RefreshCw
-                className={`w-4 h-4 ${isLoading ? 'animate-spin text-[#445D84]' : ''}`}
+                className={`w-4 h-4 ${isLoading || listLoading ? 'animate-spin text-[#445D84]' : ''}`}
               />
             </button>
           </div>
@@ -2160,6 +2330,146 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
               </button>
             </div>
           </div>
+        </div>
+      ) : activeTab === 'list' ? (
+        /* Paginated & Sortable Appointments List View (GET /api/v1/appointments) */
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs">
+          {listLoading ? (
+            <div className="p-4 space-y-3">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <div key={n} className="h-14 rounded-xl bg-slate-100 animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <DataTable<AppointmentRecord>
+              tableAriaLabel="جدول لیست نوبت‌ها"
+              data={listAppointments}
+              rowKey={(ap) => ap.id}
+              sortController={listSortCtrl}
+              emptyState={
+                <div className="p-12 text-center">
+                  <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-3 text-slate-400">
+                    <Calendar className="w-8 h-8" aria-hidden="true" />
+                  </div>
+                  <p className="text-sm font-bold text-slate-700">نوبتی برای نمایش یافت نشد</p>
+                </div>
+              }
+              columns={
+                [
+                  {
+                    key: 'student',
+                    header: 'دانش‌آموز',
+                    sortKey: 'student',
+                    priority: 'primary',
+                    cellClassName: 'min-w-0 whitespace-normal break-words',
+                    cell: (ap) => (
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-800">
+                          {ap.student_name || `دانش‌آموز #${toPersianDigits(ap.student_id)}`}
+                        </div>
+                        {ap.supporter_name && (
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            پشتیبان: {ap.supporter_name}
+                          </div>
+                        )}
+                      </div>
+                    ),
+                  },
+                  {
+                    key: 'appointment_date',
+                    header: 'تاریخ نوبت',
+                    sortKey: 'appointment_date',
+                    priority: 'secondary',
+                    headerClassName: 'w-32 text-center',
+                    cellClassName: 'w-32 text-center tabular-nums text-xs font-medium text-slate-700',
+                    cell: (ap) =>
+                      ap.appointment_date
+                        ? toPersianDigits(formatGregorianToJalali(ap.appointment_date))
+                        : '-',
+                  },
+                  {
+                    key: 'time',
+                    header: 'ساعت نوبت',
+                    sortKey: 'time',
+                    priority: 'secondary',
+                    headerClassName: 'w-28 text-center',
+                    cellClassName: 'w-28 text-center tabular-nums font-mono text-xs font-bold text-slate-800',
+                    cell: (ap) => {
+                      const st = ap.start_time ? String(ap.start_time).slice(0, 5) : '';
+                      const et = ap.end_time ? String(ap.end_time).slice(0, 5) : '';
+                      if (!st) return '-';
+                      return (
+                        <span dir="ltr">
+                          {toPersianDigits(et ? `${st} - ${et}` : st)}
+                        </span>
+                      );
+                    },
+                  },
+                  {
+                    key: 'status',
+                    header: 'وضعیت',
+                    sortKey: 'status',
+                    priority: 'secondary',
+                    headerClassName: 'w-32 text-center',
+                    cellClassName: 'w-32 text-center',
+                    cell: (ap) => {
+                      const meta = APPOINTMENT_STATUS_LABELS[ap.status] || {
+                        label: ap.status || '-',
+                        cls: 'bg-slate-100 text-slate-600 border-slate-200',
+                      };
+                      return (
+                        <span
+                          className={`inline-block px-2.5 py-0.5 rounded-lg text-[11px] font-bold border ${meta.cls}`}
+                        >
+                          {meta.label}
+                        </span>
+                      );
+                    },
+                  },
+                  {
+                    key: 'description',
+                    header: 'توضیحات',
+                    priority: 'desktop-only',
+                    headerClassName: 'hidden lg:table-cell',
+                    cellClassName: 'hidden lg:table-cell text-xs text-slate-500 whitespace-normal break-words',
+                    value: (ap) => ap.description || '-',
+                    cell: (ap) => ap.description || '-',
+                  },
+                ] satisfies Column<AppointmentRecord>[]
+              }
+            />
+          )}
+
+          {listTotalPages > 1 && (
+            <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+              <span className="tabular-nums">
+                کل {toPersianDigits(listTotal)} رکورد • صفحه {toPersianDigits(listPage)} از{' '}
+                {toPersianDigits(listTotalPages)}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <ActionButton
+                  type="button"
+                  variant="ghost"
+                  disabled={listPage <= 1 || listLoading}
+                  onClick={() => fetchPaginatedAppointments(listPage - 1)}
+                  aria-label="صفحه قبلی"
+                  className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </ActionButton>
+                <ActionButton
+                  type="button"
+                  variant="ghost"
+                  disabled={listPage >= listTotalPages || listLoading}
+                  onClick={() => fetchPaginatedAppointments(listPage + 1)}
+                  aria-label="صفحه بعدی"
+                  className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </ActionButton>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         /* Remedial Classes & Daily Attendance Matrix View (/api/v1/tutoring* & /api/v1/attendance*) */

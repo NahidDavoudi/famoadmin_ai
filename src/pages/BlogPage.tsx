@@ -17,18 +17,34 @@ import {
   Quote,
   Code,
   RemoveFormatting,
+  ChevronRight,
+  ChevronLeft,
 } from 'lucide-react';
 import API from '../lib/api';
-import { formatGregorianToJalali } from '../lib/jalali';
+import { formatGregorianToJalali, toPersianDigits } from '../lib/jalali';
+import { useTableSort, type TableSortConfig, type TableSortState } from '../lib/table-sort';
 import {
   stripHtmlToText,
   validateBlogPostForm,
   type FieldErrors,
 } from '../lib/form-validation';
-import type { BlogPost, ToastType } from '../types';
+import type { BlogPost, BlogSortKey, SortOrder, ToastType } from '../types';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
 import { DataTable, type Column } from '../components/DataTable';
+
+const BLOG_SORT_CONFIG: TableSortConfig<BlogSortKey> = {
+  allowedKeys: ['published_at', 'title', 'views', 'status'],
+  defaultSort: 'published_at',
+  defaultOrder: 'desc',
+  paginationParam: 'per_page',
+  columns: [
+    { key: 'published_at', label: 'تاریخ انتشار', defaultOrder: 'desc' },
+    { key: 'title', label: 'عنوان', defaultOrder: 'asc' },
+    { key: 'views', label: 'بازدیدها', defaultOrder: 'desc' },
+    { key: 'status', label: 'وضعیت', defaultOrder: 'desc' },
+  ],
+};
 
 interface BlogPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -47,6 +63,9 @@ type BlogFieldKey = 'title' | 'slug' | 'category' | 'content' | 'cover_image';
 export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [isEditingView, setIsEditingView] = useState(false);
   const [editingPostId, setEditingPostId] = useState<number | null>(null);
@@ -65,22 +84,67 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
   const [errors, setErrors] = useState<FieldErrors<BlogFieldKey>>({});
 
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const sortCtrlRef = useRef<ReturnType<typeof useTableSort<BlogSortKey>> | null>(null);
 
-  const loadPosts = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await API.getBlogPosts();
-      setPosts(res.data?.posts || []);
-    } catch {
-      showToast('خطا در بارگذاری پست‌های وبلاگ', 'error');
-    } finally {
-      setLoading(false);
-    }
-  }, [showToast]);
+  const loadPosts = useCallback(
+    async (
+      targetPage?: number,
+      sortOverride?: { sort?: BlogSortKey; order?: SortOrder }
+    ) => {
+      const pageToLoad = targetPage ?? sortCtrlRef.current?.page ?? 1;
+      const activeSort = sortOverride?.sort ?? sortCtrlRef.current?.sort ?? 'published_at';
+      const activeOrder = sortOverride?.order ?? sortCtrlRef.current?.order ?? 'desc';
+      const guard = sortCtrlRef.current?.startRequest();
+      sortCtrlRef.current?.setPage(pageToLoad);
+
+      setLoading(true);
+      try {
+        const res = await API.getBlogPosts(
+          {
+            page: pageToLoad,
+            per_page: 20,
+            sort: activeSort,
+            order: activeOrder,
+          },
+          guard?.signal
+        );
+        if (guard && !guard.isLatest()) return;
+
+        const rows = res.data?.posts || [];
+        setPosts(rows);
+        setPage(res.pagination?.page || pageToLoad);
+        setTotalPages(Math.max(1, res.pagination?.total_pages || 1));
+        setTotalRecords(res.pagination?.total ?? rows.length);
+        sortCtrlRef.current?.syncFromResponse(res.pagination);
+      } catch (err) {
+        if ((err as Error)?.name === 'AbortError' || (guard && !guard.isLatest())) {
+          return;
+        }
+        showToast('خطا در بارگذاری پست‌های وبلاگ', 'error');
+      } finally {
+        if (!guard || guard.isLatest()) {
+          setLoading(false);
+        }
+      }
+    },
+    [showToast]
+  );
+
+  const sortCtrl = useTableSort<BlogSortKey>(
+    { ...BLOG_SORT_CONFIG, isActive: !isEditingView },
+    useCallback(
+      (next: TableSortState<BlogSortKey>) => {
+        loadPosts(next.page, { sort: next.sort, order: next.order });
+      },
+      [loadPosts]
+    )
+  );
+  sortCtrlRef.current = sortCtrl;
 
   useEffect(() => {
-    loadPosts();
-  }, [loadPosts]);
+    loadPosts(sortCtrl.page, { sort: sortCtrl.sort, order: sortCtrl.order });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openEditor = async (post?: BlogPost) => {
     setErrors({});
@@ -510,6 +574,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
     {
       key: 'title',
       header: 'عنوان',
+      sortKey: 'title',
       priority: 'primary',
       cellClassName: 'min-w-0',
       cell: (p) => (
@@ -552,6 +617,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
     {
       key: 'status',
       header: 'وضعیت',
+      sortKey: 'status',
       priority: 'secondary',
       mobileLabel: 'وضعیت',
       headerClassName: 'w-20 xl:w-24',
@@ -569,20 +635,35 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
     {
       key: 'views',
       header: 'بازدیدها',
+      sortKey: 'views',
       priority: 'desktop-only',
-      headerClassName: 'w-16 xl:w-20 text-center',
-      cellClassName: 'w-16 xl:w-20 text-center tabular-nums font-medium text-slate-600',
-      cell: (p) => p.views || 0,
+      headerClassName: 'w-20 xl:w-24 text-center',
+      cellClassName: 'w-20 xl:w-24 text-center tabular-nums font-medium text-slate-600',
+      cell: (p) => toPersianDigits(p.views || 0),
     },
     {
       key: 'published_at',
       header: 'تاریخ انتشار',
+      sortKey: 'published_at',
       priority: 'secondary',
       mobileLabel: 'تاریخ انتشار',
-      headerClassName: 'w-24 xl:w-28 text-center',
-      cellClassName: 'w-24 xl:w-28 text-center tabular-nums text-slate-500 text-xs',
-      value: (p) => formatGregorianToJalali(p.published_at),
-      cell: (p) => formatGregorianToJalali(p.published_at),
+      headerClassName: 'w-28 xl:w-32 text-center',
+      cellClassName: 'w-28 xl:w-32 text-center tabular-nums text-slate-500 text-xs',
+      value: (p) => {
+        const j = p.published_at ? formatGregorianToJalali(p.published_at) : '';
+        return j || 'پیش‌نویس';
+      },
+      cell: (p) => {
+        const j = p.published_at ? formatGregorianToJalali(p.published_at) : '';
+        if (!j) {
+          return (
+            <span className="inline-block px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-semibold">
+              پیش‌نویس
+            </span>
+          );
+        }
+        return toPersianDigits(j);
+      },
     },
   ];
 
@@ -632,6 +713,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
             data={posts}
             rowKey={(p) => p.id}
             ariaLabel="جدول مقالات وبلاگ"
+            sortController={sortCtrl}
             actionsHeader="عملیات"
             actionsHeaderClassName="w-28"
             actionsCellClassName="w-28 shrink-0"
@@ -660,6 +742,36 @@ export const BlogPage: React.FC<BlogPageProps> = ({ showToast }) => {
               </div>
             )}
           />
+          {totalPages > 1 && (
+            <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+              <span className="tabular-nums">
+                کل {toPersianDigits(totalRecords)} رکورد • صفحه {toPersianDigits(page)} از{' '}
+                {toPersianDigits(totalPages)}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <ActionButton
+                  type="button"
+                  variant="ghost"
+                  disabled={page <= 1 || loading}
+                  onClick={() => loadPosts(page - 1)}
+                  aria-label="صفحه قبلی"
+                  className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </ActionButton>
+                <ActionButton
+                  type="button"
+                  variant="ghost"
+                  disabled={page >= totalPages || loading}
+                  onClick={() => loadPosts(page + 1)}
+                  aria-label="صفحه بعدی"
+                  className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </ActionButton>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

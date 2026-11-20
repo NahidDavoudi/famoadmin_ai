@@ -9,7 +9,11 @@ import type {
   ExamStudentSummary,
   ExamDetailsResponse,
   ExamListItem,
+  GetStudentsQuery,
   GetExamsListQuery,
+  GetExamStudentsQuery,
+  GetBlogPostsQuery,
+  SortOrder,
   UpdateExamResultRequest,
   ExamFile,
   BlogPost,
@@ -106,6 +110,8 @@ export interface ApiEnvelope<T> {
     page: number;
     per_page: number;
     total_pages: number;
+    sort?: string;
+    order?: SortOrder;
   } | null;
   error?: string | ApiErrorObject | null;
 }
@@ -816,17 +822,15 @@ class FamoApiClient {
   }
 
   // Students (/api/v1/students*)
-  async getStudents(params: {
-    search?: string;
-    field?: string;
-    grade?: string;
-    status?: '' | 'active' | 'inactive' | '1' | '0';
-    page?: number;
-    perPage?: number;
-  }): Promise<ApiEnvelope<Student[]>> {
+  async getStudents(
+    params: GetStudentsQuery,
+    signal?: AbortSignal
+  ): Promise<ApiEnvelope<Student[]>> {
+    const perPageVal = Math.max(1, safeNumber(params.perPage, 20));
     const query = new URLSearchParams({
-      page: String(params.page || 1),
-      per_page: String(params.perPage || 20),
+      page: String(Math.max(1, safeNumber(params.page, 1))),
+      perPage: String(perPageVal),
+      per_page: String(perPageVal),
     });
     const search = safeTrim(params.search);
     if (search) query.set('search', search);
@@ -837,10 +841,12 @@ class FamoApiClient {
     } else if (params.status === 'inactive' || params.status === '0') {
       query.set('status', '0');
     }
+    if (params.sort) query.set('sort', params.sort);
+    if (params.order) query.set('order', params.order);
 
     return this.requestJson<Student[]>(
       `/students?${query.toString()}`,
-      {},
+      signal ? { signal } : {},
       'خطا در بارگذاری دانش‌آموزان'
     );
   }
@@ -1852,11 +1858,22 @@ class FamoApiClient {
     return { ...res, data: { dates } };
   }
 
-  async getExamStudents(examDate: string): Promise<ApiEnvelope<{ students: ExamStudentSummary[] }>> {
-    const query = new URLSearchParams({ exam_date: examDate, per_page: '100' });
+  async getExamStudents(
+    examDate: string,
+    params: GetExamStudentsQuery = {},
+    signal?: AbortSignal
+  ): Promise<ApiEnvelope<{ students: ExamStudentSummary[] }>> {
+    const query = new URLSearchParams({
+      exam_date: examDate,
+      page: String(Math.max(1, safeNumber(params.page, 1))),
+      per_page: String(Math.max(1, safeNumber(params.per_page, 20))),
+    });
+    if (params.sort) query.set('sort', params.sort);
+    if (params.order) query.set('order', params.order);
+
     const res = await this.requestJson<{ students: ExamStudentSummary[] } | ExamStudentSummary[]>(
       `/exams/students?${query.toString()}`,
-      {},
+      signal ? { signal } : {},
       'خطا در بارگذاری لیست شرکت‌کنندگان'
     );
     const rawStudents = Array.isArray(res.data) ? res.data : res.data?.students || [];
@@ -1894,11 +1911,12 @@ class FamoApiClient {
   }
 
   /**
-   * GET /api/v1/exams?student_id={id}&date_from={YYYY-MM-DD}&date_to={YYYY-MM-DD}&page=1&per_page=20
+   * GET /api/v1/exams?student_id={id}&date_from={YYYY-MM-DD}&date_to={YYYY-MM-DD}&page=1&per_page=20&sort=exam_date&order=desc
    * Accessible by `admin`, `teacher`, `supporter` (returns exam rows with `id` and `student_name`).
    */
   async getExamsList(
-    params: GetExamsListQuery = {}
+    params: GetExamsListQuery = {},
+    signal?: AbortSignal
   ): Promise<ApiEnvelope<{ exams: ExamListItem[] }>> {
     const query = new URLSearchParams({
       page: String(Math.max(1, safeNumber(params.page, 1))),
@@ -1917,12 +1935,14 @@ class FamoApiClient {
     if (safeTrim(params.date_to)) {
       query.set('date_to', safeTrim(params.date_to));
     }
+    if (params.sort) query.set('sort', params.sort);
+    if (params.order) query.set('order', params.order);
 
     const res = await this.requestJson<
       { exams?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>
     >(
       `/exams?${query.toString()}`,
-      {},
+      signal ? { signal } : {},
       'خطا در بارگذاری لیست نتایج آزمون'
     );
 
@@ -2359,10 +2379,20 @@ class FamoApiClient {
   }
 
   // Blog (/api/v1/blog/posts*)
-  async getBlogPosts(): Promise<ApiEnvelope<{ posts: BlogPost[] }>> {
+  async getBlogPosts(
+    params: GetBlogPostsQuery = {},
+    signal?: AbortSignal
+  ): Promise<ApiEnvelope<{ posts: BlogPost[] }>> {
+    const query = new URLSearchParams({
+      page: String(Math.max(1, safeNumber(params.page, 1))),
+      per_page: String(Math.max(1, safeNumber(params.per_page, 20))),
+    });
+    if (params.sort) query.set('sort', params.sort);
+    if (params.order) query.set('order', params.order);
+
     const res = await this.requestJson<{ posts: BlogPost[] } | BlogPost[]>(
-      '/blog/posts?per_page=100',
-      {},
+      `/blog/posts?${query.toString()}`,
+      signal ? { signal } : {},
       'خطا در بارگذاری پست‌های وبلاگ'
     );
     const posts = Array.isArray(res.data) ? res.data : res.data?.posts || [];
@@ -2629,23 +2659,26 @@ class FamoApiClient {
    * Sends both `per_page` and `perPage` for PHP and dev-server compatibility.
    */
   async getAppointmentsList(
-    params?: GetAppointmentsListQuery
+    params?: GetAppointmentsListQuery,
+    signal?: AbortSignal
   ): Promise<ApiEnvelope<AppointmentRecord[]>> {
     const query = new URLSearchParams();
-    const perPageVal = params?.per_page ?? params?.perPage ?? 50;
-    query.set('page', String(params?.page || 1));
-    query.set('per_page', String(perPageVal));
+    const perPageVal = params?.perPage ?? params?.per_page ?? 50;
+    query.set('page', String(Math.max(1, safeNumber(params?.page, 1))));
     query.set('perPage', String(perPageVal));
+    query.set('per_page', String(perPageVal));
     if (params?.student_id) query.set('student_id', String(params.student_id));
     if (params?.status) query.set('status', params.status);
     if (safeTrim(params?.from_date)) query.set('from_date', safeTrim(params?.from_date));
     if (safeTrim(params?.to_date)) query.set('to_date', safeTrim(params?.to_date));
+    if (params?.sort) query.set('sort', params.sort);
+    if (params?.order) query.set('order', params.order);
 
     const res = await this.requestJson<
       AppointmentRecord[] | { appointments?: AppointmentRecord[]; items?: AppointmentRecord[] }
     >(
       `/appointments?${query.toString()}`,
-      {},
+      signal ? { signal } : {},
       'خطا در بارگذاری لیست نوبت‌ها'
     );
 

@@ -163,12 +163,47 @@ export interface ExamListItem {
   created_at?: string;
 }
 
+export type SortOrder = 'asc' | 'desc';
+
+export type StudentSortKey = 'created_at' | 'name' | 'grade' | 'field' | 'status';
+export type ExamsListSortKey = 'exam_date' | 'student_name' | 'percentage';
+export type ExamStudentsSortKey = 'name' | 'avg_percentage';
+export type BlogSortKey = 'published_at' | 'title' | 'views' | 'status';
+export type AppointmentSortKey = 'appointment_date' | 'time' | 'student' | 'status';
+
+export interface GetStudentsQuery {
+  search?: string;
+  field?: string;
+  grade?: string;
+  status?: '' | 'active' | 'inactive' | '1' | '0';
+  page?: number;
+  perPage?: number;
+  sort?: StudentSortKey;
+  order?: SortOrder;
+}
+
 export interface GetExamsListQuery {
   student_id?: number | string;
   date_from?: string;
   date_to?: string;
   page?: number;
   per_page?: number;
+  sort?: ExamsListSortKey;
+  order?: SortOrder;
+}
+
+export interface GetExamStudentsQuery {
+  page?: number;
+  per_page?: number;
+  sort?: ExamStudentsSortKey;
+  order?: SortOrder;
+}
+
+export interface GetBlogPostsQuery {
+  page?: number;
+  per_page?: number;
+  sort?: BlogSortKey;
+  order?: SortOrder;
 }
 
 export interface UpdateExamResultRequest {
@@ -378,6 +413,8 @@ export interface ApiPagination {
   per_page: number;
   total: number;
   total_pages: number;
+  sort?: string;
+  order?: SortOrder;
 }
 
 export interface ApiSuccessEnvelope<TData, TPagination = ApiPagination | null> {
@@ -667,6 +704,8 @@ export interface GetAppointmentsListQuery {
   page?: number;
   per_page?: number;
   perPage?: number;
+  sort?: AppointmentSortKey;
+  order?: SortOrder;
 }
 
 export interface AppointmentRecord {

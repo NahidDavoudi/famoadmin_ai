@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ClipboardList,
   Calendar,
@@ -38,13 +38,17 @@ import {
   type TeacherFeedbackRow,
   type StudentExamTrendPoint,
 } from '../lib/exam-math';
+import { useTableSort, type TableSortConfig, type TableSortState } from '../lib/table-sort';
 import type {
   ExamComment,
   ExamDateSummary,
   ExamDetailsResponse,
   ExamListItem,
   ExamStudentSummary,
+  ExamStudentsSortKey,
+  ExamsListSortKey,
   PageId,
+  SortOrder,
   SubjectResult,
   ToastType,
   UserRole,
@@ -61,6 +65,43 @@ import { ExamCommentsSection } from '../components/ExamCommentsSection';
 import { EditExamResultModal } from '../components/EditExamResultModal';
 import { JalaliDatePicker } from '../components/JalaliDatePicker';
 
+const EXAMS_LIST_SORT_CONFIG: TableSortConfig<ExamsListSortKey> = {
+  allowedKeys: ['exam_date', 'student_name', 'percentage'],
+  defaultSort: 'exam_date',
+  defaultOrder: 'desc',
+  paginationParam: 'per_page',
+  columns: [
+    { key: 'exam_date', label: 'تاریخ آزمون', defaultOrder: 'desc' },
+    { key: 'student_name', label: 'دانش‌آموز', defaultOrder: 'asc' },
+    { key: 'percentage', label: 'درصد', defaultOrder: 'desc', hint: 'درصد این درس' },
+  ],
+};
+
+const EXAM_STUDENTS_SORT_CONFIG: TableSortConfig<ExamStudentsSortKey> = {
+  allowedKeys: ['name', 'avg_percentage'],
+  defaultSort: 'name',
+  defaultOrder: 'asc',
+  paginationParam: 'per_page',
+  columns: [
+    { key: 'name', label: 'دانش‌آموز', defaultOrder: 'asc' },
+    { key: 'avg_percentage', label: 'میانگین درصد', defaultOrder: 'desc' },
+  ],
+};
+
+function getInitialExamsViewFromUrl(): { view: ExamViewLevel; examDate: string | null } {
+  if (typeof window === 'undefined') return { view: 'dates', examDate: null };
+  const params = new URLSearchParams(window.location.search);
+  const urlView = params.get('view');
+  const urlExamDate = safeTrim(params.get('exam_date'));
+  if (urlView === 'list') {
+    return { view: 'list', examDate: null };
+  }
+  if (urlView === 'students' && /^\d{4}-\d{2}-\d{2}$/.test(urlExamDate)) {
+    return { view: 'students', examDate: urlExamDate };
+  }
+  return { view: 'dates', examDate: null };
+}
+
 interface ExamsPageProps {
   showToast: (message: string, type?: ToastType) => void;
   onNavigate: (page: PageId) => void;
@@ -73,8 +114,9 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
   const effectiveRole = safeTrim(userRole || API.currentActorRole || 'admin').toLowerCase();
   const canEdit = canEditExamResults(effectiveRole);
 
-  const [view, setView] = useState<ExamViewLevel>('dates');
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const initialUrlState = getInitialExamsViewFromUrl();
+  const [view, setView] = useState<ExamViewLevel>(initialUrlState.view);
+  const [selectedDate, setSelectedDate] = useState<string | null>(initialUrlState.examDate);
   const [monthFilter, setMonthFilter] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -98,6 +140,9 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
   const [useDateTo, setUseDateTo] = useState(false);
   const [filterDateFrom, setFilterDateFrom] = useState(() => getTodayGregorianIso());
   const [filterDateTo, setFilterDateTo] = useState(() => getTodayGregorianIso());
+  const [studentsPage, setStudentsPage] = useState(1);
+  const [studentsTotalPages, setStudentsTotalPages] = useState(1);
+  const [studentsTotal, setStudentsTotal] = useState(0);
   const [studentFilterOptions, setStudentFilterOptions] = useState<
     Array<{ id: number; name: string }>
   >([]);
@@ -113,12 +158,37 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
     examDate?: string | null;
   }>({ isOpen: false });
 
+  const listSortRef = useRef<ReturnType<typeof useTableSort<ExamsListSortKey>> | null>(null);
+  const studentsSortRef = useRef<ReturnType<typeof useTableSort<ExamStudentsSortKey>> | null>(null);
+
+  const syncExamsUrlMeta = useCallback((nextView: ExamViewLevel, examDate?: string | null) => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (nextView === 'list') {
+      params.set('view', 'list');
+      params.delete('exam_date');
+    } else if (nextView === 'students' && examDate) {
+      params.set('view', 'students');
+      params.set('exam_date', examDate);
+    } else if (nextView === 'dates') {
+      params.delete('view');
+      params.delete('exam_date');
+      params.delete('sort');
+      params.delete('order');
+      params.delete('page');
+    }
+    const qs = params.toString();
+    const nextUrl = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`;
+    window.history.replaceState(window.history.state, '', nextUrl);
+  }, []);
+
   const loadDates = useCallback(
     async (month = monthFilter) => {
       setLoading(true);
       setView('dates');
       setSelectedDate(null);
       setDetails(null);
+      syncExamsUrlMeta('dates');
       try {
         const res = await API.getExamDates(month);
         setDates(res.data?.dates || []);
@@ -128,12 +198,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
         setLoading(false);
       }
     },
-    [monthFilter, showToast]
+    [monthFilter, showToast, syncExamsUrlMeta]
   );
-
-  useEffect(() => {
-    loadDates(monthFilter);
-  }, [loadDates, monthFilter]);
 
   useEffect(() => {
     if (effectiveRole === 'student') return;
@@ -158,8 +224,15 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
         studentId?: string;
         dateFrom?: string;
         dateTo?: string;
+        sort?: ExamsListSortKey;
+        order?: SortOrder;
       }
     ) => {
+      const activeSort = overrideFilters?.sort ?? listSortRef.current?.sort ?? 'exam_date';
+      const activeOrder = overrideFilters?.order ?? listSortRef.current?.order ?? 'desc';
+      const guard = listSortRef.current?.startRequest();
+      listSortRef.current?.setPage(pageToLoad);
+
       setListLoading(true);
       try {
         const sid = overrideFilters?.studentId ?? filterStudentId;
@@ -176,13 +249,19 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
               ? filterDateTo
               : '';
 
-        const res = await API.getExamsList({
-          student_id: sid || undefined,
-          date_from: df || undefined,
-          date_to: dt || undefined,
-          page: pageToLoad,
-          per_page: 20,
-        });
+        const res = await API.getExamsList(
+          {
+            student_id: sid || undefined,
+            date_from: df || undefined,
+            date_to: dt || undefined,
+            page: pageToLoad,
+            per_page: 20,
+            sort: activeSort,
+            order: activeOrder,
+          },
+          guard?.signal
+        );
+        if (guard && !guard.isLatest()) return;
 
         const rows = res.data?.exams || [];
         setExamsList(rows);
@@ -190,6 +269,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
         setListPage(pag?.page || pageToLoad);
         setListTotalPages(Math.max(1, pag?.total_pages || 1));
         setListTotal(pag?.total ?? rows.length);
+        listSortRef.current?.syncFromResponse(pag);
 
         if (rows.length > 0) {
           setStudentFilterOptions((prev) => {
@@ -204,92 +284,223 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
           });
         }
       } catch (err) {
+        if ((err as Error)?.name === 'AbortError' || (guard && !guard.isLatest())) {
+          return;
+        }
         showToast((err as Error)?.message || 'خطا در بارگذاری لیست نتایج آزمون', 'error');
       } finally {
-        setListLoading(false);
+        if (!guard || guard.isLatest()) {
+          setListLoading(false);
+        }
       }
     },
     [filterStudentId, useDateFrom, filterDateFrom, useDateTo, filterDateTo, showToast]
   );
 
+  const listSortCtrl = useTableSort<ExamsListSortKey>(
+    { ...EXAMS_LIST_SORT_CONFIG, isActive: view === 'list' },
+    useCallback(
+      (next: TableSortState<ExamsListSortKey>) => {
+        loadExamsList(next.page, { sort: next.sort, order: next.order });
+      },
+      [loadExamsList]
+    )
+  );
+  listSortRef.current = listSortCtrl;
+
+  const loadExamStudentsForDate = useCallback(
+    async (
+      examDate: string,
+      pageToLoad = 1,
+      sortOverride?: { sort?: ExamStudentsSortKey; order?: SortOrder }
+    ) => {
+      const activeSort = sortOverride?.sort ?? studentsSortRef.current?.sort ?? 'name';
+      const activeOrder = sortOverride?.order ?? studentsSortRef.current?.order ?? 'asc';
+      const guard = studentsSortRef.current?.startRequest();
+      studentsSortRef.current?.setPage(pageToLoad);
+
+      setLoading(true);
+      setSelectedDate(examDate);
+      setView('students');
+      syncExamsUrlMeta('students', examDate);
+
+      try {
+        let rawStudents: ExamStudentSummary[] = [];
+        let pagTotalPages = 1;
+        let pagTotal = 0;
+        let pagPage = pageToLoad;
+
+        // Endpoint `/api/v1/exams/students` returns 403 for `teacher`.
+        // Teachers load rows via `/api/v1/exams` and `/api/v1/exams/details`.
+        if (effectiveRole === 'teacher') {
+          const examsRes = await API.getExamsList(
+            {
+              date_from: examDate,
+              date_to: examDate,
+              page: 1,
+              per_page: 200,
+              sort: activeSort === 'avg_percentage' ? 'percentage' : 'student_name',
+              order: activeOrder,
+            },
+            guard?.signal
+          );
+          if (guard && !guard.isLatest()) return;
+          rawStudents = groupExamRowsByStudent(examsRes.data?.exams || []);
+          pagTotal = rawStudents.length;
+        } else {
+          try {
+            const res = await API.getExamStudents(
+              examDate,
+              {
+                page: pageToLoad,
+                per_page: 20,
+                sort: activeSort,
+                order: activeOrder,
+              },
+              guard?.signal
+            );
+            if (guard && !guard.isLatest()) return;
+            rawStudents = res.data?.students || [];
+            pagPage = res.pagination?.page || pageToLoad;
+            pagTotalPages = Math.max(1, res.pagination?.total_pages || 1);
+            pagTotal = res.pagination?.total ?? rawStudents.length;
+            studentsSortRef.current?.syncFromResponse(res.pagination);
+          } catch (innerErr) {
+            if ((innerErr as Error)?.name === 'AbortError' || (guard && !guard.isLatest())) {
+              return;
+            }
+            const examsRes = await API.getExamsList(
+              {
+                date_from: examDate,
+                date_to: examDate,
+                page: 1,
+                per_page: 200,
+                sort: activeSort === 'avg_percentage' ? 'percentage' : 'student_name',
+                order: activeOrder,
+              },
+              guard?.signal
+            );
+            if (guard && !guard.isLatest()) return;
+            rawStudents = groupExamRowsByStudent(examsRes.data?.exams || []);
+            pagTotal = rawStudents.length;
+          }
+        }
+
+        if (guard && !guard.isLatest()) return;
+        setStudents(rawStudents);
+        setStudentsPage(pagPage);
+        setStudentsTotalPages(pagTotalPages);
+        setStudentsTotal(pagTotal);
+
+        if (rawStudents.length > 0) {
+          const settled = await Promise.allSettled(
+            rawStudents.map((s) => API.getExamDetails(examDate, s.student_id))
+          );
+          if (guard && !guard.isLatest()) return;
+          const nextCache: Record<string, ExamDetailsResponse> = {};
+          const enrichedStudents = rawStudents.map((s, idx) => {
+            const outcome = settled[idx];
+            if (outcome.status === 'fulfilled' && outcome.value?.data) {
+              const detailData = outcome.value.data;
+              nextCache[`${examDate}:${s.student_id}`] = detailData;
+              return {
+                ...s,
+                subject_count: detailData.subjects?.length || s.subject_count,
+                avg_percentage: detailData.avg_percentage,
+              };
+            }
+            return s;
+          });
+
+          setDetailsCache((prev) => ({ ...prev, ...nextCache }));
+          setStudents(enrichedStudents);
+
+          const totalAvg =
+            enrichedStudents.reduce((sum, s) => sum + safeNumber(s.avg_percentage), 0) /
+            enrichedStudents.length;
+          const roundedDateAvg = Math.round(totalAvg * 10) / 10;
+          setDates((prev) =>
+            prev.map((d) =>
+              d.exam_date === examDate ? { ...d, avg_percentage: roundedDateAvg } : d
+            )
+          );
+        }
+      } catch (err) {
+        if ((err as Error)?.name === 'AbortError' || (guard && !guard.isLatest())) {
+          return;
+        }
+        showToast('خطا در بارگذاری لیست شرکت‌کنندگان', 'error');
+      } finally {
+        if (!guard || guard.isLatest()) {
+          setLoading(false);
+        }
+      }
+    },
+    [effectiveRole, showToast, syncExamsUrlMeta]
+  );
+
+  const studentsSortCtrl = useTableSort<ExamStudentsSortKey>(
+    { ...EXAM_STUDENTS_SORT_CONFIG, isActive: view === 'students' },
+    useCallback(
+      (next: TableSortState<ExamStudentsSortKey>) => {
+        if (selectedDate) {
+          loadExamStudentsForDate(selectedDate, next.page, {
+            sort: next.sort,
+            order: next.order,
+          });
+        }
+      },
+      [selectedDate, loadExamStudentsForDate]
+    )
+  );
+  studentsSortRef.current = studentsSortCtrl;
+
+  // Initial mount: restore view from URL (?view=list or ?view=students&exam_date=YYYY-MM-DD) or load dates
+  useEffect(() => {
+    if (initialUrlState.view === 'list') {
+      setLoading(false);
+      loadExamsList(listSortCtrl.page, {
+        sort: listSortCtrl.sort,
+        order: listSortCtrl.order,
+      });
+    } else if (initialUrlState.view === 'students' && initialUrlState.examDate) {
+      loadExamStudentsForDate(initialUrlState.examDate, studentsSortCtrl.page, {
+        sort: studentsSortCtrl.sort,
+        order: studentsSortCtrl.order,
+      });
+    } else {
+      loadDates(monthFilter);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Re-fetch dates when monthFilter changes while on dates view
+  const prevMonthRef = useRef(monthFilter);
+  useEffect(() => {
+    if (prevMonthRef.current !== monthFilter) {
+      prevMonthRef.current = monthFilter;
+      if (view === 'dates') {
+        loadDates(monthFilter);
+      }
+    }
+  }, [monthFilter, view, loadDates]);
+
   const handleOpenListView = async () => {
     setView('list');
     setSelectedDate(null);
     setDetails(null);
-    await loadExamsList(1);
+    syncExamsUrlMeta('list');
+    await loadExamsList(1, {
+      sort: listSortCtrl.sort,
+      order: listSortCtrl.order,
+    });
   };
 
   const handleSelectDate = async (examDate: string) => {
-    setLoading(true);
-    setSelectedDate(examDate);
-    setView('students');
-    try {
-      let rawStudents: ExamStudentSummary[] = [];
-
-      // Endpoint `/api/v1/exams/students` returns 403 for `teacher`.
-      // Teachers load rows via `/api/v1/exams` and `/api/v1/exams/details`.
-      if (effectiveRole === 'teacher') {
-        const examsRes = await API.getExamsList({
-          date_from: examDate,
-          date_to: examDate,
-          page: 1,
-          per_page: 200,
-        });
-        rawStudents = groupExamRowsByStudent(examsRes.data?.exams || []);
-      } else {
-        try {
-          const res = await API.getExamStudents(examDate);
-          rawStudents = res.data?.students || [];
-        } catch {
-          const examsRes = await API.getExamsList({
-            date_from: examDate,
-            date_to: examDate,
-            page: 1,
-            per_page: 200,
-          });
-          rawStudents = groupExamRowsByStudent(examsRes.data?.exams || []);
-        }
-      }
-
-      setStudents(rawStudents);
-
-      if (rawStudents.length > 0) {
-        const settled = await Promise.allSettled(
-          rawStudents.map((s) => API.getExamDetails(examDate, s.student_id))
-        );
-        const nextCache: Record<string, ExamDetailsResponse> = {};
-        const enrichedStudents = rawStudents.map((s, idx) => {
-          const outcome = settled[idx];
-          if (outcome.status === 'fulfilled' && outcome.value?.data) {
-            const detailData = outcome.value.data;
-            nextCache[`${examDate}:${s.student_id}`] = detailData;
-            return {
-              ...s,
-              subject_count: detailData.subjects?.length || s.subject_count,
-              avg_percentage: detailData.avg_percentage,
-            };
-          }
-          return s;
-        });
-
-        setDetailsCache((prev) => ({ ...prev, ...nextCache }));
-        setStudents(enrichedStudents);
-
-        const totalAvg =
-          enrichedStudents.reduce((sum, s) => sum + safeNumber(s.avg_percentage), 0) /
-          enrichedStudents.length;
-        const roundedDateAvg = Math.round(totalAvg * 10) / 10;
-        setDates((prev) =>
-          prev.map((d) =>
-            d.exam_date === examDate ? { ...d, avg_percentage: roundedDateAvg } : d
-          )
-        );
-      }
-    } catch {
-      showToast('خطا در بارگذاری لیست شرکت‌کنندگان', 'error');
-    } finally {
-      setLoading(false);
-    }
+    await loadExamStudentsForDate(examDate, 1, {
+      sort: studentsSortCtrl.sort,
+      order: studentsSortCtrl.order,
+    });
   };
 
   const applyDetailsState = (data: ExamDetailsResponse | null) => {
@@ -507,6 +718,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
     if (view === 'details' && selectedDate) {
       setView('students');
       setDetails(null);
+      syncExamsUrlMeta('students', selectedDate);
     } else if (view === 'details') {
       await handleOpenListView();
     } else {
@@ -904,6 +1116,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
                 tableAriaLabel="جدول ردیف‌های نتایج آزمون"
                 data={examsList}
                 rowKey={(row) => row.id}
+                sortController={listSortCtrl}
                 emptyState={
                   <div className="p-10 text-center">
                     <p className="text-sm font-semibold text-slate-500">
@@ -915,6 +1128,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
                   {
                     key: 'student_name',
                     header: 'دانش‌آموز',
+                    sortKey: 'student_name',
                     priority: 'primary',
                     cellClassName: 'min-w-0 whitespace-normal break-words',
                     cell: (row) => (
@@ -935,6 +1149,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
                   {
                     key: 'exam_date',
                     header: 'تاریخ آزمون',
+                    sortKey: 'exam_date',
                     priority: 'secondary',
                     headerClassName: 'w-28',
                     cellClassName: 'w-28 tabular-nums text-xs text-slate-600 font-medium',
@@ -977,9 +1192,11 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
                   {
                     key: 'percentage',
                     header: 'درصد',
+                    sortKey: 'percentage',
+                    headerTooltip: 'درصد این درس',
                     priority: 'secondary',
-                    headerClassName: 'w-24 text-center',
-                    cellClassName: 'w-24 text-center tabular-nums',
+                    headerClassName: 'w-28 text-center',
+                    cellClassName: 'w-28 text-center tabular-nums',
                     cell: (row) => {
                       const pct = safeNumber(row.percentage);
                       return (
@@ -1001,8 +1218,8 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
                     header: 'عملیات',
                     priority: 'secondary',
                     isAction: true,
-                    headerClassName: canEdit ? 'w-40 text-center' : 'w-24 text-center',
-                    cellClassName: canEdit ? 'w-40 shrink-0' : 'w-24 shrink-0',
+                    headerClassName: canEdit ? 'w-48 text-center' : 'w-28 text-center',
+                    cellClassName: canEdit ? 'w-48 shrink-0 text-center' : 'w-28 shrink-0 text-center',
                     cell: (row) => (
                       <div className="flex items-center justify-center gap-1">
                         {canEdit && (
@@ -1145,11 +1362,13 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
             tableAriaLabel="جدول شرکت‌کنندگان آزمون"
             data={students}
             rowKey={(s) => s.student_id}
+            sortController={studentsSortCtrl}
             columns={
               [
                 {
                   key: 'name',
                   header: 'دانش‌آموز',
+                  sortKey: 'name',
                   priority: 'primary',
                   cellClassName: 'min-w-0 whitespace-normal break-words',
                   cell: (s) => (
@@ -1196,6 +1415,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
                 {
                   key: 'avg_percentage',
                   header: 'میانگین درصد',
+                  sortKey: 'avg_percentage',
                   mobileLabel: 'میانگین کل',
                   priority: 'secondary',
                   headerClassName: 'w-20 lg:w-28',
@@ -1272,6 +1492,42 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, use
               ] satisfies Column<ExamStudentSummary>[]
             }
           />
+          {studentsTotalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 text-xs">
+              <span className="text-slate-500 tabular-nums">
+                کل {toPersianDigits(studentsTotal)} رکورد • صفحه {toPersianDigits(studentsPage)} از{' '}
+                {toPersianDigits(studentsTotalPages)}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <ActionButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={studentsPage <= 1 || loading}
+                  onClick={() =>
+                    selectedDate && loadExamStudentsForDate(selectedDate, studentsPage - 1)
+                  }
+                  icon={<ChevronRight className="w-3.5 h-3.5" />}
+                  className="px-2.5 py-1"
+                >
+                  <span>قبلی</span>
+                </ActionButton>
+                <ActionButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={studentsPage >= studentsTotalPages || loading}
+                  onClick={() =>
+                    selectedDate && loadExamStudentsForDate(selectedDate, studentsPage + 1)
+                  }
+                  className="px-2.5 py-1"
+                >
+                  <span>بعدی</span>
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </ActionButton>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         details && (

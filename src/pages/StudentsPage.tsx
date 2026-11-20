@@ -15,14 +15,30 @@ import {
   Headset,
 } from 'lucide-react';
 import API from '../lib/api';
+import { formatGregorianToJalali, toPersianDigits } from '../lib/jalali';
+import { useTableSort, type TableSortConfig, type TableSortState } from '../lib/table-sort';
 import { validateStudentForm, type FieldErrors } from '../lib/form-validation';
-import type { AcademicField, Student, ToastType } from '../types';
+import type { AcademicField, SortOrder, Student, StudentSortKey, ToastType } from '../types';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { ActionButton, FieldError, getFieldClass } from '../components/FormControls';
 import { DataTable, type Column } from '../components/DataTable';
 import { StudentSubscriptionsModal } from '../components/StudentSubscriptionsModal';
 import { StudentAssignmentModal } from '../components/StudentAssignmentModal';
+
+const STUDENTS_SORT_CONFIG: TableSortConfig<StudentSortKey> = {
+  allowedKeys: ['created_at', 'name', 'grade', 'field', 'status'],
+  defaultSort: 'created_at',
+  defaultOrder: 'desc',
+  paginationParam: 'perPage',
+  columns: [
+    { key: 'created_at', label: 'تاریخ ثبت‌نام', defaultOrder: 'desc' },
+    { key: 'name', label: 'نام', defaultOrder: 'asc' },
+    { key: 'grade', label: 'پایه', defaultOrder: 'asc' },
+    { key: 'field', label: 'رشته', defaultOrder: 'asc' },
+    { key: 'status', label: 'وضعیت', defaultOrder: 'desc' },
+  ],
+};
 
 interface StudentsPageProps {
   showToast: (message: string, type?: ToastType) => void;
@@ -95,6 +111,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
 
   const internalSearchRef = useRef<HTMLInputElement | null>(null);
   const activeSearchRef = searchInputRef || internalSearchRef;
+  const sortCtrlRef = useRef<ReturnType<typeof useTableSort<StudentSortKey>> | null>(null);
 
   const fetchStudents = useCallback(
     async (
@@ -104,34 +121,67 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
         field?: string;
         grade?: string;
         status?: '' | 'active' | 'inactive';
+        sort?: StudentSortKey;
+        order?: SortOrder;
       }
     ) => {
+      const activeSort = overrides?.sort ?? sortCtrlRef.current?.sort ?? 'created_at';
+      const activeOrder = overrides?.order ?? sortCtrlRef.current?.order ?? 'desc';
+      const guard = sortCtrlRef.current?.startRequest();
+      sortCtrlRef.current?.setPage(targetPage);
+
       setLoading(true);
       try {
-        const res = await API.getStudents({
-          search: overrides?.search !== undefined ? overrides.search : search,
-          field: overrides?.field !== undefined ? overrides.field : fieldFilter,
-          grade: overrides?.grade !== undefined ? overrides.grade : gradeFilter,
-          status: overrides?.status !== undefined ? overrides.status : statusFilter,
-          page: targetPage,
-          perPage: 20,
-        });
+        const res = await API.getStudents(
+          {
+            search: overrides?.search !== undefined ? overrides.search : search,
+            field: overrides?.field !== undefined ? overrides.field : fieldFilter,
+            grade: overrides?.grade !== undefined ? overrides.grade : gradeFilter,
+            status: overrides?.status !== undefined ? overrides.status : statusFilter,
+            page: targetPage,
+            perPage: 20,
+            sort: activeSort,
+            order: activeOrder,
+          },
+          guard?.signal
+        );
+        if (guard && !guard.isLatest()) return;
+
         setStudents(res.data || []);
-        setPage(targetPage);
+        setPage(res.pagination?.page || targetPage);
         setTotalPages(res.pagination?.total_pages || 1);
         setTotalRecords(res.pagination?.total || 0);
-      } catch {
+        sortCtrlRef.current?.syncFromResponse(res.pagination);
+      } catch (err) {
+        if ((err as Error)?.name === 'AbortError' || (guard && !guard.isLatest())) {
+          return;
+        }
         showToast('خطا در بارگذاری دانش‌آموزان', 'error');
       } finally {
-        setLoading(false);
+        if (!guard || guard.isLatest()) {
+          setLoading(false);
+        }
       }
     },
     [search, fieldFilter, gradeFilter, statusFilter, showToast]
   );
 
+  const sortCtrl = useTableSort<StudentSortKey>(
+    STUDENTS_SORT_CONFIG,
+    useCallback(
+      (next: TableSortState<StudentSortKey>) => {
+        fetchStudents(next.page, { sort: next.sort, order: next.order });
+      },
+      [fetchStudents]
+    )
+  );
+  sortCtrlRef.current = sortCtrl;
+
   useEffect(() => {
-    fetchStudents(1);
-  }, [fetchStudents]);
+    fetchStudents(sortCtrl.page, { sort: sortCtrl.sort, order: sortCtrl.order });
+    // Only run on initial mount; filter/sort/pagination handlers invoke fetchStudents directly
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleFilterClick = async () => {
     setFiltering(true);
@@ -318,6 +368,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     {
       key: 'name',
       header: 'نام',
+      sortKey: 'name',
       priority: 'primary',
       cellClassName: 'min-w-0 font-semibold text-slate-800 whitespace-normal break-words',
       cell: (s) => (
@@ -342,6 +393,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     {
       key: 'grade',
       header: 'پایه',
+      sortKey: 'grade',
       priority: 'desktop-only',
       headerClassName: 'hidden lg:table-cell w-20 text-center',
       cellClassName: 'hidden lg:table-cell w-20 text-center text-slate-600 tabular-nums',
@@ -350,6 +402,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     {
       key: 'field',
       header: 'رشته',
+      sortKey: 'field',
       priority: 'secondary',
       mobileLabel: 'پایه و رشته',
       headerClassName: 'w-24 xl:w-28 text-center',
@@ -363,7 +416,8 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
     },
     {
       key: 'account',
-      header: 'حساب',
+      header: 'وضعیت',
+      sortKey: 'status',
       priority: 'secondary',
       mobileLabel: 'وضعیت حساب',
       headerClassName: 'hidden lg:table-cell w-20 xl:w-24 text-center',
@@ -380,6 +434,16 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
           </span>
         );
       },
+    },
+    {
+      key: 'created_at',
+      header: 'تاریخ ثبت‌نام',
+      sortKey: 'created_at',
+      priority: 'desktop-only',
+      headerClassName: 'hidden xl:table-cell w-28 text-center',
+      cellClassName: 'hidden xl:table-cell w-28 text-center tabular-nums text-xs text-slate-500',
+      cell: (s) =>
+        s.created_at ? toPersianDigits(formatGregorianToJalali(s.created_at)) : '-',
     },
   ];
 
@@ -601,6 +665,7 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({ showToast, searchInp
             data={students}
             rowKey={(s) => s.id}
             ariaLabel="جدول دانش‌آموزان"
+            sortController={sortCtrl}
             actionsHeader="عملیات"
             actionsHeaderClassName="w-48 lg:w-60 text-center"
             actionsCellClassName="w-48 lg:w-60 shrink-0"

@@ -19,8 +19,34 @@ import { ReportsPage } from './pages/ReportsPage';
 import { ActivityLogsPage } from './pages/ActivityLogsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 
+const VALID_PAGE_IDS: readonly PageId[] = [
+  'overview',
+  'students',
+  'courses',
+  'instructors',
+  'exams',
+  'exam_entry',
+  'files',
+  'supporters',
+  'appointments',
+  'blog',
+  'blog-editor',
+  'reports',
+  'activity_logs',
+  'analytics',
+];
+
+function getInitialPageFromUrl(): PageId {
+  if (typeof window === 'undefined') return 'overview';
+  const tab = new URLSearchParams(window.location.search).get('tab');
+  if (tab && (VALID_PAGE_IDS as readonly string[]).includes(tab)) {
+    return tab as PageId;
+  }
+  return 'overview';
+}
+
 export default function App() {
-  const [currentPage, setCurrentPage] = useState<PageId>('overview');
+  const [currentPage, setCurrentPage] = useState<PageId>(getInitialPageFromUrl);
   const [username, setUsername] = useState<string>('مدیر سیستم (فامو)');
   const [userRole, setUserRole] = useState<UserRole>(
     ((API.currentActorRole || 'admin') as UserRole)
@@ -30,6 +56,35 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   const studentSearchRef = useRef<HTMLInputElement | null>(null);
+
+  const navigateToPage = useCallback((nextPage: PageId) => {
+    setCurrentPage((prev) => {
+      if (typeof window !== 'undefined' && prev !== nextPage) {
+        const params = new URLSearchParams(window.location.search);
+        params.set('tab', nextPage);
+        params.delete('sort');
+        params.delete('order');
+        params.delete('page');
+        params.delete('view');
+        params.delete('subtab');
+        params.delete('exam_date');
+        const qs = params.toString();
+        const nextUrl = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`;
+        window.history.replaceState(window.history.state, '', nextUrl);
+      }
+      return nextPage;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePopState = () => {
+      const fromUrl = getInitialPageFromUrl();
+      setCurrentPage(fromUrl);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const showToast = useCallback((message: string, type: ToastType = 'success') => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -87,7 +142,7 @@ export default function App() {
       if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         if (currentPage !== 'students') {
-          setCurrentPage('students');
+          navigateToPage('students');
           setTimeout(() => studentSearchRef.current?.focus(), 80);
         } else {
           studentSearchRef.current?.focus();
@@ -100,7 +155,7 @@ export default function App() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [currentPage]);
+  }, [currentPage, navigateToPage]);
 
   const handleLogout = async () => {
     await API.logout();
@@ -114,7 +169,7 @@ export default function App() {
         currentPage={currentPage}
         username={username}
         isOpenMobile={isMobileSidebarOpen}
-        onNavigate={(page) => setCurrentPage(page)}
+        onNavigate={navigateToPage}
         onToggleMobile={() => setIsMobileSidebarOpen((v) => !v)}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
         onOpenShortcuts={() => setIsShortcutsOpen(true)}
@@ -124,7 +179,7 @@ export default function App() {
       <main className="flex-1 min-w-0 md:mr-72 pt-16 md:pt-0">
         <div className="p-4 md:p-8 max-w-7xl mx-auto">
           {currentPage === 'overview' && (
-            <OverviewPage showToast={showToast} onNavigate={(page) => setCurrentPage(page)} />
+            <OverviewPage showToast={showToast} onNavigate={navigateToPage} />
           )}
           {currentPage === 'students' && (
             <StudentsPage showToast={showToast} searchInputRef={studentSearchRef} />
@@ -135,7 +190,7 @@ export default function App() {
           {currentPage === 'exams' && (
             <ExamsPage
               showToast={showToast}
-              onNavigate={(page) => setCurrentPage(page)}
+              onNavigate={navigateToPage}
               userRole={userRole}
             />
           )}
