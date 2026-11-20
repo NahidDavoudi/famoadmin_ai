@@ -1176,6 +1176,239 @@ test('Student-to-Supporter assignments helpers normalize rows, history, initial-
   assert.equal(initialFillLog?.title, 'اجرای تخصیص خودکار اولیه پشتیبان بر اساس پایه و رشته');
 });
 
+test('Exam result editing RBAC, digit normalization, validation, payload building, and state sync', async () => {
+  const {
+    canEditExamResults,
+    normalizeDigitsToEnglish,
+    parseStrictInteger,
+    computeRemainingQuestions,
+    calculateRawExamPercentagePreview,
+    validateExamEditForm,
+    buildUpdateExamResultPayload,
+    groupExamRowsByStudent,
+    applyUpdatedExamRowToDetails,
+    applyUpdatedExamRowToList,
+  } = await import('./exam-math');
+  const { describeApiMutation } = await import('./activity-log');
+
+  // 1. RBAC checks
+  assert.equal(canEditExamResults('admin'), true);
+  assert.equal(canEditExamResults('teacher'), true);
+  assert.equal(canEditExamResults('ADMIN'), true);
+  assert.equal(canEditExamResults('supporter'), false);
+  assert.equal(canEditExamResults('student'), false);
+  assert.equal(canEditExamResults(null), false);
+  assert.equal(canEditExamResults(''), false);
+
+  // 2. Digit normalization & strict integer parsing
+  assert.equal(normalizeDigitsToEnglish(' ۱۶ '), '16');
+  assert.equal(normalizeDigitsToEnglish('٢٠'), '20');
+  assert.equal(parseStrictInteger('۱۶'), 16);
+  assert.equal(parseStrictInteger('١٢'), 12);
+  assert.equal(parseStrictInteger('0'), 0);
+  assert.equal(parseStrictInteger('16.5'), null);
+  assert.equal(parseStrictInteger('abc'), null);
+  assert.equal(parseStrictInteger(''), null);
+
+  // 3. Remaining questions computation
+  const remOk = computeRemainingQuestions('۲۰', '۱۶', '۲', '۱');
+  assert.equal(remOk.total, 20);
+  assert.equal(remOk.answeredAndSkippedSum, 19);
+  assert.equal(remOk.remaining, 1);
+  assert.equal(remOk.isOverflow, false);
+
+  const remOverflow = computeRemainingQuestions(20, 15, 5, 2);
+  assert.equal(remOverflow.remaining, -2);
+  assert.equal(remOverflow.isOverflow, true);
+
+  // 4. Live percentage preview matching server formula ROUND((correct / total_q) * 100, 2)
+  const preview80 = calculateRawExamPercentagePreview('۲۰', '۱۶');
+  assert.equal(preview80.formatted, '80.00');
+  assert.equal(preview80.numeric, 80);
+
+  const previewZero = calculateRawExamPercentagePreview(0, 5);
+  assert.equal(previewZero.formatted, '0.00');
+  assert.equal(previewZero.numeric, 0);
+
+  // 5. Form validation rules
+  const invalidOverflow = validateExamEditForm({
+    exam_date: '2026-10-25',
+    subject: 'ریاضی',
+    chapter: 'مشتق',
+    total_q: '20',
+    correct: '15',
+    wrong: '4',
+    skipped: '3',
+  });
+  assert.equal(invalidOverflow.isValid, false);
+  assert.ok(invalidOverflow.errors.balance);
+
+  const invalidFields = validateExamEditForm({
+    exam_date: 'invalid-date',
+    subject: '   ',
+    chapter: 'x'.repeat(101),
+    total_q: '0',
+    correct: '-1',
+    wrong: '1.5',
+    skipped: 'abc',
+  });
+  assert.equal(invalidFields.isValid, false);
+  assert.ok(invalidFields.errors.exam_date);
+  assert.ok(invalidFields.errors.subject);
+  assert.ok(invalidFields.errors.chapter);
+  assert.ok(invalidFields.errors.total_q);
+  assert.ok(invalidFields.errors.correct);
+  assert.ok(invalidFields.errors.wrong);
+  assert.ok(invalidFields.errors.skipped);
+
+  const longSubject = validateExamEditForm({
+    exam_date: '2026-10-25',
+    subject: 'د'.repeat(51),
+    chapter: '',
+    total_q: 20,
+    correct: 16,
+    wrong: 2,
+    skipped: 2,
+  });
+  assert.equal(longSubject.isValid, false);
+  assert.ok(longSubject.errors.subject);
+
+  const validPersianInput = validateExamEditForm({
+    exam_date: '2026-10-25',
+    subject: 'ریاضی',
+    chapter: 'مشتق',
+    total_q: '۲۰',
+    correct: '۱۶',
+    wrong: '۲',
+    skipped: '۲',
+  });
+  assert.equal(validPersianInput.isValid, true);
+  assert.equal(Object.keys(validPersianInput.errors).length, 0);
+
+  // 6. Payload builder omits `percentage`, converts digits, maps empty chapter -> null
+  const payload = buildUpdateExamResultPayload({
+    exam_date: '2026-10-25',
+    subject: ' ریاضی ',
+    chapter: '   ',
+    total_q: '۲۰',
+    correct: '۱۶',
+    wrong: '۲',
+    skipped: '۲',
+    student_id: '20',
+  });
+  assert.deepEqual(payload, {
+    exam_date: '2026-10-25',
+    subject: 'ریاضی',
+    chapter: null,
+    total_q: 20,
+    correct: 16,
+    wrong: 2,
+    skipped: 2,
+    student_id: 20,
+  });
+  assert.equal('percentage' in payload, false);
+
+  // 7. Teacher fallback grouping from GET /api/v1/exams
+  const grouped = groupExamRowsByStudent([
+    {
+      id: 1,
+      student_id: 20,
+      student_name: 'علی رضایی',
+      grade: 12,
+      field: 'تجربی',
+      exam_date: '2026-10-25',
+      subject: 'ریاضی',
+      chapter: 'مشتق',
+      total_q: 20,
+      correct: 16,
+      wrong: 2,
+      skipped: 2,
+      percentage: 80,
+    },
+    {
+      id: 2,
+      student_id: 20,
+      student_name: 'علی رضایی',
+      grade: 12,
+      field: 'تجربی',
+      exam_date: '2026-10-25',
+      subject: 'فیزیک',
+      chapter: 'حرکت',
+      total_q: 20,
+      correct: 12,
+      wrong: 4,
+      skipped: 4,
+      percentage: 60,
+    },
+  ]);
+  assert.equal(grouped.length, 1);
+  assert.equal(grouped[0].student_id, 20);
+  assert.equal(grouped[0].subject_count, 2);
+  assert.equal(grouped[0].avg_percentage, 70);
+
+  // 8. In-place report card & list updates after 200 OK
+  const updatedExamRow = {
+    id: 1,
+    student_id: 20,
+    file_id: null,
+    exam_date: '2026-10-25',
+    subject: 'ریاضی',
+    chapter: 'مشتق',
+    total_q: 20,
+    correct: 18,
+    wrong: 1,
+    skipped: 1,
+    percentage: 90,
+  };
+  const updatedDetails = applyUpdatedExamRowToDetails(
+    {
+      student: { id: 20, name: 'علی رضایی', grade: 12, field: 'تجربی' },
+      exam_date: '2026-10-25',
+      subjects: [
+        { id: 1, subject: 'ریاضی', chapter: 'مشتق', total_q: 20, correct: 16, wrong: 2, skipped: 2, percentage: 80 },
+        { id: 2, subject: 'فیزیک', chapter: null, total_q: 20, correct: 10, wrong: 5, skipped: 5, percentage: 50 },
+      ],
+      avg_percentage: 65,
+    },
+    updatedExamRow,
+    '2026-10-25'
+  );
+  assert.equal(updatedDetails?.subjects[0].correct, 18);
+  assert.equal(updatedDetails?.subjects[0].percentage, 90);
+  assert.equal(updatedDetails?.avg_percentage, 70);
+
+  const updatedList = applyUpdatedExamRowToList(
+    [
+      {
+        id: 1,
+        student_id: 20,
+        student_name: 'علی رضایی',
+        grade: 12,
+        field: 'تجربی',
+        exam_date: '2026-10-25',
+        subject: 'ریاضی',
+        chapter: 'مشتق',
+        total_q: 20,
+        correct: 16,
+        wrong: 2,
+        skipped: 2,
+        percentage: 80,
+      },
+    ],
+    updatedExamRow
+  );
+  assert.equal(updatedList[0].correct, 18);
+  assert.equal(updatedList[0].percentage, 90);
+  assert.equal(updatedList[0].student_name, 'علی رضایی');
+
+  // 9. Activity log mutation description for PATCH /exams/{id}
+  const patchExamLog = describeApiMutation('PATCH', '/exams/1', payload);
+  assert.equal(patchExamLog?.action_type, 'update');
+  assert.equal(patchExamLog?.category, 'exams');
+  assert.equal(patchExamLog?.title, 'ویرایش نتیجه آزمون');
+});
+
+
 
 
 

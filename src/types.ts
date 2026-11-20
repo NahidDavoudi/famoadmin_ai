@@ -11,7 +11,8 @@ export type PageId =
   | 'blog'
   | 'blog-editor'
   | 'reports'
-  | 'activity_logs';
+  | 'activity_logs'
+  | 'analytics';
 
 export type AcademicField =
   | 'ریاضی'
@@ -130,6 +131,10 @@ export interface BlogCategory {
 }
 
 export interface SubjectResult {
+  id?: number;
+  student_id?: number;
+  file_id?: number | null;
+  exam_date?: string;
   subject: string;
   chapter?: string | null;
   total_q: number;
@@ -137,6 +142,44 @@ export interface SubjectResult {
   wrong: number;
   skipped: number;
   percentage: number;
+  created_at?: string;
+}
+
+export interface ExamListItem {
+  id: number;
+  student_id: number;
+  file_id?: number | null;
+  exam_date: string; // YYYY-MM-DD (Gregorian ISO)
+  subject: string;
+  chapter?: string | null;
+  total_q: number;
+  correct: number;
+  wrong: number;
+  skipped: number;
+  percentage: number;
+  student_name?: string;
+  grade?: number | null;
+  field?: AcademicField | string | null;
+  created_at?: string;
+}
+
+export interface GetExamsListQuery {
+  student_id?: number | string;
+  date_from?: string;
+  date_to?: string;
+  page?: number;
+  per_page?: number;
+}
+
+export interface UpdateExamResultRequest {
+  exam_date?: string;
+  subject?: string;
+  chapter?: string | null;
+  total_q?: number;
+  correct?: number;
+  wrong?: number;
+  skipped?: number;
+  student_id?: number;
 }
 
 export interface ExamRecord {

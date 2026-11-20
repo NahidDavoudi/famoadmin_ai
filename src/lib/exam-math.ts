@@ -2,10 +2,13 @@ import type {
   AcademicField,
   ExamComment,
   ExamDetailsResponse,
+  ExamListItem,
   ExamShareLinkItem,
   ExamShareLinkStatus,
+  ExamStudentSummary,
   SubjectResult,
   Student,
+  UpdateExamResultRequest,
 } from '../types';
 import { formatGregorianToJalali } from './jalali';
 
@@ -92,6 +95,7 @@ export function normalizeExamSubject(sub: Partial<SubjectResult> | null | undefi
 
   return {
     ...sub,
+    ...(sub?.id !== undefined && sub?.id !== null ? { id: safeNumber(sub.id) } : {}),
     subject: safeTrim(sub?.subject),
     chapter: sub?.chapter ? safeTrim(sub.chapter) : null,
     total_q,
@@ -595,5 +599,394 @@ export function filterExamShareLinks(
     return true;
   });
 }
+
+// ============================================================================
+// Edit Exam Result (PATCH /api/v1/exams/{id}) Validation, RBAC & Helpers
+// ============================================================================
+
+/**
+ * RBAC check: Only `admin` and `teacher` roles are permitted to edit exam results.
+ * `supporter` and `student` must NOT see edit controls.
+ */
+export function canEditExamResults(role?: string | null): boolean {
+  const normalized = safeTrim(role).toLowerCase();
+  return normalized === 'admin' || normalized === 'teacher';
+}
+
+/**
+ * Converts Persian (۰-۹) and Arabic-Indic (٠-٩) digits to ASCII English digits (0-9).
+ */
+export function normalizeDigitsToEnglish(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .trim();
+}
+
+/**
+ * Strictly parses an integer from string/number (supporting Persian/Arabic digits).
+ * Rejects decimals, floats, and non-numeric strings.
+ */
+export function parseStrictInteger(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? value : null;
+  }
+  const normalized = normalizeDigitsToEnglish(value);
+  if (!/^-?\d+$/.test(normalized)) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+export interface RemainingQuestionsSummary {
+  total: number | null;
+  answeredAndSkippedSum: number | null;
+  remaining: number | null;
+  isOverflow: boolean;
+}
+
+/**
+ * Computes `total_q - (correct + wrong + skipped)` for live remaining indicator.
+ */
+export function computeRemainingQuestions(
+  totalRaw: unknown,
+  correctRaw: unknown,
+  wrongRaw: unknown,
+  skippedRaw: unknown
+): RemainingQuestionsSummary {
+  const total = parseStrictInteger(totalRaw);
+  const correct = parseStrictInteger(correctRaw) ?? 0;
+  const wrong = parseStrictInteger(wrongRaw) ?? 0;
+  const skipped = parseStrictInteger(skippedRaw) ?? 0;
+
+  if (total === null) {
+    return {
+      total: null,
+      answeredAndSkippedSum: null,
+      remaining: null,
+      isOverflow: false,
+    };
+  }
+
+  const sum = correct + wrong + skipped;
+  const remaining = total - sum;
+
+  return {
+    total,
+    answeredAndSkippedSum: sum,
+    remaining,
+    isOverflow: remaining < 0,
+  };
+}
+
+/**
+ * Computes live percentage preview matching the backend generated column:
+ * `ROUND((correct / total_q) * 100, 2)` -> `total_q > 0 ? ((correct / total_q) * 100).toFixed(2) : '0.00'`
+ */
+export function calculateRawExamPercentagePreview(
+  totalRaw: unknown,
+  correctRaw: unknown
+): { formatted: string; numeric: number } {
+  const total = parseStrictInteger(totalRaw);
+  const correct = parseStrictInteger(correctRaw);
+  if (total === null || total <= 0 || correct === null || correct < 0) {
+    return { formatted: '0.00', numeric: 0 };
+  }
+  const ratio = (correct / total) * 100;
+  const formatted = ratio.toFixed(2);
+  return {
+    formatted,
+    numeric: Number(formatted),
+  };
+}
+
+export interface ExamEditFormInput {
+  exam_date: string;
+  subject: string;
+  chapter: string;
+  total_q: string | number;
+  correct: string | number;
+  wrong: string | number;
+  skipped: string | number;
+  student_id?: string | number | null;
+}
+
+export type ExamEditFieldName =
+  | 'exam_date'
+  | 'subject'
+  | 'chapter'
+  | 'total_q'
+  | 'correct'
+  | 'wrong'
+  | 'skipped'
+  | 'balance';
+
+export type ExamEditFieldErrors = Partial<Record<ExamEditFieldName, string>>;
+
+/**
+ * Client-side validation matching backend rules for PATCH /api/v1/exams/{id}:
+ * - exam_date: Gregorian YYYY-MM-DD
+ * - subject: non-empty string, max 50 chars
+ * - chapter: optional string, max 100 chars
+ * - total_q: integer >= 1
+ * - correct, wrong, skipped: integers >= 0
+ * - correct + wrong + skipped <= total_q
+ */
+export function validateExamEditForm(input: ExamEditFormInput): {
+  errors: ExamEditFieldErrors;
+  isValid: boolean;
+} {
+  const errors: ExamEditFieldErrors = {};
+
+  const examDate = safeTrim(input.exam_date);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(examDate)) {
+    errors.exam_date = 'تاریخ آزمون باید با فرمت معتبر انتخاب شود';
+  }
+
+  const subject = safeTrim(input.subject);
+  if (!subject) {
+    errors.subject = 'نام درس نمی‌تواند خالی باشد';
+  } else if (subject.length > 50) {
+    errors.subject = 'نام درس نباید بیشتر از ۵۰ کاراکتر باشد';
+  }
+
+  const chapter = safeTrim(input.chapter);
+  if (chapter.length > 100) {
+    errors.chapter = 'نام مبحث نباید بیشتر از ۱۰۰ کاراکتر باشد';
+  }
+
+  const totalQ = parseStrictInteger(input.total_q);
+  if (totalQ === null) {
+    errors.total_q = 'تعداد کل سوالات باید یک عدد صحیح باشد';
+  } else if (totalQ < 1) {
+    errors.total_q = 'تعداد کل سوالات باید حداقل ۱ باشد';
+  }
+
+  const correct = parseStrictInteger(input.correct);
+  if (correct === null) {
+    errors.correct = 'تعداد پاسخ صحیح باید عدد صحیح باشد';
+  } else if (correct < 0) {
+    errors.correct = 'تعداد صحیح نمی‌تواند منفی باشد';
+  }
+
+  const wrong = parseStrictInteger(input.wrong);
+  if (wrong === null) {
+    errors.wrong = 'تعداد پاسخ غلط باید عدد صحیح باشد';
+  } else if (wrong < 0) {
+    errors.wrong = 'تعداد غلط نمی‌تواند منفی باشد';
+  }
+
+  const skipped = parseStrictInteger(input.skipped);
+  if (skipped === null) {
+    errors.skipped = 'تعداد سوالات نزده باید عدد صحیح باشد';
+  } else if (skipped < 0) {
+    errors.skipped = 'تعداد نزده نمی‌تواند منفی باشد';
+  }
+
+  if (
+    totalQ !== null &&
+    totalQ >= 1 &&
+    correct !== null &&
+    correct >= 0 &&
+    wrong !== null &&
+    wrong >= 0 &&
+    skipped !== null &&
+    skipped >= 0
+  ) {
+    const sum = correct + wrong + skipped;
+    if (sum > totalQ) {
+      errors.balance = `مجموع صحیح (${correct}) + غلط (${wrong}) + نزده (${skipped}) برابر ${sum} است و نمی‌تواند از کل سوالات (${totalQ}) بیشتر باشد`;
+    }
+  }
+
+  return {
+    errors,
+    isValid: Object.keys(errors).length === 0,
+  };
+}
+
+/**
+ * Builds the exact JSON payload for PATCH /api/v1/exams/{id}.
+ * Intentionally omits `percentage` since it is generated server-side,
+ * converts Persian/Arabic digits to integers, and maps empty `chapter` to `null`.
+ */
+export function buildUpdateExamResultPayload(
+  input: ExamEditFormInput
+): UpdateExamResultRequest {
+  const chapterTrimmed = safeTrim(input.chapter);
+  const payload: UpdateExamResultRequest = {
+    exam_date: safeTrim(input.exam_date),
+    subject: safeTrim(input.subject),
+    chapter: chapterTrimmed !== '' ? chapterTrimmed : null,
+    total_q: parseStrictInteger(input.total_q) ?? 1,
+    correct: parseStrictInteger(input.correct) ?? 0,
+    wrong: parseStrictInteger(input.wrong) ?? 0,
+    skipped: parseStrictInteger(input.skipped) ?? 0,
+  };
+
+  const studentId = parseStrictInteger(input.student_id);
+  if (studentId !== null && studentId >= 1) {
+    payload.student_id = studentId;
+  }
+
+  return payload;
+}
+
+/**
+ * Normalizes a single flat exam row from GET /api/v1/exams or PATCH /api/v1/exams/{id}.
+ * Preserves the server-computed `percentage` verbatim.
+ */
+export function normalizeExamListItem(
+  raw: Partial<ExamListItem> | Record<string, unknown> | null | undefined
+): ExamListItem {
+  const r = (raw || {}) as Partial<ExamListItem>;
+  return {
+    id: safeNumber(r.id),
+    student_id: safeNumber(r.student_id),
+    file_id: r.file_id !== undefined && r.file_id !== null ? safeNumber(r.file_id) : null,
+    exam_date: safeTrim(r.exam_date),
+    subject: safeTrim(r.subject),
+    chapter: safeTrim(r.chapter) || null,
+    total_q: safeNumber(r.total_q),
+    correct: safeNumber(r.correct),
+    wrong: safeNumber(r.wrong),
+    skipped: safeNumber(r.skipped),
+    percentage: safeNumber(r.percentage),
+    student_name: safeTrim(r.student_name) || undefined,
+    grade: r.grade !== undefined && r.grade !== null ? safeNumber(r.grade) : null,
+    field: safeTrim(r.field) || null,
+    created_at: safeTrim(r.created_at) || undefined,
+  };
+}
+
+/**
+ * Groups flat exam rows from GET /api/v1/exams into ExamStudentSummary[] so that
+ * `teacher` accounts can browse exam participants for a date without hitting
+ * `GET /api/v1/exams/students` (which is restricted to `admin` and `supporter`).
+ */
+export function groupExamRowsByStudent(rows: ExamListItem[]): ExamStudentSummary[] {
+  const byStudent = new Map<
+    number,
+    {
+      student_id: number;
+      name: string;
+      grade: number;
+      field: AcademicField;
+      percentages: number[];
+    }
+  >();
+
+  for (const row of rows || []) {
+    const sid = safeNumber(row.student_id);
+    if (!sid) continue;
+    let bucket = byStudent.get(sid);
+    if (!bucket) {
+      bucket = {
+        student_id: sid,
+        name: safeTrim(row.student_name) || `دانش‌آموز #${sid}`,
+        grade: safeNumber(row.grade, 12),
+        field: (safeTrim(row.field) || 'تجربی') as AcademicField,
+        percentages: [],
+      };
+      byStudent.set(sid, bucket);
+    }
+    bucket.percentages.push(safeNumber(row.percentage));
+  }
+
+  return Array.from(byStudent.values()).map((bucket) => {
+    const count = bucket.percentages.length;
+    const avg =
+      count > 0
+        ? Math.round((bucket.percentages.reduce((sum, p) => sum + p, 0) / count) * 10) / 10
+        : 0;
+    return {
+      student_id: bucket.student_id,
+      name: bucket.name,
+      grade: bucket.grade,
+      field: bucket.field,
+      subject_count: count,
+      avg_percentage: avg,
+    };
+  });
+}
+
+/**
+ * Updates the current report card (`ExamDetailsResponse`) in-place after `PATCH /api/v1/exams/{id}`,
+ * preserving `data.exam.percentage` verbatim on the updated subject row and recomputing `avg_percentage`.
+ * If `exam_date` was moved to another date, removes the moved row from the current date's view.
+ */
+export function applyUpdatedExamRowToDetails(
+  details: ExamDetailsResponse | null,
+  updatedExam: ExamListItem,
+  viewingExamDate?: string | null
+): ExamDetailsResponse | null {
+  if (!details) return null;
+  const activeDate = safeTrim(viewingExamDate || details.exam_date);
+  const movedToDifferentDate =
+    Boolean(activeDate) &&
+    Boolean(safeTrim(updatedExam.exam_date)) &&
+    safeTrim(updatedExam.exam_date) !== activeDate;
+
+  let nextSubjects: SubjectResult[];
+  if (movedToDifferentDate) {
+    nextSubjects = (details.subjects || []).filter((s) => s.id !== updatedExam.id);
+  } else {
+    nextSubjects = (details.subjects || []).map((s) =>
+      s.id === updatedExam.id
+        ? {
+            ...s,
+            id: updatedExam.id,
+            student_id: updatedExam.student_id,
+            exam_date: updatedExam.exam_date,
+            subject: updatedExam.subject,
+            chapter: updatedExam.chapter ?? null,
+            total_q: updatedExam.total_q,
+            correct: updatedExam.correct,
+            wrong: updatedExam.wrong,
+            skipped: updatedExam.skipped,
+            percentage: updatedExam.percentage,
+          }
+        : s
+    );
+  }
+
+  const nextAvg =
+    nextSubjects.length > 0
+      ? Math.round(
+          (nextSubjects.reduce((sum, s) => sum + safeNumber(s.percentage), 0) /
+            nextSubjects.length) *
+            100
+        ) / 100
+      : 0;
+
+  return {
+    ...details,
+    subjects: nextSubjects,
+    avg_percentage: nextAvg,
+  };
+}
+
+/**
+ * Updates a flat exam list (`ExamListItem[]`) in-place after `PATCH /api/v1/exams/{id}`.
+ */
+export function applyUpdatedExamRowToList(
+  list: ExamListItem[],
+  updatedExam: ExamListItem
+): ExamListItem[] {
+  return (list || []).map((item) =>
+    item.id === updatedExam.id
+      ? {
+          ...item,
+          ...updatedExam,
+          student_name: updatedExam.student_name || item.student_name,
+          grade: updatedExam.grade ?? item.grade,
+          field: updatedExam.field ?? item.field,
+        }
+      : item
+  );
+}
+
 
 

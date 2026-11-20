@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Keyboard, ClipboardList, Search } from 'lucide-react';
 import API from './lib/api';
-import type { PageId, ToastItem, ToastType } from './types';
+import type { PageId, ToastItem, ToastType, UserRole } from './types';
 import { Sidebar } from './components/Sidebar';
 import { ToastStack } from './components/ToastStack';
 import { Modal } from './components/Modal';
@@ -17,10 +17,14 @@ import { AppointmentsPage } from './pages/AppointmentsPage';
 import { BlogPage } from './pages/BlogPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { ActivityLogsPage } from './pages/ActivityLogsPage';
+import { AnalyticsPage } from './pages/AnalyticsPage';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<PageId>('overview');
   const [username, setUsername] = useState<string>('مدیر سیستم (فامو)');
+  const [userRole, setUserRole] = useState<UserRole>(
+    ((API.currentActorRole || 'admin') as UserRole)
+  );
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -45,8 +49,11 @@ export default function App() {
   useEffect(() => {
     API.getMe()
       .then((u) => {
+        if (u?.role) {
+          setUserRole(u.role.toLowerCase() as UserRole);
+        }
         if (u?.username) {
-          setUsername(u.username);
+          setUsername(u.full_name || u.username);
         } else if (
           typeof window !== 'undefined' &&
           window.location.hostname.endsWith('famoacademy.ir')
@@ -126,7 +133,11 @@ export default function App() {
           {currentPage === 'courses' && <CoursesPage showToast={showToast} />}
           {currentPage === 'instructors' && <InstructorsPage showToast={showToast} />}
           {currentPage === 'exams' && (
-            <ExamsPage showToast={showToast} onNavigate={(page) => setCurrentPage(page)} />
+            <ExamsPage
+              showToast={showToast}
+              onNavigate={(page) => setCurrentPage(page)}
+              userRole={userRole}
+            />
           )}
           {currentPage === 'exam_entry' && <ExamEntryPage showToast={showToast} />}
           {currentPage === 'files' && <FilesPage showToast={showToast} />}
@@ -135,6 +146,7 @@ export default function App() {
             <BlogPage showToast={showToast} />
           )}
           {currentPage === 'reports' && <ReportsPage showToast={showToast} />}
+          {currentPage === 'analytics' && <AnalyticsPage showToast={showToast} />}
           {currentPage === 'activity_logs' && <ActivityLogsPage showToast={showToast} />}
         </div>
       </main>

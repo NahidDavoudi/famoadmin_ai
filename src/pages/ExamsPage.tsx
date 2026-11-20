@@ -5,6 +5,7 @@ import {
   Users,
   Eye,
   ChevronRight,
+  ChevronLeft,
   X,
   Plus,
   Printer,
@@ -13,14 +14,27 @@ import {
   TrendingUp,
   Share2,
   Link2,
+  Pencil,
+  ListFilter,
+  RefreshCw,
 } from 'lucide-react';
 import API from '../lib/api';
-import { formatJalaliLong, formatGregorianToJalali } from '../lib/jalali';
+import {
+  formatJalaliLong,
+  formatGregorianToJalali,
+  getTodayGregorianIso,
+  toPersianDigits,
+} from '../lib/jalali';
 import {
   safeNumber,
+  safeTrim,
   formatFixed,
   createInitialTeacherFeedbacks,
   getAuthorRoleLabel,
+  canEditExamResults,
+  groupExamRowsByStudent,
+  applyUpdatedExamRowToDetails,
+  applyUpdatedExamRowToList,
   type TeacherFeedbackRow,
   type StudentExamTrendPoint,
 } from '../lib/exam-math';
@@ -28,10 +42,12 @@ import type {
   ExamComment,
   ExamDateSummary,
   ExamDetailsResponse,
+  ExamListItem,
   ExamStudentSummary,
   PageId,
   SubjectResult,
   ToastType,
+  UserRole,
 } from '../types';
 import {
   RadialGauge,
@@ -42,15 +58,21 @@ import { ActionButton } from '../components/FormControls';
 import { DataTable, type Column } from '../components/DataTable';
 import { ExamShareLinksModal } from '../components/ExamShareLinksModal';
 import { ExamCommentsSection } from '../components/ExamCommentsSection';
+import { EditExamResultModal } from '../components/EditExamResultModal';
+import { JalaliDatePicker } from '../components/JalaliDatePicker';
 
 interface ExamsPageProps {
   showToast: (message: string, type?: ToastType) => void;
   onNavigate: (page: PageId) => void;
+  userRole?: UserRole | string;
 }
 
-type ExamViewLevel = 'dates' | 'students' | 'details';
+type ExamViewLevel = 'dates' | 'students' | 'details' | 'list';
 
-export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) => {
+export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate, userRole }) => {
+  const effectiveRole = safeTrim(userRole || API.currentActorRole || 'admin').toLowerCase();
+  const canEdit = canEditExamResults(effectiveRole);
+
   const [view, setView] = useState<ExamViewLevel>('dates');
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [monthFilter, setMonthFilter] = useState('');
@@ -64,6 +86,25 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
   const [counselorNote, setCounselorNote] = useState('');
   const [trendPoints, setTrendPoints] = useState<StudentExamTrendPoint[]>([]);
   const [trendLoading, setTrendLoading] = useState(false);
+
+  // Flat Exams List state (GET /api/v1/exams)
+  const [examsList, setExamsList] = useState<ExamListItem[]>([]);
+  const [listLoading, setListLoading] = useState(false);
+  const [listPage, setListPage] = useState(1);
+  const [listTotalPages, setListTotalPages] = useState(1);
+  const [listTotal, setListTotal] = useState(0);
+  const [filterStudentId, setFilterStudentId] = useState('');
+  const [useDateFrom, setUseDateFrom] = useState(false);
+  const [useDateTo, setUseDateTo] = useState(false);
+  const [filterDateFrom, setFilterDateFrom] = useState(() => getTodayGregorianIso());
+  const [filterDateTo, setFilterDateTo] = useState(() => getTodayGregorianIso());
+  const [studentFilterOptions, setStudentFilterOptions] = useState<
+    Array<{ id: number; name: string }>
+  >([]);
+
+  // Edit Exam Result Modal state
+  const [editingExam, setEditingExam] = useState<ExamListItem | null>(null);
+  const [resolvingSubjectEdit, setResolvingSubjectEdit] = useState(false);
 
   const [shareModalState, setShareModalState] = useState<{
     isOpen: boolean;
@@ -94,13 +135,122 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
     loadDates(monthFilter);
   }, [loadDates, monthFilter]);
 
+  useEffect(() => {
+    if (effectiveRole === 'student') return;
+    API.getStudentsList()
+      .then((res) => {
+        const list = res.data || [];
+        if (list.length > 0) {
+          setStudentFilterOptions(
+            list.map((s) => ({ id: s.id, name: s.name }))
+          );
+        }
+      })
+      .catch(() => {
+        // Teacher role may not have access to /students/list; options populate from /exams rows
+      });
+  }, [effectiveRole]);
+
+  const loadExamsList = useCallback(
+    async (
+      pageToLoad = 1,
+      overrideFilters?: {
+        studentId?: string;
+        dateFrom?: string;
+        dateTo?: string;
+      }
+    ) => {
+      setListLoading(true);
+      try {
+        const sid = overrideFilters?.studentId ?? filterStudentId;
+        const df =
+          overrideFilters?.dateFrom !== undefined
+            ? overrideFilters.dateFrom
+            : useDateFrom
+              ? filterDateFrom
+              : '';
+        const dt =
+          overrideFilters?.dateTo !== undefined
+            ? overrideFilters.dateTo
+            : useDateTo
+              ? filterDateTo
+              : '';
+
+        const res = await API.getExamsList({
+          student_id: sid || undefined,
+          date_from: df || undefined,
+          date_to: dt || undefined,
+          page: pageToLoad,
+          per_page: 20,
+        });
+
+        const rows = res.data?.exams || [];
+        setExamsList(rows);
+        const pag = res.pagination;
+        setListPage(pag?.page || pageToLoad);
+        setListTotalPages(Math.max(1, pag?.total_pages || 1));
+        setListTotal(pag?.total ?? rows.length);
+
+        if (rows.length > 0) {
+          setStudentFilterOptions((prev) => {
+            const map = new Map<number, string>();
+            for (const opt of prev) map.set(opt.id, opt.name);
+            for (const row of rows) {
+              if (row.student_id && row.student_name && !map.has(row.student_id)) {
+                map.set(row.student_id, row.student_name);
+              }
+            }
+            return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+          });
+        }
+      } catch (err) {
+        showToast((err as Error)?.message || 'خطا در بارگذاری لیست نتایج آزمون', 'error');
+      } finally {
+        setListLoading(false);
+      }
+    },
+    [filterStudentId, useDateFrom, filterDateFrom, useDateTo, filterDateTo, showToast]
+  );
+
+  const handleOpenListView = async () => {
+    setView('list');
+    setSelectedDate(null);
+    setDetails(null);
+    await loadExamsList(1);
+  };
+
   const handleSelectDate = async (examDate: string) => {
     setLoading(true);
     setSelectedDate(examDate);
     setView('students');
     try {
-      const res = await API.getExamStudents(examDate);
-      const rawStudents = res.data?.students || [];
+      let rawStudents: ExamStudentSummary[] = [];
+
+      // Endpoint `/api/v1/exams/students` returns 403 for `teacher`.
+      // Teachers load rows via `/api/v1/exams` and `/api/v1/exams/details`.
+      if (effectiveRole === 'teacher') {
+        const examsRes = await API.getExamsList({
+          date_from: examDate,
+          date_to: examDate,
+          page: 1,
+          per_page: 200,
+        });
+        rawStudents = groupExamRowsByStudent(examsRes.data?.exams || []);
+      } else {
+        try {
+          const res = await API.getExamStudents(examDate);
+          rawStudents = res.data?.students || [];
+        } catch {
+          const examsRes = await API.getExamsList({
+            date_from: examDate,
+            date_to: examDate,
+            page: 1,
+            per_page: 200,
+          });
+          rawStudents = groupExamRowsByStudent(examsRes.data?.exams || []);
+        }
+      }
+
       setStudents(rawStudents);
 
       if (rawStudents.length > 0) {
@@ -249,10 +399,116 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
     });
   };
 
+  const handleOpenEditFromDetails = async (sub: SubjectResult) => {
+    if (!canEdit || !details?.student?.id || resolvingSubjectEdit) return;
+
+    const currentExamDate = activeExamDate || sub.exam_date || '';
+    if (sub.id && sub.id > 0) {
+      setEditingExam({
+        id: sub.id,
+        student_id: sub.student_id || details.student.id,
+        file_id: sub.file_id ?? null,
+        exam_date: sub.exam_date || currentExamDate,
+        subject: sub.subject,
+        chapter: sub.chapter ?? null,
+        total_q: sub.total_q,
+        correct: sub.correct,
+        wrong: sub.wrong,
+        skipped: sub.skipped,
+        percentage: sub.percentage,
+        student_name: details.student.name,
+        grade: details.student.grade,
+        field: details.student.field,
+      });
+      return;
+    }
+
+    // Fallback: resolve row `id` from GET /api/v1/exams if not attached on subject
+    setResolvingSubjectEdit(true);
+    try {
+      const res = await API.getExamsList({
+        student_id: details.student.id,
+        date_from: currentExamDate || undefined,
+        date_to: currentExamDate || undefined,
+        per_page: 100,
+      });
+      const match = (res.data?.exams || []).find(
+        (item) => safeTrim(item.subject) === safeTrim(sub.subject)
+      );
+      if (match && match.id) {
+        setEditingExam({
+          ...match,
+          student_name: match.student_name || details.student.name,
+          grade: match.grade ?? details.student.grade,
+          field: match.field ?? details.student.field,
+        });
+      } else {
+        showToast('شناسه ردیف درس برای ویرایش یافت نشد', 'error');
+      }
+    } catch (err) {
+      showToast((err as Error)?.message || 'خطا در دریافت اطلاعات ردیف درس', 'error');
+    } finally {
+      setResolvingSubjectEdit(false);
+    }
+  };
+
+  const handleEditSuccess = async (updatedExam: ExamListItem) => {
+    // 1. Update flat list state immediately
+    setExamsList((prev) => applyUpdatedExamRowToList(prev, updatedExam));
+
+    // 2. Update details state immediately with exact server `data.exam`
+    const viewingDate = activeExamDate;
+    setDetails((prev) => {
+      if (!prev) return prev;
+      const updated = applyUpdatedExamRowToDetails(prev, updatedExam, viewingDate);
+      if (updated) {
+        setTeacherFeedbacks(createInitialTeacherFeedbacks(updated));
+      }
+      return updated;
+    });
+
+    // Clear stale cache entries for affected dates
+    setDetailsCache((prev) => {
+      const next = { ...prev };
+      if (viewingDate && updatedExam.student_id) {
+        delete next[`${viewingDate}:${updatedExam.student_id}`];
+      }
+      if (updatedExam.exam_date && updatedExam.student_id) {
+        delete next[`${updatedExam.exam_date}:${updatedExam.student_id}`];
+      }
+      return next;
+    });
+
+    // 3. Refetch details / list from backend so `avg_percentage` stays in sync
+    if (view === 'details' && details?.student?.id && viewingDate) {
+      try {
+        const refreshed = await API.getExamDetails(viewingDate, details.student.id);
+        if (refreshed.data) {
+          const synced = applyUpdatedExamRowToDetails(refreshed.data, updatedExam, viewingDate);
+          if (synced) {
+            setDetails(synced);
+            setTeacherFeedbacks(createInitialTeacherFeedbacks(synced));
+            setDetailsCache((prev) => ({
+              ...prev,
+              [`${viewingDate}:${details.student.id}`]: synced,
+            }));
+            await loadStudentTrend(details.student.id, viewingDate, synced);
+          }
+        }
+      } catch {
+        // Keep optimistic updated state if refetch fails transiently
+      }
+    } else if (view === 'list') {
+      await loadExamsList(listPage);
+    }
+  };
+
   const handleGoBack = async () => {
     if (view === 'details' && selectedDate) {
       setView('students');
       setDetails(null);
+    } else if (view === 'details') {
+      await handleOpenListView();
     } else {
       await loadDates(monthFilter);
     }
@@ -279,17 +535,57 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
   const pageTitle =
     view === 'dates'
       ? 'آزمون‌های برگزار شده'
-      : view === 'students'
-        ? `شرکت‌کنندگان آزمون ${formatJalaliLong(selectedDate)}`
-        : `نتایج ${details?.student?.name || ''} - آزمون ${formatJalaliLong(activeExamDate)}`;
+      : view === 'list'
+        ? 'فهرست نتایج دروس آزمون‌ها'
+        : view === 'students'
+          ? `شرکت‌کنندگان آزمون ${formatJalaliLong(selectedDate)}`
+          : `نتایج ${details?.student?.name || ''} - آزمون ${formatJalaliLong(activeExamDate)}`;
 
   return (
     <div id="page-exams" className="space-y-6">
       <div className="no-print flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h1 className="text-2xl font-bold text-[#445D84] flex items-center gap-2">
-          <ClipboardList className="w-6 h-6 shrink-0" aria-hidden="true" />
-          <span>{pageTitle}</span>
-        </h1>
+        <div className="space-y-2">
+          <h1 className="text-2xl font-bold text-[#445D84] flex items-center gap-2">
+            <ClipboardList className="w-6 h-6 shrink-0" aria-hidden="true" />
+            <span>{pageTitle}</span>
+          </h1>
+
+          {(view === 'dates' || view === 'list') && (
+            <div
+              role="tablist"
+              aria-label="حالت نمایش آزمون‌ها"
+              className="inline-flex items-center p-1 rounded-xl bg-slate-100 border border-slate-200 gap-1"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === 'dates'}
+                onClick={() => loadDates(monthFilter)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  view === 'dates'
+                    ? 'bg-[#445D84] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                آزمون‌ها بر اساس تاریخ
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === 'list'}
+                onClick={handleOpenListView}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  view === 'list'
+                    ? 'bg-[#445D84] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <ListFilter className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>فهرست ردیف‌های نتایج</span>
+              </button>
+            </div>
+          )}
+        </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           {view === 'details' && details && (
@@ -337,7 +633,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
               <span>لینک‌های اشتراک کارنامه</span>
             </ActionButton>
           )}
-          {view !== 'dates' && (
+          {view !== 'dates' && view !== 'list' && (
             <ActionButton
               type="button"
               variant="secondary"
@@ -347,7 +643,13 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
               icon={<ChevronRight className="w-4 h-4" />}
               className="px-4 py-2"
             >
-              <span>{view === 'students' ? 'بازگشت به لیست آزمون‌ها' : 'بازگشت به شرکت‌کنندگان'}</span>
+              <span>
+                {view === 'students'
+                  ? 'بازگشت به لیست آزمون‌ها'
+                  : selectedDate
+                    ? 'بازگشت به شرکت‌کنندگان'
+                    : 'بازگشت به فهرست نتایج'}
+              </span>
             </ActionButton>
           )}
           {view === 'dates' && (
@@ -484,6 +786,358 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
               ] satisfies Column<ExamDateSummary>[]
             }
           />
+        </div>
+      ) : view === 'list' ? (
+        <div className="space-y-4">
+          {/* Filters Toolbar (student_id, Jalali date_from / date_to -> Gregorian YYYY-MM-DD) */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[240px_minmax(0,1fr)_minmax(0,1fr)] gap-4 items-end">
+              <div className="md:col-span-2 xl:col-span-1 min-w-0">
+                <label
+                  htmlFor="examListStudentFilter"
+                  className="block text-xs font-bold text-slate-700 mb-1.5"
+                >
+                  فیلتر دانش‌آموز:
+                </label>
+                <select
+                  id="examListStudentFilter"
+                  value={filterStudentId}
+                  onChange={(e) => setFilterStudentId(e.target.value)}
+                  className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl text-xs bg-white text-slate-700 font-semibold focus:outline-none focus:border-[#445D84]"
+                >
+                  <option value="">همه دانش‌آموزان</option>
+                  {studentFilterOptions.map((st) => (
+                    <option key={st.id} value={String(st.id)}>
+                      {st.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1.5 min-w-0">
+                <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useDateFrom}
+                    onChange={(e) => setUseDateFrom(e.target.checked)}
+                    className="rounded border-slate-300 text-[#445D84] focus:ring-[#445D84]"
+                  />
+                  <span>از تاریخ (شمسی):</span>
+                </label>
+                <JalaliDatePicker
+                  value={filterDateFrom}
+                  onChange={(iso) => {
+                    setFilterDateFrom(iso);
+                    if (!useDateFrom) setUseDateFrom(true);
+                  }}
+                  disabled={!useDateFrom}
+                />
+              </div>
+
+              <div className="space-y-1.5 min-w-0">
+                <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useDateTo}
+                    onChange={(e) => setUseDateTo(e.target.checked)}
+                    className="rounded border-slate-300 text-[#445D84] focus:ring-[#445D84]"
+                  />
+                  <span>تا تاریخ (شمسی):</span>
+                </label>
+                <JalaliDatePicker
+                  value={filterDateTo}
+                  onChange={(iso) => {
+                    setFilterDateTo(iso);
+                    if (!useDateTo) setUseDateTo(true);
+                  }}
+                  disabled={!useDateTo}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+              <div className="text-xs text-slate-500 tabular-nums">
+                مجموع رکوردهای یافت‌شده:{' '}
+                <strong className="text-slate-700">{toPersianDigits(listTotal)}</strong> ردیف
+              </div>
+              <div className="flex items-center gap-2">
+                {(filterStudentId || useDateFrom || useDateTo) && (
+                  <ActionButton
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      setFilterStudentId('');
+                      setUseDateFrom(false);
+                      setUseDateTo(false);
+                      loadExamsList(1, { studentId: '', dateFrom: '', dateTo: '' });
+                    }}
+                    icon={<X className="w-3.5 h-3.5" />}
+                    className="px-3 py-1.5 text-xs"
+                  >
+                    <span>پاک کردن فیلترها</span>
+                  </ActionButton>
+                )}
+                <ActionButton
+                  type="button"
+                  loading={listLoading}
+                  loadingText="در حال جستجو..."
+                  onClick={() => loadExamsList(1)}
+                  icon={<RefreshCw className="w-3.5 h-3.5" />}
+                  className="px-4 py-1.5 text-xs"
+                >
+                  <span>اعمال فیلتر و بروزرسانی</span>
+                </ActionButton>
+              </div>
+            </div>
+          </div>
+
+          {/* Flat Exams Table (GET /api/v1/exams) */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs">
+            {listLoading ? (
+              <div className="p-4 space-y-3">
+                {[1, 2, 3, 4].map((n) => (
+                  <div key={n} className="h-14 rounded-xl bg-slate-100 animate-pulse" />
+                ))}
+              </div>
+            ) : (
+              <DataTable<ExamListItem>
+                tableAriaLabel="جدول ردیف‌های نتایج آزمون"
+                data={examsList}
+                rowKey={(row) => row.id}
+                emptyState={
+                  <div className="p-10 text-center">
+                    <p className="text-sm font-semibold text-slate-500">
+                      نتیجه آزمونی مطابق فیلترهای انتخاب‌شده یافت نشد.
+                    </p>
+                  </div>
+                }
+                columns={[
+                  {
+                    key: 'student_name',
+                    header: 'دانش‌آموز',
+                    priority: 'primary',
+                    cellClassName: 'min-w-0 whitespace-normal break-words',
+                    cell: (row) => (
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-800">
+                          {row.student_name || `دانش‌آموز #${toPersianDigits(row.student_id)}`}
+                        </div>
+                        {(row.grade || row.field) && (
+                          <div className="text-[11px] text-slate-500 font-normal mt-0.5 tabular-nums">
+                            {row.grade ? `پایه ${toPersianDigits(row.grade)}` : ''}
+                            {row.grade && row.field ? ' · ' : ''}
+                            {row.field || ''}
+                          </div>
+                        )}
+                      </div>
+                    ),
+                  },
+                  {
+                    key: 'exam_date',
+                    header: 'تاریخ آزمون',
+                    priority: 'secondary',
+                    headerClassName: 'w-28',
+                    cellClassName: 'w-28 tabular-nums text-xs text-slate-600 font-medium',
+                    cell: (row) => toPersianDigits(formatGregorianToJalali(row.exam_date)),
+                  },
+                  {
+                    key: 'subject',
+                    header: 'درس / مبحث',
+                    priority: 'secondary',
+                    cellClassName: 'min-w-0 whitespace-normal break-words',
+                    cell: (row) => (
+                      <div>
+                        <div className="font-bold text-slate-800">{row.subject}</div>
+                        {row.chapter && (
+                          <div className="text-[11px] text-slate-500 line-clamp-1">
+                            {row.chapter}
+                          </div>
+                        )}
+                      </div>
+                    ),
+                  },
+                  {
+                    key: 'counts',
+                    header: 'آمار (کل / ص / غ / ن)',
+                    priority: 'desktop-only',
+                    headerClassName: 'hidden lg:table-cell w-40 text-center',
+                    cellClassName: 'hidden lg:table-cell w-40 text-center tabular-nums text-xs',
+                    cell: (row) => (
+                      <div className="inline-flex items-center gap-1.5">
+                        <span className="text-slate-600 font-semibold">{row.total_q}</span>
+                        <span className="text-slate-300">/</span>
+                        <span className="text-emerald-700 font-bold">{row.correct}</span>
+                        <span className="text-slate-300">/</span>
+                        <span className="text-red-600 font-bold">{row.wrong}</span>
+                        <span className="text-slate-300">/</span>
+                        <span className="text-slate-500">{row.skipped}</span>
+                      </div>
+                    ),
+                  },
+                  {
+                    key: 'percentage',
+                    header: 'درصد',
+                    priority: 'secondary',
+                    headerClassName: 'w-24 text-center',
+                    cellClassName: 'w-24 text-center tabular-nums',
+                    cell: (row) => {
+                      const pct = safeNumber(row.percentage);
+                      return (
+                        <span
+                          dir="ltr"
+                          className={`inline-block px-2 py-0.5 rounded-lg font-extrabold text-xs border ${
+                            pct >= 50
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-red-50 text-red-700 border-red-200'
+                          }`}
+                        >
+                          {pct.toFixed(1)}%
+                        </span>
+                      );
+                    },
+                  },
+                  {
+                    key: 'actions',
+                    header: 'عملیات',
+                    priority: 'secondary',
+                    isAction: true,
+                    headerClassName: canEdit ? 'w-40 text-center' : 'w-24 text-center',
+                    cellClassName: canEdit ? 'w-40 shrink-0' : 'w-24 shrink-0',
+                    cell: (row) => (
+                      <div className="flex items-center justify-center gap-1">
+                        {canEdit && (
+                          <ActionButton
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`ویرایش نتیجه ${row.subject} برای ${row.student_name || row.student_id}`}
+                            onClick={() => setEditingExam(row)}
+                            icon={<Pencil className="w-3.5 h-3.5" />}
+                            className="rounded-lg text-[#445D84] hover:bg-slate-100 font-semibold text-xs"
+                          >
+                            <span>ویرایش</span>
+                          </ActionButton>
+                        )}
+                        <ActionButton
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleSelectStudentDetails(row.exam_date, row.student_id)}
+                          icon={<Eye className="w-3.5 h-3.5" />}
+                          className="rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs"
+                        >
+                          <span>کارنامه</span>
+                        </ActionButton>
+                      </div>
+                    ),
+                  },
+                ]}
+                mobileCardRender={(row) => {
+                  const pct = safeNumber(row.percentage);
+                  return (
+                    <div className="space-y-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-extrabold text-sm text-slate-800">
+                            {row.student_name || `دانش‌آموز #${toPersianDigits(row.student_id)}`}
+                          </div>
+                          <div className="text-xs font-bold text-[#445D84] mt-0.5">
+                            {row.subject}
+                            {row.chapter ? ` (${row.chapter})` : ''}
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
+                            {toPersianDigits(formatGregorianToJalali(row.exam_date))}
+                          </div>
+                        </div>
+                        <span
+                          dir="ltr"
+                          className={`shrink-0 inline-block px-2 py-1 rounded-lg font-extrabold text-xs border tabular-nums ${
+                            pct >= 50
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-red-50 text-red-700 border-red-200'
+                          }`}
+                        >
+                          {pct.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] tabular-nums">
+                          <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-bold">
+                            صحیح: {row.correct}
+                          </span>
+                          <span className="px-2 py-0.5 rounded bg-red-50 text-red-700 font-bold">
+                            غلط: {row.wrong}
+                          </span>
+                          <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold">
+                            نزده: {row.skipped}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {canEdit && (
+                            <ActionButton
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`ویرایش نتیجه ${row.subject}`}
+                              onClick={() => setEditingExam(row)}
+                              icon={<Pencil className="w-3.5 h-3.5" />}
+                              className="rounded-lg text-[#445D84] hover:bg-slate-100 font-semibold text-xs"
+                            >
+                              <span>ویرایش</span>
+                            </ActionButton>
+                          )}
+                          <ActionButton
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              handleSelectStudentDetails(row.exam_date, row.student_id)
+                            }
+                            icon={<Eye className="w-3.5 h-3.5" />}
+                            className="rounded-lg text-blue-600 hover:bg-blue-50 font-medium text-xs"
+                          >
+                            <span>کارنامه</span>
+                          </ActionButton>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }}
+              />
+            )}
+
+            {listTotalPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 text-xs">
+                <span className="text-slate-500 tabular-nums">
+                  صفحه {toPersianDigits(listPage)} از {toPersianDigits(listTotalPages)}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <ActionButton
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={listPage <= 1 || listLoading}
+                    onClick={() => loadExamsList(listPage - 1)}
+                    icon={<ChevronRight className="w-3.5 h-3.5" />}
+                    className="px-2.5 py-1"
+                  >
+                    <span>قبلی</span>
+                  </ActionButton>
+                  <ActionButton
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={listPage >= listTotalPages || listLoading}
+                    onClick={() => loadExamsList(listPage + 1)}
+                    className="px-2.5 py-1"
+                  >
+                    <span>بعدی</span>
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </ActionButton>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       ) : view === 'students' ? (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs">
@@ -794,6 +1448,32 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                           cellClassName: 'hidden xl:table-cell w-24 py-1.5 text-center',
                           cell: (sub) => <RadialGauge percentage={safeNumber(sub.percentage)} />,
                         },
+                        ...(canEdit
+                          ? [
+                              {
+                                key: 'actions',
+                                header: 'ویرایش',
+                                priority: 'secondary' as const,
+                                isAction: true,
+                                headerClassName: 'w-24 text-center',
+                                cellClassName: 'w-24 text-center shrink-0',
+                                cell: (sub: SubjectResult) => (
+                                  <ActionButton
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    loading={resolvingSubjectEdit}
+                                    onClick={() => handleOpenEditFromDetails(sub)}
+                                    icon={<Pencil className="w-3.5 h-3.5" />}
+                                    aria-label={`ویرایش نتیجه ${sub.subject}`}
+                                    className="rounded-lg text-[#445D84] hover:bg-slate-100 font-semibold text-xs"
+                                  >
+                                    <span>ویرایش</span>
+                                  </ActionButton>
+                                ),
+                              } satisfies Column<SubjectResult>,
+                            ]
+                          : []),
                       ] satisfies Column<SubjectResult>[]
                     }
                     mobileCardRender={(sub) => {
@@ -841,9 +1521,25 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
                                 نزده: {sub.skipped}
                               </span>
                             </div>
-                            <span className="text-[11px] text-slate-500 font-medium tabular-nums">
-                              کل سوالات: {sub.total_q}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-slate-500 font-medium tabular-nums">
+                                کل سوالات: {sub.total_q}
+                              </span>
+                              {canEdit && (
+                                <ActionButton
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  loading={resolvingSubjectEdit}
+                                  onClick={() => handleOpenEditFromDetails(sub)}
+                                  icon={<Pencil className="w-3.5 h-3.5" />}
+                                  aria-label={`ویرایش نتیجه ${sub.subject}`}
+                                  className="rounded-lg text-[#445D84] hover:bg-slate-100 font-semibold text-xs"
+                                >
+                                  <span>ویرایش</span>
+                                </ActionButton>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
@@ -1313,6 +2009,17 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({ showToast, onNavigate }) =
         examDate={shareModalState.examDate}
         showToast={showToast}
       />
+
+      {/* Edit Exam Result Modal (RBAC: admin & teacher only) */}
+      {canEdit && (
+        <EditExamResultModal
+          isOpen={Boolean(editingExam)}
+          exam={editingExam}
+          onClose={() => setEditingExam(null)}
+          onSuccess={handleEditSuccess}
+          showToast={showToast}
+        />
+      )}
     </div>
   );
 };

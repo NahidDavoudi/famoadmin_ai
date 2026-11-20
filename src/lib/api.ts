@@ -8,6 +8,9 @@ import type {
   ExamDateSummary,
   ExamStudentSummary,
   ExamDetailsResponse,
+  ExamListItem,
+  GetExamsListQuery,
+  UpdateExamResultRequest,
   ExamFile,
   BlogPost,
   ReportDayStat,
@@ -63,6 +66,7 @@ import {
   safeTrim,
   safeNumber,
   normalizeExamDetails,
+  normalizeExamListItem,
   buildStudentExamTrend,
   type RawStudentExamHistoryRow,
   type StudentExamTrendPoint,
@@ -1886,6 +1890,168 @@ class FamoApiClient {
         ...normalizeExamDetails(res.data),
         comments: Array.isArray(res.data?.comments) ? res.data.comments : [],
       },
+    };
+  }
+
+  /**
+   * GET /api/v1/exams?student_id={id}&date_from={YYYY-MM-DD}&date_to={YYYY-MM-DD}&page=1&per_page=20
+   * Accessible by `admin`, `teacher`, `supporter` (returns exam rows with `id` and `student_name`).
+   */
+  async getExamsList(
+    params: GetExamsListQuery = {}
+  ): Promise<ApiEnvelope<{ exams: ExamListItem[] }>> {
+    const query = new URLSearchParams({
+      page: String(Math.max(1, safeNumber(params.page, 1))),
+      per_page: String(Math.max(1, safeNumber(params.per_page, 20))),
+    });
+    if (
+      params.student_id !== undefined &&
+      params.student_id !== null &&
+      safeTrim(params.student_id) !== ''
+    ) {
+      query.set('student_id', safeTrim(params.student_id));
+    }
+    if (safeTrim(params.date_from)) {
+      query.set('date_from', safeTrim(params.date_from));
+    }
+    if (safeTrim(params.date_to)) {
+      query.set('date_to', safeTrim(params.date_to));
+    }
+
+    const res = await this.requestJson<
+      { exams?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>
+    >(
+      `/exams?${query.toString()}`,
+      {},
+      'خطا در بارگذاری لیست نتایج آزمون'
+    );
+
+    const rawExams = Array.isArray(res.data) ? res.data : res.data?.exams || [];
+    return {
+      ...res,
+      data: {
+        exams: rawExams.map((row) => normalizeExamListItem(row)),
+      },
+    };
+  }
+
+  /**
+   * PATCH /api/v1/exams/{id} (with 405 fallback to PUT /api/v1/exams/{id})
+   * Permitted for `admin` and `teacher` roles only.
+   * Never sends `percentage` (computed server-side: ROUND((correct / total_q) * 100, 2)).
+   */
+  async updateExamResult(
+    id: number,
+    payload: UpdateExamResultRequest
+  ): Promise<ApiEnvelope<{ exam: ExamListItem }>> {
+    const body: Record<string, unknown> = {};
+    if (payload.exam_date !== undefined) {
+      body.exam_date = safeTrim(payload.exam_date);
+    }
+    if (payload.subject !== undefined) {
+      body.subject = safeTrim(payload.subject);
+    }
+    if (payload.chapter !== undefined) {
+      const cleanChapter = safeTrim(payload.chapter);
+      body.chapter = cleanChapter !== '' ? cleanChapter : null;
+    }
+    if (payload.total_q !== undefined) {
+      body.total_q = Number(payload.total_q);
+    }
+    if (payload.correct !== undefined) {
+      body.correct = Number(payload.correct);
+    }
+    if (payload.wrong !== undefined) {
+      body.wrong = Number(payload.wrong);
+    }
+    if (payload.skipped !== undefined) {
+      body.skipped = Number(payload.skipped);
+    }
+    if (payload.student_id !== undefined && Number(payload.student_id) >= 1) {
+      body.student_id = Number(payload.student_id);
+    }
+
+    const endpoint = `/exams/${Number(id)}`;
+    const bodyStr = JSON.stringify(body);
+
+    let usedMethod: 'PATCH' | 'PUT' = 'PATCH';
+    let res = await this.fetch(endpoint, {
+      method: 'PATCH',
+      body: bodyStr,
+    });
+
+    if (res.status === 405) {
+      usedMethod = 'PUT';
+      res = await this.fetch(endpoint, {
+        method: 'PUT',
+        body: bodyStr,
+      });
+    }
+
+    let json: ApiEnvelope<{ exam?: Record<string, unknown> } | Record<string, unknown>>;
+    try {
+      json = (await res.json()) as ApiEnvelope<
+        { exam?: Record<string, unknown> } | Record<string, unknown>
+      >;
+    } catch {
+      const fallbackByStatus =
+        res.status === 401
+          ? 'نشست منقضی شده یا توکن نامعتبر است'
+          : res.status === 403
+            ? 'فقط مدرس و مدیر امکان ویرایش نتایج آزمون را دارند'
+            : res.status === 404
+              ? 'نتیجه آزمون مورد نظر یافت نشد'
+              : 'خطا در ویرایش نتیجه آزمون';
+      const err = new Error(fallbackByStatus) as Error & { status?: number };
+      err.status = res.status;
+      throw err;
+    }
+
+    if (!res.ok || json.success === false) {
+      const fallbackByStatus =
+        res.status === 401
+          ? 'نشست منقضی شده یا توکن نامعتبر است'
+          : res.status === 403
+            ? 'فقط مدرس و مدیر امکان ویرایش نتایج آزمون را دارند'
+            : res.status === 404
+              ? 'نتیجه آزمون مورد نظر یافت نشد'
+              : 'خطا در ویرایش نتیجه آزمون';
+      const msg = extractErrorMessage(json.error, fallbackByStatus);
+      const err = new Error(msg) as Error & { status?: number; code?: string };
+      err.status = res.status;
+      if (json.error && typeof json.error === 'object' && json.error.code) {
+        err.code = json.error.code;
+      }
+      throw err;
+    }
+
+    recordClientActivityLog({
+      actorName: this.currentActorName,
+      actorRole: this.currentActorRole,
+      method: usedMethod,
+      path: endpoint,
+      bodyObj: body,
+    });
+
+    const rawData = json.data as { exam?: Record<string, unknown> } | Record<string, unknown> | null;
+    const rawExamObj: Record<string, unknown> =
+      rawData &&
+      typeof rawData === 'object' &&
+      'exam' in rawData &&
+      rawData.exam &&
+      typeof rawData.exam === 'object'
+        ? (rawData.exam as Record<string, unknown>)
+        : rawData && typeof rawData === 'object'
+          ? (rawData as Record<string, unknown>)
+          : {};
+
+    return {
+      success: true,
+      data: {
+        exam: normalizeExamListItem({ id, ...body, ...rawExamObj }),
+      },
+      pagination: json.pagination ?? null,
+      error: null,
     };
   }
 

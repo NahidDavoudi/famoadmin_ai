@@ -616,6 +616,19 @@ export function describeApiMutation(
         endpoint: cleanPath,
       };
     }
+    if (method === 'PATCH' || method === 'PUT') {
+      const examId = cleanPath.split('/')[2] || '-';
+      const subject = safeTrim(body.subject);
+      return {
+        action_type: 'update',
+        category: 'exams',
+        category_label: CATEGORY_LABELS.exams,
+        title: 'ویرایش نتیجه آزمون',
+        description: `ویرایش نمره درس ${subject ? `«${subject}» ` : ''}(ردیف آزمون شناسه ${examId})`,
+        method,
+        endpoint: cleanPath,
+      };
+    }
     const subjectsCount = Array.isArray(body.subjects) ? body.subjects.length : 0;
     const examDate = safeTrim(body.exam_date);
     return {

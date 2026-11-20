@@ -12,6 +12,7 @@ import {
   Newspaper,
   LineChart,
   History,
+  TrendingUp,
   LogOut,
   Loader2,
   Menu,
@@ -42,6 +43,7 @@ const NAV_ITEMS: { id: PageId; label: string; icon: React.ComponentType<{ classN
   { id: 'supporters', label: 'پشتیبان‌ها و تخصیص', icon: Headset },
   { id: 'blog', label: 'وبلاگ', icon: Newspaper },
   { id: 'reports', label: 'گزارش‌ها', icon: LineChart },
+  { id: 'analytics', label: 'تحلیل پیشرفته آزمون', icon: TrendingUp },
   { id: 'activity_logs', label: 'لاگ فعالیت‌ها', icon: History },
 ];
 
