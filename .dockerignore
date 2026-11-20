@@ -8,3 +8,4 @@ dist
 docker-compose.yml
 fix.sh
 npm-debug.log*
+package-lock.json

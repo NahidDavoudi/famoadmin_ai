@@ -11,9 +11,11 @@ ENV VITE_API_BASE=$VITE_API_BASE
 ENV VITE_MAIN_SITE_URL=$VITE_MAIN_SITE_URL
 ENV VITE_AUTH_URL=$VITE_AUTH_URL
 
-# Install dependencies
-COPY package.json package-lock.json* ./
-RUN npm install
+# Install dependencies without glibc-locked optional deps so Alpine/MUSL resolves
+# native binaries (@rollup/rollup-linux-x64-musl, @tailwindcss/oxide-linux-x64-musl, lightningcss-linux-x64-musl)
+COPY package.json ./
+RUN rm -rf node_modules package-lock.json \
+    && npm install --no-audit --no-fund
 
 # Copy source code and build production bundle
 COPY . .
