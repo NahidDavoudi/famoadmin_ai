@@ -158,8 +158,29 @@ export function toPersianDigits(val: string | number | null | undefined): string
 export function toEnglishDigits(val: string | number | null | undefined): string {
   if (val === null || val === undefined) return '';
   return String(val)
+    .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '')
     .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
-    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660));
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[０-９]/g, (d) => String(d.charCodeAt(0) - 0xff10));
 }
+
+export function normalizeIntegerInput(
+  val: string | number | null | undefined,
+  maxLength?: number
+): string {
+  const digits = toEnglishDigits(val).replace(/[^\d]/g, '');
+  if (maxLength && maxLength > 0) {
+    return digits.slice(0, maxLength);
+  }
+  return digits;
+}
+
+export function parseStrictInteger(val: string | number | null | undefined): number | null {
+  const cleaned = toEnglishDigits(val).trim();
+  if (!/^\d+$/.test(cleaned)) return null;
+  const num = Number(cleaned);
+  return Number.isSafeInteger(num) ? num : null;
+}
+
 
 

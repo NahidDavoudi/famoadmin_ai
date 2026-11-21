@@ -18,7 +18,12 @@ import {
   type AdmissionFormValues,
 } from '../lib/admissions-testimonials';
 import { resolveEntityImageUrl } from '../lib/image-upload';
-import { getTodayJalali, toEnglishDigits, toPersianDigits } from '../lib/jalali';
+import {
+  getTodayJalali,
+  normalizeIntegerInput,
+  parseStrictInteger,
+  toEnglishDigits,
+} from '../lib/jalali';
 import type {
   AcademicField,
   AdmissionExamType,
@@ -219,12 +224,12 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
     try {
       const payload = {
         student_name: studentName.trim(),
-        year: Number(toEnglishDigits(year).trim()),
+        year: parseStrictInteger(year) ?? todayJy,
         exam_type: examType,
         field: field.trim(),
         admission_title: admissionTitle.trim(),
         rank: rank.trim() ? toEnglishDigits(rank).trim() : null,
-        display_order: Number(toEnglishDigits(displayOrder).trim()) || 0,
+        display_order: parseStrictInteger(displayOrder) ?? 0,
         status: effectiveStatus,
         consent_obtained: consentObtained,
         photo: photoFile,
@@ -433,14 +438,19 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
                 id="admissionYear"
                 type="text"
                 inputMode="numeric"
+                dir="ltr"
+                maxLength={4}
                 value={year}
                 onChange={(e) => {
-                  setYear(e.target.value);
+                  setYear(normalizeIntegerInput(e.target.value, 4));
                   clearFieldError('year');
                 }}
-                placeholder={toPersianDigits(todayJy)}
-                className={getFieldClass(Boolean(errors.year), 'tabular-nums')}
+                placeholder={String(todayJy)}
+                className={getFieldClass(Boolean(errors.year), 'tabular-nums text-right')}
               />
+              <p className="mt-1 text-[11px] text-slate-500">
+                اعداد انگلیسی یا فارسی به‌صورت خودکار نرمالایز می‌شوند (مثلاً {todayJy}).
+              </p>
               <FieldError message={errors.year} />
             </div>
 
@@ -550,14 +560,17 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
               </label>
               <input
                 id="admissionDisplayOrder"
-                type="number"
-                min={0}
+                type="text"
+                inputMode="numeric"
+                dir="ltr"
+                maxLength={5}
                 value={displayOrder}
                 onChange={(e) => {
-                  setDisplayOrder(e.target.value);
+                  setDisplayOrder(normalizeIntegerInput(e.target.value, 5));
                   clearFieldError('display_order');
                 }}
-                className={getFieldClass(Boolean(errors.display_order), 'tabular-nums')}
+                placeholder="0"
+                className={getFieldClass(Boolean(errors.display_order), 'tabular-nums text-right')}
               />
               <FieldError message={errors.display_order} />
             </div>

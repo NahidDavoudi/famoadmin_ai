@@ -9,7 +9,7 @@ import type {
   TestimonialStatus,
   UserRole,
 } from '../types';
-import { toEnglishDigits } from './jalali';
+import { normalizeIntegerInput, parseStrictInteger, toEnglishDigits } from './jalali';
 
 export const ADMISSION_CONSENT_LABEL =
   'رضایت شاگرد/ولی برای انتشار نام و عکس دریافت شده است';
@@ -85,7 +85,10 @@ export function normalizeAdmission(raw: Record<string, unknown>): AdmissionRecor
   return {
     id: Number(raw.id) || 0,
     student_name: String(raw.student_name ?? raw.name ?? '').trim(),
-    year: Number(raw.year ?? raw.jalali_year ?? raw.admission_year) || 1404,
+    year:
+      parseStrictInteger(
+        (raw.jalali_year ?? raw.year ?? raw.admission_year) as string | number | null | undefined
+      ) ?? 1404,
     exam_type: String(raw.exam_type ?? 'konkur').trim() || 'konkur',
     field: String(raw.field ?? raw.major ?? '').trim(),
     admission_title: String(
@@ -95,7 +98,10 @@ export function normalizeAdmission(raw: Record<string, unknown>): AdmissionRecor
       rankRaw === null || rankRaw === undefined || String(rankRaw).trim() === ''
         ? null
         : String(rankRaw).trim(),
-    display_order: Number(raw.display_order ?? raw.sort_order ?? 0) || 0,
+    display_order:
+      parseStrictInteger(
+        (raw.display_order ?? raw.sort_order ?? 0) as string | number | null | undefined
+      ) ?? 0,
     photo_url:
       photoRaw && String(photoRaw).trim() !== '' && String(photoRaw).trim() !== 'null'
         ? String(photoRaw).trim()
@@ -203,10 +209,9 @@ export function validateAdmissionForm(values: AdmissionFormValues): Record<strin
     errors.student_name = 'نام دانش‌آموز باید حداقل ۲ کاراکتر باشد';
   }
 
-  const yearStr = toEnglishDigits(values.year).trim();
-  const yearNum = Number(yearStr);
-  if (!yearStr || !Number.isInteger(yearNum) || yearNum < 1380 || yearNum > 1450) {
-    errors.year = 'سال شمسی معتبر وارد کنید (مثلاً ۱۴۰۴)';
+  const yearNum = parseStrictInteger(values.year);
+  if (yearNum === null || yearNum < 1380 || yearNum > 1450) {
+    errors.year = 'سال شمسی معتبر وارد کنید (مثلاً 1404 یا ۱۴۰۴)';
   }
 
   if (!values.exam_type || !String(values.exam_type).trim()) {
@@ -224,8 +229,8 @@ export function validateAdmissionForm(values: AdmissionFormValues): Record<strin
 
   const orderStr = toEnglishDigits(values.display_order).trim();
   if (orderStr !== '') {
-    const orderNum = Number(orderStr);
-    if (!Number.isInteger(orderNum) || orderNum < 0) {
+    const orderNum = parseStrictInteger(orderStr);
+    if (orderNum === null || orderNum < 0) {
       errors.display_order = 'ترتیب نمایش باید عدد صحیح غیرمنفی باشد';
     }
   }
@@ -252,21 +257,33 @@ export function shouldWarnConsentUnpublish(
 
 export function buildAdmissionFormData(input: AdmissionUpsertInput): FormData {
   const fd = new FormData();
-  fd.append('student_name', input.student_name.trim());
-  fd.append('name', input.student_name.trim());
-  fd.append('year', String(input.year));
+  const cleanName = input.student_name.trim();
+  const cleanYear = normalizeIntegerInput(input.year, 4);
+  const cleanTitle = input.admission_title.trim();
+  const cleanOrder = String(parseStrictInteger(input.display_order) ?? 0);
+  const cleanConsent = input.consent_obtained ? '1' : '0';
+
+  fd.append('student_name', cleanName);
+  fd.append('name', cleanName);
+  fd.append('jalali_year', cleanYear);
+  fd.append('year', cleanYear);
+  fd.append('admission_year', cleanYear);
   fd.append('exam_type', String(input.exam_type).trim());
   fd.append('field', input.field.trim());
-  fd.append('admission_title', input.admission_title.trim());
+  fd.append('admission_title', cleanTitle);
+  fd.append('title', cleanTitle);
   if (input.rank !== undefined && input.rank !== null && String(input.rank).trim() !== '') {
     fd.append('rank', toEnglishDigits(String(input.rank)).trim());
   } else {
     fd.append('rank', '');
   }
-  fd.append('display_order', String(Math.max(0, Math.floor(Number(input.display_order) || 0))));
+  fd.append('display_order', cleanOrder);
+  fd.append('sort_order', cleanOrder);
   const effectiveStatus: AdmissionStatus = input.consent_obtained ? input.status : 'draft';
   fd.append('status', effectiveStatus);
-  fd.append('consent_obtained', input.consent_obtained ? '1' : '0');
+  fd.append('consent_obtained', cleanConsent);
+  fd.append('has_consent', cleanConsent);
+  fd.append('consent', cleanConsent);
 
   if (input.photo instanceof File) {
     fd.append('photo', input.photo);

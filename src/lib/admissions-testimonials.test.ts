@@ -12,6 +12,7 @@ import {
   validateAdmissionForm,
   validateTestimonialForm,
 } from './admissions-testimonials';
+import { normalizeIntegerInput, parseStrictInteger, toEnglishDigits } from './jalali';
 
 test('canAccessAdminOnlySections permits only admin role', () => {
   assert.equal(canAccessAdminOnlySections('admin'), true);
@@ -69,10 +70,10 @@ test('shouldWarnConsentUnpublish triggers only when unchecking consent on a publ
   assert.equal(shouldWarnConsentUnpublish(null, false), false);
 });
 
-test('buildAdmissionFormData forces draft when consent is false and includes remove_photo flag', () => {
+test('buildAdmissionFormData forces draft when consent is false, sends jalali_year/title/has_consent aliases, and includes remove_photo flag', () => {
   const fd = buildAdmissionFormData({
     student_name: '  آرش کریمی  ',
-    year: 1404,
+    year: '۱۴۰۴' as unknown as number,
     exam_type: 'konkur',
     field: 'ریاضی',
     admission_title: 'مهندسی کامپیوتر شریف',
@@ -84,10 +85,45 @@ test('buildAdmissionFormData forces draft when consent is false and includes rem
   });
 
   assert.equal(fd.get('student_name'), 'آرش کریمی');
+  assert.equal(fd.get('name'), 'آرش کریمی');
+  assert.equal(fd.get('year'), '1404');
+  assert.equal(fd.get('jalali_year'), '1404');
+  assert.equal(fd.get('admission_year'), '1404');
+  assert.equal(fd.get('admission_title'), 'مهندسی کامپیوتر شریف');
+  assert.equal(fd.get('title'), 'مهندسی کامپیوتر شریف');
   assert.equal(fd.get('status'), 'draft');
   assert.equal(fd.get('consent_obtained'), '0');
+  assert.equal(fd.get('has_consent'), '0');
+  assert.equal(fd.get('consent'), '0');
   assert.equal(fd.get('rank'), '42');
+  assert.equal(fd.get('display_order'), '2');
   assert.equal(fd.get('remove_photo'), '1');
+});
+
+test('digit normalization converts English, Persian, Arabic-Indic, and full-width digits cleanly', () => {
+  assert.equal(toEnglishDigits('\u200f۱۴۰۴\u200e'), '1404');
+  assert.equal(toEnglishDigits('١٤٠٤'), '1404');
+  assert.equal(toEnglishDigits('１４０４'), '1404');
+  assert.equal(normalizeIntegerInput(' ۱۴۰۴ سال ', 4), '1404');
+  assert.equal(normalizeIntegerInput('140499', 4), '1404');
+  assert.equal(parseStrictInteger('1404'), 1404);
+  assert.equal(parseStrictInteger('۱۴۰۴'), 1404);
+  assert.equal(parseStrictInteger('١٤٠٤'), 1404);
+  assert.equal(parseStrictInteger('1404.5'), null);
+  assert.equal(parseStrictInteger('1404a'), null);
+
+  const enYearErrors = validateAdmissionForm({
+    student_name: 'رضا کریمی',
+    year: '1404',
+    exam_type: 'konkur',
+    field: 'ریاضی',
+    admission_title: 'مهندسی برق شریف',
+    rank: '15',
+    display_order: '۳',
+    status: 'draft',
+    consent_obtained: false,
+  });
+  assert.deepEqual(enYearErrors, {});
 });
 
 test('extractApiFieldErrors parses 422 details and maps CONSENT_REQUIRED clearly', () => {

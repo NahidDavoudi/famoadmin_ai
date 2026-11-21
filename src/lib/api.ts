@@ -75,6 +75,7 @@ import {
   normalizeAdmission,
   normalizeTestimonial,
 } from './admissions-testimonials';
+import { normalizeIntegerInput } from './jalali';
 import { normalizeSubscription } from './subscriptions';
 import {
   normalizeAssignmentStudentRow,
@@ -3183,7 +3184,11 @@ class FamoApiClient {
     params.set('page', String(query.page ?? 1));
     params.set('per_page', String(query.per_page ?? 20));
     if (query.year !== undefined && safeTrim(query.year) !== '') {
-      params.set('year', safeTrim(query.year));
+      const normalizedYear = normalizeIntegerInput(query.year, 4);
+      if (normalizedYear) {
+        params.set('year', normalizedYear);
+        params.set('jalali_year', normalizedYear);
+      }
     }
     if (query.status) {
       params.set('status', query.status);
@@ -3269,7 +3274,7 @@ class FamoApiClient {
   }
 
   /**
-   * PATCH /api/v1/admissions/{id} (multipart/form-data)
+   * PUT /api/v1/admissions/{id} (multipart/form-data)
    */
   async updateAdmission(
     id: number,
@@ -3281,7 +3286,7 @@ class FamoApiClient {
     >(
       `/admissions/${id}`,
       {
-        method: 'PATCH',
+        method: 'PUT',
         body: formData,
       },
       'خطا در ویرایش اطلاعات قبولی'
