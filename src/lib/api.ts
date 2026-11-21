@@ -58,7 +58,23 @@ import type {
   AssignmentHistoryEntry,
   AssignmentInitialFillRequest,
   AssignmentInitialFillReport,
+  AdmissionRecord,
+  AdmissionStatus,
+  AdmissionUpsertInput,
+  GetAdmissionsQuery,
+  TestimonialRecord,
+  TestimonialCreateInput,
+  TestimonialUpdateInput,
+  TestimonialModerateInput,
+  TestimonialBulkRejectInput,
+  GetTestimonialsQuery,
 } from '../types';
+import {
+  buildAdmissionFormData,
+  chunkBulkRejectIds,
+  normalizeAdmission,
+  normalizeTestimonial,
+} from './admissions-testimonials';
 import { normalizeSubscription } from './subscriptions';
 import {
   normalizeAssignmentStudentRow,
@@ -100,6 +116,29 @@ import {
 export interface ApiErrorObject {
   code?: string;
   message?: string;
+  details?: Record<string, string | string[]>;
+  fields?: Record<string, string | string[]>;
+}
+
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  readonly details: Record<string, string | string[]>;
+
+  constructor(
+    message: string,
+    options: {
+      status?: number;
+      code?: string | null;
+      details?: Record<string, string | string[]> | null;
+    } = {}
+  ) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = options.status ?? 0;
+    this.code = options.code ?? null;
+    this.details = options.details ?? {};
+  }
 }
 
 export interface ApiEnvelope<T> {
@@ -246,7 +285,13 @@ class FamoApiClient {
     }
 
     if (!res.ok || json.success === false) {
-      throw new Error(extractErrorMessage(json.error, defaultErrorMsg));
+      const errObj =
+        json.error && typeof json.error === 'object' ? (json.error as ApiErrorObject) : null;
+      throw new ApiRequestError(extractErrorMessage(json.error, defaultErrorMsg), {
+        status: res.status,
+        code: errObj?.code ?? null,
+        details: errObj?.details ?? errObj?.fields ?? {},
+      });
     }
 
     const method = (options.method || 'GET').toUpperCase();
@@ -3120,6 +3165,441 @@ class FamoApiClient {
         method: 'DELETE',
       },
       'خطا در حذف ستون کلاس رفع اشکال از سرور'
+    );
+  }
+
+  // ==========================================================================
+  // Admissions / قبولی‌ها (/api/v1/admissions*) — Admin only
+  // ==========================================================================
+
+  /**
+   * GET /api/v1/admissions
+   */
+  async getAdmissions(
+    query: GetAdmissionsQuery = {},
+    signal?: AbortSignal
+  ): Promise<ApiEnvelope<AdmissionRecord[]>> {
+    const params = new URLSearchParams();
+    params.set('page', String(query.page ?? 1));
+    params.set('per_page', String(query.per_page ?? 20));
+    if (query.year !== undefined && safeTrim(query.year) !== '') {
+      params.set('year', safeTrim(query.year));
+    }
+    if (query.status) {
+      params.set('status', query.status);
+    }
+    if (query.search && safeTrim(query.search) !== '') {
+      params.set('search', safeTrim(query.search));
+    }
+    if (query.sort) {
+      params.set('sort', query.sort);
+    }
+    if (query.order) {
+      params.set('order', query.order);
+    }
+
+    const res = await this.requestJson<
+      | AdmissionRecord[]
+      | { admissions?: unknown[]; items?: unknown[] }
+    >(
+      `/admissions?${params.toString()}`,
+      { signal },
+      'خطا در بارگذاری لیست قبولی‌ها'
+    );
+
+    const rawData = res.data;
+    const rawList: unknown[] = Array.isArray(rawData)
+      ? rawData
+      : Array.isArray((rawData as { admissions?: unknown[] })?.admissions)
+        ? ((rawData as { admissions: unknown[] }).admissions)
+        : Array.isArray((rawData as { items?: unknown[] })?.items)
+          ? ((rawData as { items: unknown[] }).items)
+          : [];
+
+    const normalized = rawList.map((item) =>
+      normalizeAdmission((item || {}) as Record<string, unknown>)
+    );
+
+    return {
+      ...res,
+      data: normalized,
+    };
+  }
+
+  /**
+   * GET /api/v1/admissions/{id}
+   */
+  async getAdmissionById(id: number): Promise<ApiEnvelope<AdmissionRecord>> {
+    const res = await this.requestJson<
+      Record<string, unknown> | { admission?: Record<string, unknown> }
+    >(`/admissions/${id}`, {}, 'خطا در دریافت اطلاعات قبولی');
+    const raw =
+      (res.data as { admission?: Record<string, unknown> })?.admission ||
+      (res.data as Record<string, unknown>) ||
+      {};
+    return {
+      ...res,
+      data: normalizeAdmission(raw),
+    };
+  }
+
+  /**
+   * POST /api/v1/admissions (multipart/form-data)
+   */
+  async createAdmission(input: AdmissionUpsertInput): Promise<ApiEnvelope<AdmissionRecord>> {
+    const formData = buildAdmissionFormData(input);
+    const res = await this.requestJson<
+      Record<string, unknown> | { admission?: Record<string, unknown> }
+    >(
+      '/admissions',
+      {
+        method: 'POST',
+        body: formData,
+      },
+      'خطا در ثبت قبولی جدید'
+    );
+    const raw =
+      (res.data as { admission?: Record<string, unknown> })?.admission ||
+      (res.data as Record<string, unknown>) ||
+      {};
+    return {
+      ...res,
+      data: normalizeAdmission(raw),
+    };
+  }
+
+  /**
+   * PATCH /api/v1/admissions/{id} (multipart/form-data)
+   */
+  async updateAdmission(
+    id: number,
+    input: AdmissionUpsertInput
+  ): Promise<ApiEnvelope<AdmissionRecord>> {
+    const formData = buildAdmissionFormData(input);
+    const res = await this.requestJson<
+      Record<string, unknown> | { admission?: Record<string, unknown> }
+    >(
+      `/admissions/${id}`,
+      {
+        method: 'PATCH',
+        body: formData,
+      },
+      'خطا در ویرایش اطلاعات قبولی'
+    );
+    const raw =
+      (res.data as { admission?: Record<string, unknown> })?.admission ||
+      (res.data as Record<string, unknown>) ||
+      {};
+    return {
+      ...res,
+      data: normalizeAdmission(raw),
+    };
+  }
+
+  /**
+   * PATCH /api/v1/admissions/{id}/status
+   */
+  async updateAdmissionStatus(
+    id: number,
+    status: AdmissionStatus
+  ): Promise<ApiEnvelope<AdmissionRecord>> {
+    const res = await this.requestJson<
+      Record<string, unknown> | { admission?: Record<string, unknown> }
+    >(
+      `/admissions/${id}/status`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      },
+      'خطا در تغییر وضعیت انتشار قبولی'
+    );
+    const raw =
+      (res.data as { admission?: Record<string, unknown> })?.admission ||
+      (res.data as Record<string, unknown>) ||
+      {};
+    return {
+      ...res,
+      data: normalizeAdmission(raw),
+    };
+  }
+
+  /**
+   * DELETE /api/v1/admissions/{id}
+   */
+  async deleteAdmission(id: number): Promise<ApiEnvelope<null>> {
+    return this.requestJson<null>(
+      `/admissions/${id}`,
+      { method: 'DELETE' },
+      'خطا در حذف قبولی'
+    );
+  }
+
+  // ==========================================================================
+  // Testimonials / نظرات (/api/v1/testimonials*) — Admin only
+  // ==========================================================================
+
+  /**
+   * GET /api/v1/testimonials
+   */
+  async getTestimonials(
+    query: GetTestimonialsQuery = {},
+    signal?: AbortSignal
+  ): Promise<
+    ApiEnvelope<{
+      testimonials: TestimonialRecord[];
+      counts?: { pending?: number; approved?: number; rejected?: number };
+    }>
+  > {
+    const params = new URLSearchParams();
+    params.set('page', String(query.page ?? 1));
+    params.set('per_page', String(query.per_page ?? 20));
+    if (query.status) {
+      params.set('status', query.status);
+    }
+    if (query.source) {
+      params.set('source', query.source);
+    }
+    if (query.search && safeTrim(query.search) !== '') {
+      params.set('search', safeTrim(query.search));
+    }
+    if (query.sort) {
+      params.set('sort', query.sort);
+    }
+    if (query.order) {
+      params.set('order', query.order);
+    }
+
+    const res = await this.requestJson<
+      | TestimonialRecord[]
+      | {
+          testimonials?: unknown[];
+          items?: unknown[];
+          counts?: { pending?: number; approved?: number; rejected?: number };
+          pending_count?: number;
+        }
+    >(
+      `/testimonials?${params.toString()}`,
+      { signal },
+      'خطا در بارگذاری لیست نظرات'
+    );
+
+    const rawData = res.data;
+    const rawList: unknown[] = Array.isArray(rawData)
+      ? rawData
+      : Array.isArray((rawData as { testimonials?: unknown[] })?.testimonials)
+        ? (rawData as { testimonials: unknown[] }).testimonials
+        : Array.isArray((rawData as { items?: unknown[] })?.items)
+          ? (rawData as { items: unknown[] }).items
+          : [];
+
+    const normalized = rawList.map((item) =>
+      normalizeTestimonial((item || {}) as Record<string, unknown>)
+    );
+
+    const objData = !Array.isArray(rawData) && rawData && typeof rawData === 'object' ? rawData : null;
+    const counts = objData?.counts
+      ? objData.counts
+      : objData?.pending_count !== undefined
+        ? { pending: Number(objData.pending_count) || 0 }
+        : undefined;
+
+    return {
+      ...res,
+      data: {
+        testimonials: normalized,
+        counts,
+      },
+    };
+  }
+
+  /**
+   * Lightweight count fetch for the "در انتظار" badge in Sidebar & TestimonialsPage tabs.
+   */
+  async getTestimonialsPendingCount(signal?: AbortSignal): Promise<number> {
+    const res = await this.getTestimonials({ status: 'pending', page: 1, per_page: 1 }, signal);
+    if (res.data.counts?.pending !== undefined) {
+      return Number(res.data.counts.pending) || 0;
+    }
+    if (res.pagination?.total !== undefined) {
+      return Number(res.pagination.total) || 0;
+    }
+    return res.data.testimonials.length;
+  }
+
+  /**
+   * POST /api/v1/testimonials (admin direct entry, default status='approved', source='admin')
+   */
+  async createTestimonial(
+    input: TestimonialCreateInput
+  ): Promise<ApiEnvelope<TestimonialRecord>> {
+    const body: Record<string, unknown> = {
+      author_name: safeTrim(input.author_name),
+      name: safeTrim(input.author_name),
+      author_role: safeTrim(input.author_role),
+      role: safeTrim(input.author_role),
+      author_subtitle: safeTrim(input.author_subtitle) || null,
+      role_description: safeTrim(input.author_subtitle) || null,
+      rating: Number(input.rating),
+      content: safeTrim(input.content),
+      body: safeTrim(input.content),
+      status: input.status || 'approved',
+      source: input.source || 'admin',
+      course_id: input.course_id ?? null,
+      instructor_id: input.instructor_id ?? null,
+    };
+
+    const res = await this.requestJson<
+      Record<string, unknown> | { testimonial?: Record<string, unknown> }
+    >(
+      '/testimonials',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      'خطا در ثبت نظر جدید'
+    );
+    const raw =
+      (res.data as { testimonial?: Record<string, unknown> })?.testimonial ||
+      (res.data as Record<string, unknown>) ||
+      {};
+    return {
+      ...res,
+      data: normalizeTestimonial(raw),
+    };
+  }
+
+  /**
+   * PATCH /api/v1/testimonials/{id}
+   */
+  async updateTestimonial(
+    id: number,
+    input: TestimonialUpdateInput
+  ): Promise<ApiEnvelope<TestimonialRecord>> {
+    const body: Record<string, unknown> = {};
+    if (input.author_name !== undefined) {
+      body.author_name = safeTrim(input.author_name);
+      body.name = safeTrim(input.author_name);
+    }
+    if (input.author_role !== undefined) {
+      body.author_role = safeTrim(input.author_role);
+      body.role = safeTrim(input.author_role);
+    }
+    if (input.author_subtitle !== undefined) {
+      body.author_subtitle = safeTrim(input.author_subtitle) || null;
+      body.role_description = safeTrim(input.author_subtitle) || null;
+    }
+    if (input.rating !== undefined) {
+      body.rating = Number(input.rating);
+    }
+    if (input.content !== undefined) {
+      body.content = safeTrim(input.content);
+      body.body = safeTrim(input.content);
+    }
+    if (input.course_id !== undefined) {
+      body.course_id = input.course_id;
+    }
+    if (input.instructor_id !== undefined) {
+      body.instructor_id = input.instructor_id;
+    }
+
+    const res = await this.requestJson<
+      Record<string, unknown> | { testimonial?: Record<string, unknown> }
+    >(
+      `/testimonials/${id}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      },
+      'خطا در ویرایش نظر'
+    );
+    const raw =
+      (res.data as { testimonial?: Record<string, unknown> })?.testimonial ||
+      (res.data as Record<string, unknown>) ||
+      {};
+    return {
+      ...res,
+      data: normalizeTestimonial(raw),
+    };
+  }
+
+  /**
+   * PATCH /api/v1/testimonials/{id}/moderate
+   */
+  async moderateTestimonial(
+    id: number,
+    input: TestimonialModerateInput
+  ): Promise<ApiEnvelope<TestimonialRecord>> {
+    const body: Record<string, unknown> = {
+      status: input.status,
+    };
+    if (input.rejection_reason !== undefined) {
+      body.rejection_reason = safeTrim(input.rejection_reason) || null;
+    }
+
+    const res = await this.requestJson<
+      Record<string, unknown> | { testimonial?: Record<string, unknown> }
+    >(
+      `/testimonials/${id}/moderate`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      },
+      input.status === 'approved' ? 'خطا در تأیید نظر' : 'خطا در رد نظر'
+    );
+    const raw =
+      (res.data as { testimonial?: Record<string, unknown> })?.testimonial ||
+      (res.data as Record<string, unknown>) ||
+      {};
+    return {
+      ...res,
+      data: normalizeTestimonial(raw),
+    };
+  }
+
+  /**
+   * POST /api/v1/testimonials/bulk-reject
+   * Automatically chunks IDs into batches of at most 100 items per request.
+   */
+  async bulkRejectTestimonials(
+    input: TestimonialBulkRejectInput
+  ): Promise<{ totalRejected: number; batches: number }> {
+    const batches = chunkBulkRejectIds(input.ids, 100);
+    if (batches.length === 0) {
+      return { totalRejected: 0, batches: 0 };
+    }
+
+    const reason = safeTrim(input.rejection_reason) || null;
+    let totalRejected = 0;
+
+    for (const batchIds of batches) {
+      const res = await this.requestJson<{ rejected?: number; affected?: number; count?: number }>(
+        '/testimonials/bulk-reject',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            ids: batchIds,
+            ...(reason ? { rejection_reason: reason } : {}),
+          }),
+        },
+        'خطا در رد دسته‌جمعی نظرات'
+      );
+      const count =
+        Number(res.data?.rejected ?? res.data?.affected ?? res.data?.count ?? batchIds.length) ||
+        batchIds.length;
+      totalRejected += count;
+    }
+
+    return { totalRejected, batches: batches.length };
+  }
+
+  /**
+   * DELETE /api/v1/testimonials/{id}
+   */
+  async deleteTestimonial(id: number): Promise<ApiEnvelope<null>> {
+    return this.requestJson<null>(
+      `/testimonials/${id}`,
+      { method: 'DELETE' },
+      'خطا در حذف نظر'
     );
   }
 }

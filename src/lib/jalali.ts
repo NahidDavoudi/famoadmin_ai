@@ -155,3 +155,11 @@ export function toPersianDigits(val: string | number | null | undefined): string
   return String(val).replace(/\d/g, (d) => persian[Number(d)] || d);
 }
 
+export function toEnglishDigits(val: string | number | null | undefined): string {
+  if (val === null || val === undefined) return '';
+  return String(val)
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660));
+}
+
+

@@ -12,7 +12,9 @@ export type PageId =
   | 'blog-editor'
   | 'reports'
   | 'activity_logs'
-  | 'analytics';
+  | 'analytics'
+  | 'admissions'
+  | 'testimonials';
 
 export type AcademicField =
   | 'ریاضی'
@@ -170,6 +172,8 @@ export type ExamsListSortKey = 'exam_date' | 'student_name' | 'percentage';
 export type ExamStudentsSortKey = 'name' | 'avg_percentage';
 export type BlogSortKey = 'published_at' | 'title' | 'views' | 'status';
 export type AppointmentSortKey = 'appointment_date' | 'time' | 'student' | 'status';
+export type AdmissionSortKey = 'display_order' | 'year' | 'student_name' | 'status' | 'created_at';
+export type TestimonialSortKey = 'created_at' | 'rating' | 'author_name';
 
 export interface GetStudentsQuery {
   search?: string;
@@ -397,6 +401,7 @@ export type ApiErrorCode =
   | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'VALIDATION_ERROR'
+  | 'CONSENT_REQUIRED'
   | 'CONCURRENT_SEND_LOCKED'
   | 'RATE_LIMITED'
   | 'INTERNAL_ERROR'
@@ -405,7 +410,7 @@ export type ApiErrorCode =
 export interface ApiErrorDetail {
   code: ApiErrorCode;
   message: string;
-  details?: Record<string, string>;
+  details?: Record<string, string | string[]>;
 }
 
 export interface ApiPagination {
@@ -1052,6 +1057,130 @@ export interface AssignmentInitialFillReport {
   ambiguous_count: number;
   no_match_count: number;
   items: AssignmentInitialFillItem[];
+}
+
+// ============================================================================
+// Admissions / قبولی‌ها (/api/v1/admissions*)
+// ============================================================================
+
+export type AdmissionStatus = 'draft' | 'published';
+
+export type AdmissionExamType =
+  | 'konkur'
+  | 'tizhooshan'
+  | 'nemooneh'
+  | 'olympiad'
+  | 'other'
+  | (string & {});
+
+export interface AdmissionRecord {
+  id: number;
+  student_name: string;
+  year: number; // Jalali year, e.g. 1404
+  exam_type: AdmissionExamType;
+  field: AcademicField | string;
+  admission_title: string; // e.g. پزشکی دانشگاه علوم پزشکی تهران
+  rank: string | number | null;
+  display_order: number;
+  photo_url: string | null;
+  status: AdmissionStatus;
+  consent_obtained: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface GetAdmissionsQuery {
+  page?: number;
+  per_page?: number;
+  year?: number | string;
+  status?: AdmissionStatus | '';
+  search?: string;
+  sort?: AdmissionSortKey;
+  order?: SortOrder;
+}
+
+export interface AdmissionUpsertInput {
+  student_name: string;
+  year: number;
+  exam_type: AdmissionExamType;
+  field: string;
+  admission_title: string;
+  rank?: string | null;
+  display_order: number;
+  status: AdmissionStatus;
+  consent_obtained: boolean;
+  photo?: File | null;
+  remove_photo?: boolean;
+}
+
+// ============================================================================
+// Testimonials / نظرات (/api/v1/testimonials*)
+// ============================================================================
+
+export type TestimonialStatus = 'pending' | 'approved' | 'rejected';
+
+export type TestimonialSource = 'public' | 'admin';
+
+export type TestimonialAuthorRole = 'student' | 'parent' | 'alumni' | 'other' | (string & {});
+
+export interface TestimonialRecord {
+  id: number;
+  author_name: string;
+  author_role: TestimonialAuthorRole;
+  author_subtitle: string | null;
+  rating: number; // 1..5
+  content: string;
+  status: TestimonialStatus;
+  source: TestimonialSource;
+  course_id: number | null;
+  course_name: string | null;
+  instructor_id: number | null;
+  instructor_name: string | null;
+  rejection_reason: string | null;
+  created_at: string | null;
+  updated_at?: string | null;
+}
+
+export interface GetTestimonialsQuery {
+  status?: TestimonialStatus | '';
+  search?: string;
+  source?: TestimonialSource | '';
+  page?: number;
+  per_page?: number;
+  sort?: TestimonialSortKey;
+  order?: SortOrder;
+}
+
+export interface TestimonialCreateInput {
+  author_name: string;
+  author_role: TestimonialAuthorRole;
+  author_subtitle?: string | null;
+  rating: number;
+  content: string;
+  status?: TestimonialStatus;
+  source?: TestimonialSource;
+  course_id?: number | null;
+  instructor_id?: number | null;
+}
+
+export interface TestimonialUpdateInput {
+  author_name?: string;
+  author_role?: TestimonialAuthorRole;
+  author_subtitle?: string | null;
+  rating?: number;
+  content?: string;
+  course_id?: number | null;
+  instructor_id?: number | null;
+}
+
+export interface TestimonialModerateInput {
+  status: 'approved' | 'rejected';
+  rejection_reason?: string | null;
+}
+
+export interface TestimonialBulkRejectInput {
+  ids: number[];
+  rejection_reason?: string | null;
 }
 
 

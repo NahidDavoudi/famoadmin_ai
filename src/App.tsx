@@ -18,6 +18,9 @@ import { BlogPage } from './pages/BlogPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { ActivityLogsPage } from './pages/ActivityLogsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
+import { AdmissionsPage } from './pages/AdmissionsPage';
+import { TestimonialsPage } from './pages/TestimonialsPage';
+import { canAccessAdminOnlySections } from './lib/admissions-testimonials';
 
 const VALID_PAGE_IDS: readonly PageId[] = [
   'overview',
@@ -29,6 +32,8 @@ const VALID_PAGE_IDS: readonly PageId[] = [
   'files',
   'supporters',
   'appointments',
+  'admissions',
+  'testimonials',
   'blog',
   'blog-editor',
   'reports',
@@ -54,6 +59,7 @@ export default function App() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [pendingTestimonialsCount, setPendingTestimonialsCount] = useState<number>(0);
 
   const studentSearchRef = useRef<HTMLInputElement | null>(null);
 
@@ -126,6 +132,25 @@ export default function App() {
       });
   }, []);
 
+  // Keep Sidebar pending testimonials badge synchronized for admin users
+  useEffect(() => {
+    if (!canAccessAdminOnlySections(userRole)) {
+      setPendingTestimonialsCount(0);
+      return;
+    }
+    let cancelled = false;
+    API.getTestimonialsPendingCount()
+      .then((count) => {
+        if (!cancelled) setPendingTestimonialsCount(count);
+      })
+      .catch(() => {
+        // Ignore silent badge-fetch failures (handled explicitly on TestimonialsPage)
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userRole]);
+
   // Global keyboard shortcuts ('/' to focus search, '?' to open shortcuts modal)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -168,6 +193,8 @@ export default function App() {
       <Sidebar
         currentPage={currentPage}
         username={username}
+        userRole={userRole}
+        pendingTestimonialsCount={pendingTestimonialsCount}
         isOpenMobile={isMobileSidebarOpen}
         onNavigate={navigateToPage}
         onToggleMobile={() => setIsMobileSidebarOpen((v) => !v)}
@@ -197,6 +224,16 @@ export default function App() {
           {currentPage === 'exam_entry' && <ExamEntryPage showToast={showToast} />}
           {currentPage === 'files' && <FilesPage showToast={showToast} />}
           {currentPage === 'supporters' && <SupportersPage showToast={showToast} />}
+          {currentPage === 'admissions' && (
+            <AdmissionsPage showToast={showToast} userRole={userRole} />
+          )}
+          {currentPage === 'testimonials' && (
+            <TestimonialsPage
+              showToast={showToast}
+              userRole={userRole}
+              onPendingCountChange={setPendingTestimonialsCount}
+            />
+          )}
           {(currentPage === 'blog' || currentPage === 'blog-editor') && (
             <BlogPage showToast={showToast} />
           )}

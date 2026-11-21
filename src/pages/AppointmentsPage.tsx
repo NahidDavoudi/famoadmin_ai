@@ -1772,8 +1772,8 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
           {/* Control Strip: Day Selector + Field Tabs + Search + Send Button */}
           <div className="p-3.5 sm:p-4 border-b border-slate-200/80 space-y-3.5 bg-slate-50/50">
             {/* Step 1: Select Day of the Week */}
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
-              <div className="flex flex-wrap items-center gap-1.5 pb-1">
+            <div className="flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                 <span className="text-xs font-bold text-slate-500 pe-1 whitespace-nowrap shrink-0">
                   انتخاب روز نوبت:
                 </span>
@@ -1784,7 +1784,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
                       key={day.iso}
                       type="button"
                       onClick={() => setSelectedDayIso(day.iso)}
-                      className={`min-h-[40px] px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 border ${
+                      className={`min-h-[38px] px-2.5 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 border ${
                         isSelectedDay
                           ? 'bg-[#445D84] text-white border-[#445D84]'
                           : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
@@ -1807,7 +1807,7 @@ export const AppointmentsPage: React.FC<AppointmentsPageProps> = ({ showToast })
               <JalaliDatePicker
                 value={selectedDayIso}
                 onChange={(iso) => setSelectedDayIso(iso)}
-                className="bg-white border border-slate-200 rounded-xl px-2.5 py-1 self-start lg:self-auto shrink-0"
+                className="bg-white border border-slate-200 rounded-xl px-2 py-1 shrink-0"
               />
             </div>
 

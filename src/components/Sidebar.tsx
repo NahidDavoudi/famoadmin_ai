@@ -13,16 +13,22 @@ import {
   LineChart,
   History,
   TrendingUp,
+  Award,
+  MessageSquareQuote,
   LogOut,
   Loader2,
   Menu,
   Keyboard,
 } from 'lucide-react';
-import type { PageId } from '../types';
+import type { PageId, UserRole } from '../types';
+import { toPersianDigits } from '../lib/jalali';
+import { canAccessAdminOnlySections } from '../lib/admissions-testimonials';
 
 interface SidebarProps {
   currentPage: PageId;
   username: string;
+  userRole?: UserRole;
+  pendingTestimonialsCount?: number;
   isOpenMobile: boolean;
   onNavigate: (page: PageId) => void;
   onToggleMobile: () => void;
@@ -31,7 +37,12 @@ interface SidebarProps {
   onLogout: () => void | Promise<void>;
 }
 
-const NAV_ITEMS: { id: PageId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+const NAV_ITEMS: {
+  id: PageId;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  adminOnly?: boolean;
+}[] = [
   { id: 'overview', label: 'داشبورد', icon: BarChart3 },
   { id: 'students', label: 'دانش‌آموزان', icon: Users },
   { id: 'appointments', label: 'نوبت‌دهی هفتگی', icon: CalendarClock },
@@ -41,6 +52,8 @@ const NAV_ITEMS: { id: PageId; label: string; icon: React.ComponentType<{ classN
   { id: 'exam_entry', label: 'ثبت نتایج', icon: Pencil },
   { id: 'files', label: 'فایل‌های آزمون', icon: Upload },
   { id: 'supporters', label: 'پشتیبان‌ها و تخصیص', icon: Headset },
+  { id: 'admissions', label: 'قبولی‌ها', icon: Award, adminOnly: true },
+  { id: 'testimonials', label: 'نظرات', icon: MessageSquareQuote, adminOnly: true },
   { id: 'blog', label: 'وبلاگ', icon: Newspaper },
   { id: 'reports', label: 'گزارش‌ها', icon: LineChart },
   { id: 'analytics', label: 'تحلیل پیشرفته آزمون', icon: TrendingUp },
@@ -50,6 +63,8 @@ const NAV_ITEMS: { id: PageId; label: string; icon: React.ComponentType<{ classN
 export const Sidebar: React.FC<SidebarProps> = ({
   currentPage,
   username,
+  userRole,
+  pendingTestimonialsCount = 0,
   isOpenMobile,
   onNavigate,
   onToggleMobile,
@@ -59,6 +74,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [loggingOut, setLoggingOut] = useState(false);
   const activeNavId = currentPage === 'blog-editor' ? 'blog' : currentPage;
+  const isAdmin = canAccessAdminOnlySections(userRole);
+  const visibleNavItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
 
   const handleLogoutClick = async () => {
     if (loggingOut) return;
@@ -139,9 +156,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <nav className="p-3 flex-1 overflow-y-auto space-y-1" aria-label="منوی اصلی پنل مدیریت">
-          {NAV_ITEMS.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeNavId === item.id;
+            const showPendingBadge = item.id === 'testimonials' && pendingTestimonialsCount > 0;
             return (
               <button
                 key={item.id}
@@ -164,7 +182,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   />
                 )}
                 <Icon className="w-5 h-5 shrink-0" aria-hidden="true" />
-                <span className="whitespace-nowrap">{item.label}</span>
+                <span className="whitespace-nowrap flex-1 text-right">{item.label}</span>
+                {showPendingBadge && (
+                  <span
+                    data-testid="sidebar-testimonials-pending-badge"
+                    aria-label={`${toPersianDigits(pendingTestimonialsCount)} نظر در انتظار بررسی`}
+                    className="min-w-5 h-5 px-1.5 rounded-full bg-amber-400 text-slate-900 text-[11px] font-bold flex items-center justify-center shrink-0 tabular-nums shadow-xs"
+                  >
+                    {toPersianDigits(pendingTestimonialsCount > 99 ? '99+' : pendingTestimonialsCount)}
+                  </span>
+                )}
               </button>
             );
           })}

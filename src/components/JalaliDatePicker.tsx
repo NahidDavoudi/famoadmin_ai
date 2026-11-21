@@ -80,8 +80,8 @@ export const JalaliDatePicker: React.FC<JalaliDatePickerProps> = ({
   const dayOptions = Array.from({ length: maxDays }, (_, i) => i + 1);
 
   return (
-    <div id={id} className={`flex flex-wrap items-center gap-2 w-full min-w-0 ${className}`}>
-      <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+    <div id={id} className={`inline-flex flex-wrap items-center gap-1.5 w-fit max-w-full min-w-0 ${className}`}>
+      <div className="inline-flex flex-wrap items-center gap-1.5 min-w-0">
         {/* Year Select */}
         <select
           aria-label="سال شمسی"
