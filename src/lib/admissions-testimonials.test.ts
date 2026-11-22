@@ -70,7 +70,7 @@ test('shouldWarnConsentUnpublish triggers only when unchecking consent on a publ
   assert.equal(shouldWarnConsentUnpublish(null, false), false);
 });
 
-test('buildAdmissionFormData forces draft when consent is false, sends jalali_year/title/has_consent aliases, and includes remove_photo flag', () => {
+test('buildAdmissionFormData forces draft when consent is false, sends exact OpenAPI fields, and includes remove_image flag', () => {
   const fd = buildAdmissionFormData({
     student_name: '  آرش کریمی  ',
     year: '۱۴۰۴' as unknown as number,
@@ -85,19 +85,15 @@ test('buildAdmissionFormData forces draft when consent is false, sends jalali_ye
   });
 
   assert.equal(fd.get('student_name'), 'آرش کریمی');
-  assert.equal(fd.get('name'), 'آرش کریمی');
-  assert.equal(fd.get('year'), '1404');
   assert.equal(fd.get('jalali_year'), '1404');
-  assert.equal(fd.get('admission_year'), '1404');
-  assert.equal(fd.get('admission_title'), 'مهندسی کامپیوتر شریف');
-  assert.equal(fd.get('title'), 'مهندسی کامپیوتر شریف');
-  assert.equal(fd.get('status'), 'draft');
-  assert.equal(fd.get('consent_obtained'), '0');
-  assert.equal(fd.get('has_consent'), '0');
-  assert.equal(fd.get('consent'), '0');
-  assert.equal(fd.get('rank'), '42');
+  assert.equal(fd.get('exam_type'), 'konkur');
+  assert.equal(fd.get('field'), 'ریاضی');
+  assert.equal(fd.get('result_title'), 'مهندسی کامپیوتر شریف');
+  assert.equal(fd.get('rank_value'), '42');
   assert.equal(fd.get('display_order'), '2');
-  assert.equal(fd.get('remove_photo'), '1');
+  assert.equal(fd.get('status'), 'draft');
+  assert.equal(fd.get('consent_confirmed'), '0');
+  assert.equal(fd.get('remove_image'), '1');
 });
 
 test('digit normalization converts English, Persian, Arabic-Indic, and full-width digits cleanly', () => {
@@ -141,51 +137,56 @@ test('extractApiFieldErrors parses 422 details and maps CONSENT_REQUIRED clearly
       code: 'VALIDATION_ERROR',
       message: 'خطای اعتبارسنجی',
       details: {
-        name: ['نام الزامی است'],
-        year: 'سال نامعتبر است',
+        result_title: ['عنوان قبولی (رشته/دانشگاه) الزامی است'],
+        jalali_year: 'سال شمسی نامعتبر است',
       },
     },
-    { name: 'student_name' }
+    { result_title: 'admission_title', jalali_year: 'year' }
   );
   assert.equal(fieldRes.isConsentRequired, false);
-  assert.equal(fieldRes.fieldErrors.student_name, 'نام الزامی است');
-  assert.equal(fieldRes.fieldErrors.year, 'سال نامعتبر است');
+  assert.equal(fieldRes.fieldErrors.admission_title, 'عنوان قبولی (رشته/دانشگاه) الزامی است');
+  assert.equal(fieldRes.fieldErrors.year, 'سال شمسی نامعتبر است');
 });
 
-test('normalizeAdmission and normalizeTestimonial handle alias fields safely', () => {
+test('normalizeAdmission and normalizeTestimonial handle live OpenAPI fields and legacy aliases safely', () => {
   const adm = normalizeAdmission({
     id: 7,
-    name: 'مریم رضایی',
+    student_name: 'مریم رضایی',
     jalali_year: 1403,
     exam_type: 'tizhooshan',
     field: 'تجربی',
-    title: 'فرزانگان ۱ تهران',
-    rank: 14,
+    result_title: 'فرزانگان ۱ تهران',
+    rank_value: '14',
     display_order: 3,
     image_url: '/uploads/admissions/7.jpg',
     status: 'published',
-    has_consent: 1,
+    consent_confirmed: true,
   });
   assert.equal(adm.student_name, 'مریم رضایی');
   assert.equal(adm.year, 1403);
+  assert.equal(adm.admission_title, 'فرزانگان ۱ تهران');
+  assert.equal(adm.rank, '14');
   assert.equal(adm.photo_url, '/uploads/admissions/7.jpg');
   assert.equal(adm.consent_obtained, true);
   assert.equal(adm.status, 'published');
 
   const tm = normalizeTestimonial({
     id: 19,
-    name: 'مادر آرش',
-    role: 'parent',
-    role_description: 'ولی پایه دوازدهم تجربی',
+    author_name: 'مادر آرش',
+    author_role: 'parent',
+    author_meta: 'ولی پایه دوازدهم تجربی',
     rating: 5,
-    body: '<script>alert(1)</script> خیلی عالی بود',
+    content: '<script>alert(1)</script> خیلی عالی بود',
     status: 'pending',
-    source: 'public',
-    course: { id: 4, name: 'دوره نکته و تست' },
-    instructor: { id: 8, name: 'استاد کریمی' },
+    source: 'public_form',
+    course_id: 4,
+    course_name: 'دوره نکته و تست',
+    instructor_id: 8,
+    instructor_name: 'استاد کریمی',
   });
   assert.equal(tm.author_name, 'مادر آرش');
   assert.equal(tm.author_subtitle, 'ولی پایه دوازدهم تجربی');
+  assert.equal(tm.source, 'public_form');
   assert.equal(tm.course_id, 4);
   assert.equal(tm.course_name, 'دوره نکته و تست');
   assert.equal(tm.instructor_id, 8);
@@ -205,7 +206,7 @@ test('chunkBulkRejectIds deduplicates, filters invalid IDs, and caps each batch 
   assert.equal(chunks[2][34], 235);
 });
 
-test('validateTestimonialForm validates rating bounds and required content', () => {
+test('validateTestimonialForm validates rating bounds and 10-character minimum content', () => {
   const bad = validateTestimonialForm({
     author_name: 'ا',
     author_role: 'student',
@@ -218,18 +219,17 @@ test('validateTestimonialForm validates rating bounds and required content', () 
   });
   assert.ok(bad.author_name);
   assert.ok(bad.rating);
-  assert.equal(bad.content, undefined);
+  assert.ok(bad.content);
 
-  const emptyContent = validateTestimonialForm({
+  const valid = validateTestimonialForm({
     author_name: 'علی رضایی',
-    author_role: 'student',
+    author_role: 'graduate',
     author_subtitle: 'رتبه ۳۰۰',
     rating: 5,
-    content: '   ',
+    content: 'کیفیت کلاس‌ها و پیگیری پشتیبان‌ها واقعاً عالی بود.',
     status: 'approved',
     course_id: '2',
     instructor_id: '',
   });
-  assert.ok(emptyContent.content);
-  assert.equal(emptyContent.author_name, undefined);
+  assert.deepEqual(valid, {});
 });

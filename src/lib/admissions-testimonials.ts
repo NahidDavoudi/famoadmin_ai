@@ -20,7 +20,7 @@ export const CONSENT_REQUIRED_MESSAGE =
 export const ADMISSION_EXAM_TYPES: ReadonlyArray<{ value: AdmissionExamType; label: string }> = [
   { value: 'konkur', label: 'کنکور سراسری' },
   { value: 'tizhooshan', label: 'تیزهوشان (سمپاد)' },
-  { value: 'nemooneh', label: 'نمونه دولتی' },
+  { value: 'nemoone', label: 'نمونه دولتی' },
   { value: 'olympiad', label: 'المپیاد علمی' },
   { value: 'other', label: 'سایر آزمون‌ها' },
 ];
@@ -31,7 +31,7 @@ export const TESTIMONIAL_AUTHOR_ROLES: ReadonlyArray<{
 }> = [
   { value: 'student', label: 'دانش‌آموز' },
   { value: 'parent', label: 'والدین' },
-  { value: 'alumni', label: 'قبول‌شده / فارغ‌التحصیل' },
+  { value: 'graduate', label: 'قبول‌شده / فارغ‌التحصیل' },
   { value: 'other', label: 'سایر' },
 ];
 
@@ -71,16 +71,21 @@ export function normalizeAdmission(raw: Record<string, unknown>): AdmissionRecor
       : 'draft';
 
   const consentRaw =
-    raw.consent_obtained !== undefined
-      ? raw.consent_obtained
-      : raw.has_consent !== undefined
-        ? raw.has_consent
-        : raw.consent;
+    raw.consent_confirmed !== undefined
+      ? raw.consent_confirmed
+      : raw.consent_obtained !== undefined
+        ? raw.consent_obtained
+        : raw.has_consent !== undefined
+          ? raw.has_consent
+          : raw.consent;
 
   const photoRaw =
-    raw.photo_url ?? raw.image_url ?? raw.photo ?? raw.avatar_url ?? null;
+    raw.image_url ?? raw.photo_url ?? raw.photo ?? raw.avatar_url ?? null;
 
-  const rankRaw = raw.rank ?? raw.national_rank ?? null;
+  const rankRaw = raw.rank_value ?? raw.rank ?? raw.national_rank ?? null;
+
+  const examRaw = String(raw.exam_type ?? 'konkur').trim() || 'konkur';
+  const normalizedExamType = examRaw === 'nemooneh' ? 'nemoone' : examRaw;
 
   return {
     id: Number(raw.id) || 0,
@@ -89,10 +94,15 @@ export function normalizeAdmission(raw: Record<string, unknown>): AdmissionRecor
       parseStrictInteger(
         (raw.jalali_year ?? raw.year ?? raw.admission_year) as string | number | null | undefined
       ) ?? 1404,
-    exam_type: String(raw.exam_type ?? 'konkur').trim() || 'konkur',
+    exam_type: normalizedExamType,
     field: String(raw.field ?? raw.major ?? '').trim(),
     admission_title: String(
-      raw.admission_title ?? raw.title ?? raw.university ?? raw.university_title ?? ''
+      raw.result_title ??
+        raw.admission_title ??
+        raw.title ??
+        raw.university ??
+        raw.university_title ??
+        ''
     ).trim(),
     rank:
       rankRaw === null || rankRaw === undefined || String(rankRaw).trim() === ''
@@ -118,8 +128,11 @@ export function normalizeTestimonial(raw: Record<string, unknown>): TestimonialR
   const status: TestimonialStatus =
     statusRaw === 'approved' || statusRaw === 'rejected' ? statusRaw : 'pending';
 
-  const sourceRaw = String(raw.source ?? 'public').trim().toLowerCase();
-  const source: TestimonialSource = sourceRaw === 'admin' ? 'admin' : 'public';
+  const sourceRaw = String(raw.source ?? 'public_form').trim().toLowerCase();
+  const source: TestimonialSource = sourceRaw === 'admin' ? 'admin' : 'public_form';
+
+  const roleRaw = String(raw.author_role ?? raw.role ?? 'student').trim().toLowerCase() || 'student';
+  const normalizedRole: TestimonialAuthorRole = roleRaw === 'alumni' ? 'graduate' : roleRaw;
 
   const ratingNum = Number(raw.rating ?? 5);
   const clampedRating = Number.isFinite(ratingNum)
@@ -145,18 +158,15 @@ export function normalizeTestimonial(raw: Record<string, unknown>): TestimonialR
         ? Number(instructorObj.id)
         : null;
 
+  const metaRaw =
+    raw.author_meta ?? raw.author_subtitle ?? raw.role_description ?? raw.subtitle ?? null;
+
   return {
     id: Number(raw.id) || 0,
     author_name: String(raw.author_name ?? raw.name ?? '').trim(),
-    author_role: String(raw.author_role ?? raw.role ?? 'student').trim() || 'student',
+    author_role: normalizedRole,
     author_subtitle:
-      raw.author_subtitle !== undefined && raw.author_subtitle !== null
-        ? String(raw.author_subtitle).trim() || null
-        : raw.role_description !== undefined && raw.role_description !== null
-          ? String(raw.role_description).trim() || null
-          : raw.subtitle !== undefined && raw.subtitle !== null
-            ? String(raw.subtitle).trim() || null
-            : null,
+      metaRaw !== null && metaRaw !== undefined ? String(metaRaw).trim() || null : null,
     rating: clampedRating,
     content: String(raw.content ?? raw.body ?? raw.text ?? '').trim(),
     status,
@@ -259,36 +269,31 @@ export function buildAdmissionFormData(input: AdmissionUpsertInput): FormData {
   const fd = new FormData();
   const cleanName = input.student_name.trim();
   const cleanYear = normalizeIntegerInput(input.year, 4);
+  const cleanExamType = String(input.exam_type).trim() === 'nemooneh' ? 'nemoone' : String(input.exam_type).trim();
   const cleanTitle = input.admission_title.trim();
   const cleanOrder = String(parseStrictInteger(input.display_order) ?? 0);
   const cleanConsent = input.consent_obtained ? '1' : '0';
+  const cleanRank =
+    input.rank !== undefined && input.rank !== null && String(input.rank).trim() !== ''
+      ? toEnglishDigits(String(input.rank)).trim()
+      : '';
 
+  // Exact live OpenAPI AdmissionWriteRequest + multipart fields
   fd.append('student_name', cleanName);
-  fd.append('name', cleanName);
   fd.append('jalali_year', cleanYear);
-  fd.append('year', cleanYear);
-  fd.append('admission_year', cleanYear);
-  fd.append('exam_type', String(input.exam_type).trim());
+  fd.append('exam_type', cleanExamType);
   fd.append('field', input.field.trim());
-  fd.append('admission_title', cleanTitle);
-  fd.append('title', cleanTitle);
-  if (input.rank !== undefined && input.rank !== null && String(input.rank).trim() !== '') {
-    fd.append('rank', toEnglishDigits(String(input.rank)).trim());
-  } else {
-    fd.append('rank', '');
-  }
+  fd.append('result_title', cleanTitle);
+  fd.append('rank_value', cleanRank);
   fd.append('display_order', cleanOrder);
-  fd.append('sort_order', cleanOrder);
   const effectiveStatus: AdmissionStatus = input.consent_obtained ? input.status : 'draft';
   fd.append('status', effectiveStatus);
-  fd.append('consent_obtained', cleanConsent);
-  fd.append('has_consent', cleanConsent);
-  fd.append('consent', cleanConsent);
+  fd.append('consent_confirmed', cleanConsent);
 
   if (input.photo instanceof File) {
-    fd.append('photo', input.photo);
+    fd.append('image', input.photo);
   } else if (input.remove_photo) {
-    fd.append('remove_photo', '1');
+    fd.append('remove_image', '1');
   }
 
   return fd;
@@ -326,8 +331,10 @@ export function validateTestimonialForm(values: TestimonialFormValues): Record<s
   const body = values.content.trim();
   if (!body) {
     errors.content = 'وارد کردن متن نظر الزامی است';
-  } else if (body.length < 5) {
-    errors.content = 'متن نظر باید حداقل ۵ کاراکتر باشد';
+  } else if (body.length < 10) {
+    errors.content = 'متن نظر باید حداقل ۱۰ کاراکتر باشد';
+  } else if (body.length > 1500) {
+    errors.content = 'متن نظر نباید بیشتر از ۱۵۰۰ کاراکتر باشد';
   }
 
   return errors;

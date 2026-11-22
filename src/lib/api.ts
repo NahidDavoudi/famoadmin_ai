@@ -3187,14 +3187,13 @@ class FamoApiClient {
       const normalizedYear = normalizeIntegerInput(query.year, 4);
       if (normalizedYear) {
         params.set('year', normalizedYear);
-        params.set('jalali_year', normalizedYear);
       }
     }
     if (query.status) {
       params.set('status', query.status);
     }
     if (query.search && safeTrim(query.search) !== '') {
-      params.set('search', safeTrim(query.search));
+      params.set('q', safeTrim(query.search));
     }
     if (query.sort) {
       params.set('sort', query.sort);
@@ -3274,7 +3273,7 @@ class FamoApiClient {
   }
 
   /**
-   * PUT /api/v1/admissions/{id} (multipart/form-data)
+   * POST /api/v1/admissions/{id} (multipart/form-data — native PHP $_POST/$_FILES update)
    */
   async updateAdmission(
     id: number,
@@ -3286,7 +3285,7 @@ class FamoApiClient {
     >(
       `/admissions/${id}`,
       {
-        method: 'PUT',
+        method: 'POST',
         body: formData,
       },
       'خطا در ویرایش اطلاعات قبولی'
@@ -3365,7 +3364,7 @@ class FamoApiClient {
       params.set('source', query.source);
     }
     if (query.search && safeTrim(query.search) !== '') {
-      params.set('search', safeTrim(query.search));
+      params.set('q', safeTrim(query.search));
     }
     if (query.sort) {
       params.set('sort', query.sort);
@@ -3437,18 +3436,14 @@ class FamoApiClient {
   async createTestimonial(
     input: TestimonialCreateInput
   ): Promise<ApiEnvelope<TestimonialRecord>> {
+    const roleVal = safeTrim(input.author_role) === 'alumni' ? 'graduate' : safeTrim(input.author_role);
     const body: Record<string, unknown> = {
       author_name: safeTrim(input.author_name),
-      name: safeTrim(input.author_name),
-      author_role: safeTrim(input.author_role),
-      role: safeTrim(input.author_role),
-      author_subtitle: safeTrim(input.author_subtitle) || null,
-      role_description: safeTrim(input.author_subtitle) || null,
+      author_role: roleVal || 'student',
+      author_meta: safeTrim(input.author_subtitle) || null,
       rating: Number(input.rating),
       content: safeTrim(input.content),
-      body: safeTrim(input.content),
       status: input.status || 'approved',
-      source: input.source || 'admin',
       course_id: input.course_id ?? null,
       instructor_id: input.instructor_id ?? null,
     };
@@ -3483,22 +3478,19 @@ class FamoApiClient {
     const body: Record<string, unknown> = {};
     if (input.author_name !== undefined) {
       body.author_name = safeTrim(input.author_name);
-      body.name = safeTrim(input.author_name);
     }
     if (input.author_role !== undefined) {
-      body.author_role = safeTrim(input.author_role);
-      body.role = safeTrim(input.author_role);
+      const roleVal = safeTrim(input.author_role);
+      body.author_role = roleVal === 'alumni' ? 'graduate' : roleVal;
     }
     if (input.author_subtitle !== undefined) {
-      body.author_subtitle = safeTrim(input.author_subtitle) || null;
-      body.role_description = safeTrim(input.author_subtitle) || null;
+      body.author_meta = safeTrim(input.author_subtitle) || null;
     }
     if (input.rating !== undefined) {
       body.rating = Number(input.rating);
     }
     if (input.content !== undefined) {
       body.content = safeTrim(input.content);
-      body.body = safeTrim(input.content);
     }
     if (input.course_id !== undefined) {
       body.course_id = input.course_id;
@@ -3577,7 +3569,12 @@ class FamoApiClient {
     let totalRejected = 0;
 
     for (const batchIds of batches) {
-      const res = await this.requestJson<{ rejected?: number; affected?: number; count?: number }>(
+      const res = await this.requestJson<{
+        rejected_count?: number;
+        rejected?: number;
+        affected?: number;
+        count?: number;
+      }>(
         '/testimonials/bulk-reject',
         {
           method: 'POST',
@@ -3589,8 +3586,13 @@ class FamoApiClient {
         'خطا در رد دسته‌جمعی نظرات'
       );
       const count =
-        Number(res.data?.rejected ?? res.data?.affected ?? res.data?.count ?? batchIds.length) ||
-        batchIds.length;
+        Number(
+          res.data?.rejected_count ??
+            res.data?.rejected ??
+            res.data?.affected ??
+            res.data?.count ??
+            batchIds.length
+        ) || batchIds.length;
       totalRejected += count;
     }
 

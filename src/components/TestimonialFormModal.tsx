@@ -21,6 +21,7 @@ import { ActionButton, FieldError, getFieldClass } from './FormControls';
 const TESTIMONIAL_FIELD_ALIASES: Record<string, string> = {
   name: 'author_name',
   role: 'author_role',
+  author_meta: 'author_subtitle',
   role_description: 'author_subtitle',
   subtitle: 'author_subtitle',
   body: 'content',

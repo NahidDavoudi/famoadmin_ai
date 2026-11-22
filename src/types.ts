@@ -172,8 +172,19 @@ export type ExamsListSortKey = 'exam_date' | 'student_name' | 'percentage';
 export type ExamStudentsSortKey = 'name' | 'avg_percentage';
 export type BlogSortKey = 'published_at' | 'title' | 'views' | 'status';
 export type AppointmentSortKey = 'appointment_date' | 'time' | 'student' | 'status';
-export type AdmissionSortKey = 'display_order' | 'year' | 'student_name' | 'status' | 'created_at';
-export type TestimonialSortKey = 'created_at' | 'rating' | 'author_name';
+export type AdmissionSortKey =
+  | 'jalali_year'
+  | 'student_name'
+  | 'display_order'
+  | 'status'
+  | 'created_at'
+  | 'published_at';
+export type TestimonialSortKey =
+  | 'created_at'
+  | 'rating'
+  | 'display_order'
+  | 'status'
+  | 'author_name';
 
 export interface GetStudentsQuery {
   search?: string;
@@ -1068,7 +1079,7 @@ export type AdmissionStatus = 'draft' | 'published';
 export type AdmissionExamType =
   | 'konkur'
   | 'tizhooshan'
-  | 'nemooneh'
+  | 'nemoone'
   | 'olympiad'
   | 'other'
   | (string & {});
@@ -1119,9 +1130,9 @@ export interface AdmissionUpsertInput {
 
 export type TestimonialStatus = 'pending' | 'approved' | 'rejected';
 
-export type TestimonialSource = 'public' | 'admin';
+export type TestimonialSource = 'public_form' | 'admin';
 
-export type TestimonialAuthorRole = 'student' | 'parent' | 'alumni' | 'other' | (string & {});
+export type TestimonialAuthorRole = 'student' | 'parent' | 'graduate' | 'other' | (string & {});
 
 export interface TestimonialRecord {
   id: number;

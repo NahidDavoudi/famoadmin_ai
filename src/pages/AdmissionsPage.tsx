@@ -48,19 +48,21 @@ interface AdmissionsPageProps {
 }
 
 const ADMISSIONS_SORT_COLUMNS: TableSortConfig<AdmissionSortKey>['columns'] = [
+  { key: 'jalali_year', label: 'سال قبولی', defaultOrder: 'desc' },
   { key: 'display_order', label: 'ترتیب نمایش', defaultOrder: 'asc' },
-  { key: 'year', label: 'سال قبولی', defaultOrder: 'desc' },
   { key: 'student_name', label: 'نام', defaultOrder: 'asc' },
   { key: 'status', label: 'وضعیت', defaultOrder: 'desc' },
   { key: 'created_at', label: 'تاریخ ثبت', defaultOrder: 'desc' },
+  { key: 'published_at', label: 'تاریخ انتشار', defaultOrder: 'desc' },
 ];
 
 const ADMISSIONS_ALLOWED_SORT_KEYS: readonly AdmissionSortKey[] = [
-  'display_order',
-  'year',
+  'jalali_year',
   'student_name',
+  'display_order',
   'status',
   'created_at',
+  'published_at',
 ];
 
 export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userRole }) => {
@@ -105,8 +107,8 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
 
       const sortCtrl = sortCtrlRef.current;
       const effectivePage = targetPage ?? sortCtrl?.page ?? 1;
-      const effectiveSort = overrideSort?.sort ?? sortCtrl?.sort ?? 'display_order';
-      const effectiveOrder = overrideSort?.order ?? sortCtrl?.order ?? 'asc';
+      const effectiveSort = overrideSort?.sort ?? sortCtrl?.sort ?? 'jalali_year';
+      const effectiveOrder = overrideSort?.order ?? sortCtrl?.order ?? 'desc';
 
       const currentFilters = filtersRef.current;
       const effectiveSearch =
@@ -159,8 +161,8 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
   const sortConfig = useMemo<TableSortConfig<AdmissionSortKey>>(
     () => ({
       allowedKeys: ADMISSIONS_ALLOWED_SORT_KEYS,
-      defaultSort: 'display_order',
-      defaultOrder: 'asc',
+      defaultSort: 'jalali_year',
+      defaultOrder: 'desc',
       columns: ADMISSIONS_SORT_COLUMNS,
       isActive: isAdmin,
     }),
@@ -289,7 +291,7 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
       {
         key: 'year',
         header: 'سال',
-        sortKey: 'year',
+        sortKey: 'jalali_year',
         priority: 'secondary',
         headerClassName: 'w-20 text-center',
         cellClassName: 'w-20 text-center tabular-nums font-bold text-slate-700',
