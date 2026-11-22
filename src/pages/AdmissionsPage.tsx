@@ -1,18 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
+  AlertTriangle,
   Award,
   Check,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Clock,
   Eye,
   EyeOff,
+  FilterX,
+  Loader2,
   Pencil,
   Plus,
   RefreshCw,
   Search,
   ShieldAlert,
   Trash2,
+  WifiOff,
   X,
 } from 'lucide-react';
 import API from '../lib/api';
@@ -22,6 +28,14 @@ import {
   extractApiFieldErrors,
   getExamTypeLabel,
 } from '../lib/admissions-testimonials';
+import {
+  admissionsQueueStore,
+  findPossibleDuplicateAdmission,
+  matchesAdmissionFilters,
+  type AdmissionQueueItem,
+} from '../lib/admissions-queue';
+import type { CompletedOptimisticMutation } from '../lib/optimistic-queue';
+import { useOptimisticQueue } from '../hooks/useOptimisticQueue';
 import { resolveEntityImageUrl } from '../lib/image-upload';
 import { getTodayJalali, toEnglishDigits, toPersianDigits } from '../lib/jalali';
 import {
@@ -45,6 +59,19 @@ import { AdmissionFormModal } from '../components/AdmissionFormModal';
 interface AdmissionsPageProps {
   showToast: (message: string, type?: ToastType) => void;
   userRole: UserRole;
+}
+
+interface AdmissionDisplayRow {
+  kind: 'server' | 'queued_create';
+  rowKey: string;
+  record: AdmissionRecord;
+  queueItem: AdmissionQueueItem | null;
+  isOutOfFilter: boolean;
+}
+
+interface AmbiguousRetryConfirmState {
+  queueItem: AdmissionQueueItem;
+  duplicateFound: AdmissionRecord | null;
 }
 
 const ADMISSIONS_SORT_COLUMNS: TableSortConfig<AdmissionSortKey>['columns'] = [
@@ -81,12 +108,26 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
 
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<AdmissionRecord | null>(null);
+  const [editingQueueItem, setEditingQueueItem] = useState<AdmissionQueueItem | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [deletingItem, setDeletingItem] = useState<AdmissionRecord | null>(null);
+
+  const [checkingRetryId, setCheckingRetryId] = useState<string | null>(null);
+  const [retryConfirmState, setRetryConfirmState] = useState<AmbiguousRetryConfirmState | null>(
+    null
+  );
 
   const requestGuardRef = useRef(createRequestGuard());
   const filtersRef = useRef({ search, yearFilter, statusFilter });
   filtersRef.current = { search, yearFilter, statusFilter };
+
+  const itemsRef = useRef<AdmissionRecord[]>(items);
+  itemsRef.current = items;
+
+  /** Tracks submission sequence of recently created records so rows stay in exact order as they confirm */
+  const recentCreatedSeqRef = useRef<Map<number, number>>(new Map());
+  /** Keeps stable React keys across the pending -> confirmed server record transition */
+  const stableKeyByServerIdRef = useRef<Map<number, string>>(new Map());
 
   const sortCtrlRef = useRef<ReturnType<typeof useTableSort<AdmissionSortKey>> | null>(null);
 
@@ -98,13 +139,15 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
         year?: string;
         status?: AdmissionStatus | '';
       },
-      overrideSort?: { sort: AdmissionSortKey; order: SortOrder }
+      overrideSort?: { sort: AdmissionSortKey; order: SortOrder },
+      options?: { silent?: boolean }
     ) => {
       if (!isAdmin) {
         setLoading(false);
         return;
       }
 
+      const silent = Boolean(options?.silent);
       const sortCtrl = sortCtrlRef.current;
       const effectivePage = targetPage ?? sortCtrl?.page ?? 1;
       const effectiveSort = overrideSort?.sort ?? sortCtrl?.sort ?? 'jalali_year';
@@ -119,8 +162,12 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
         overrideFilters?.status !== undefined ? overrideFilters.status : currentFilters.statusFilter;
 
       const { signal, isLatest } = requestGuardRef.current.start();
-      setLoading(true);
-      setErrorMsg(null);
+      if (!silent) {
+        recentCreatedSeqRef.current.clear();
+        stableKeyByServerIdRef.current.clear();
+        setLoading(true);
+        setErrorMsg(null);
+      }
 
       try {
         const res = await API.getAdmissions(
@@ -138,6 +185,9 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
 
         if (!isLatest()) return;
 
+        if (silent) {
+          recentCreatedSeqRef.current.clear();
+        }
         setItems(res.data || []);
         setTotalRecords(res.pagination?.total ?? (res.data || []).length);
         setTotalPages(Math.max(1, res.pagination?.total_pages ?? 1));
@@ -146,17 +196,54 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
         if ((err as Error)?.name === 'AbortError' || !isLatest()) {
           return;
         }
-        const msg = (err as Error)?.message || 'خطا در بارگذاری لیست قبولی‌ها';
-        setErrorMsg(msg);
-        showToast(msg, 'error');
+        if (!silent) {
+          const msg = (err as Error)?.message || 'خطا در بارگذاری لیست قبولی‌ها';
+          setErrorMsg(msg);
+          showToast(msg, 'error');
+        }
       } finally {
-        if (isLatest()) {
+        if (!silent && isLatest()) {
           setLoading(false);
         }
       }
     },
     [isAdmin, showToast]
   );
+
+  const handleQueueCompleted = useCallback(
+    (completed: CompletedOptimisticMutation<AdmissionRecord>) => {
+      if (completed.operation === 'create') {
+        recentCreatedSeqRef.current.set(completed.record.id, completed.createdAtSeq);
+        stableKeyByServerIdRef.current.set(completed.record.id, completed.queueId);
+        let addedNew = false;
+        setItems((prev) => {
+          const exists = prev.some((r) => r.id === completed.record.id);
+          if (exists) {
+            return prev.map((r) => (r.id === completed.record.id ? completed.record : r));
+          }
+          addedNew = true;
+          return [completed.record, ...prev];
+        });
+        if (addedNew) {
+          setTotalRecords((prev) => prev + 1);
+        }
+      } else {
+        setItems((prev) =>
+          prev.map((r) => (r.id === completed.record.id ? completed.record : r))
+        );
+      }
+    },
+    []
+  );
+
+  const handleQueueDrained = useCallback(() => {
+    void loadAdmissions(undefined, undefined, undefined, { silent: true });
+  }, [loadAdmissions]);
+
+  const queueSnap = useOptimisticQueue(admissionsQueueStore, {
+    onCompleted: handleQueueCompleted,
+    onDrained: handleQueueDrained,
+  });
 
   const sortConfig = useMemo<TableSortConfig<AdmissionSortKey>>(
     () => ({
@@ -200,7 +287,12 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
     void loadAdmissions(1, { search: '', year: '', status: '' });
   };
 
+  // Strictly server-confirmed (not optimistic)
   const handleQuickToggleStatus = async (item: AdmissionRecord) => {
+    if (admissionsQueueStore.isTargetLocked(item.id)) {
+      showToast('ویرایش این رکورد هنوز در حال ذخیره است.', 'warning');
+      return;
+    }
     const nextStatus: AdmissionStatus = item.status === 'published' ? 'draft' : 'published';
     if (nextStatus === 'published' && !item.consent_obtained) {
       showToast(CONSENT_REQUIRED_MESSAGE, 'error');
@@ -228,6 +320,7 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
     }
   };
 
+  // Strictly server-confirmed 2-step delete (not optimistic)
   const handleConfirmDelete = async () => {
     if (!deletingItem) return;
     const target = deletingItem;
@@ -241,6 +334,37 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
     }
   };
 
+  const handleRetryQueueItem = async (queueItem: AdmissionQueueItem) => {
+    // Non-ambiguous failure (e.g. offline pre-send) -> immediate retry with same Idempotency-Key
+    if (!queueItem.isAmbiguous) {
+      admissionsQueueStore.retry(queueItem.queueId);
+      return;
+    }
+
+    // Ambiguous failure (timeout / 5xx / mid-flight disconnect) -> check server list first
+    setCheckingRetryId(queueItem.queueId);
+    let duplicateFound: AdmissionRecord | null = null;
+    try {
+      const res = await API.getAdmissions({
+        page: 1,
+        per_page: 20,
+        search: queueItem.payload.student_name,
+        year: String(queueItem.payload.year),
+      });
+      const combined = [...(res.data || []), ...itemsRef.current];
+      duplicateFound = findPossibleDuplicateAdmission(queueItem.optimisticRecord, combined);
+    } catch {
+      duplicateFound = findPossibleDuplicateAdmission(
+        queueItem.optimisticRecord,
+        itemsRef.current
+      );
+    } finally {
+      setCheckingRetryId(null);
+    }
+
+    setRetryConfirmState({ queueItem, duplicateFound });
+  };
+
   const yearOptions = useMemo(() => {
     const years: number[] = [];
     for (let y = todayJy + 1; y >= todayJy - 8; y -= 1) {
@@ -249,7 +373,70 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
     return years;
   }, [todayJy]);
 
-  const columns: Column<AdmissionRecord>[] = useMemo(
+  const mergedRows = useMemo<AdmissionDisplayRow[]>(() => {
+    const activeFilters = {
+      search,
+      year: yearFilter,
+      status: statusFilter,
+      page: sortCtrl.page,
+    };
+
+    const queuedUpdatesById = new Map<number, AdmissionQueueItem>();
+    const topSessionRows: Array<{ seq: number; row: AdmissionDisplayRow }> = [];
+
+    for (const qItem of queueSnap.items) {
+      if (qItem.operation === 'update' && qItem.targetId !== null) {
+        queuedUpdatesById.set(qItem.targetId, qItem);
+      } else if (qItem.operation === 'create') {
+        topSessionRows.push({
+          seq: qItem.createdAtSeq,
+          row: {
+            kind: 'queued_create',
+            rowKey: qItem.queueId,
+            record: qItem.optimisticRecord,
+            queueItem: qItem,
+            isOutOfFilter: !matchesAdmissionFilters(qItem.optimisticRecord, activeFilters),
+          },
+        });
+      }
+    }
+
+    const normalServerRows: AdmissionDisplayRow[] = [];
+
+    for (const rec of items) {
+      const queuedUpdate = queuedUpdatesById.get(rec.id) ?? null;
+      const effectiveRecord = queuedUpdate ? queuedUpdate.optimisticRecord : rec;
+      const recentSeq = recentCreatedSeqRef.current.get(rec.id);
+
+      if (recentSeq !== undefined) {
+        topSessionRows.push({
+          seq: recentSeq,
+          row: {
+            kind: 'server',
+            rowKey: stableKeyByServerIdRef.current.get(rec.id) || String(rec.id),
+            record: effectiveRecord,
+            queueItem: queuedUpdate,
+            isOutOfFilter: !matchesAdmissionFilters(effectiveRecord, activeFilters),
+          },
+        });
+      } else {
+        normalServerRows.push({
+          kind: 'server',
+          rowKey: String(rec.id),
+          record: effectiveRecord,
+          queueItem: queuedUpdate,
+          isOutOfFilter: false,
+        });
+      }
+    }
+
+    // Preserve exact submission order (newest submitted at top) across pending & newly confirmed rows
+    topSessionRows.sort((a, b) => b.seq - a.seq);
+
+    return [...topSessionRows.map((entry) => entry.row), ...normalServerRows];
+  }, [items, queueSnap.items, search, yearFilter, statusFilter, sortCtrl.page]);
+
+  const columns: Column<AdmissionDisplayRow>[] = useMemo(
     () => [
       {
         key: 'photo',
@@ -258,12 +445,15 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
         headerClassName: 'w-16 text-center',
         cellClassName: 'w-16 text-center',
         cell: (row) => {
-          const resolved = resolveEntityImageUrl(row.photo_url);
-          const initials = (row.student_name || 'ق').trim().slice(0, 1);
+          const rec = row.record;
+          const resolved = rec.photo_url?.startsWith('blob:')
+            ? rec.photo_url
+            : resolveEntityImageUrl(rec.photo_url);
+          const initials = (rec.student_name || 'ق').trim().slice(0, 1);
           return resolved ? (
             <img
               src={resolved}
-              alt={row.student_name}
+              alt={rec.student_name}
               className="w-11 h-11 rounded-xl object-cover border border-slate-200 mx-auto"
             />
           ) : (
@@ -278,15 +468,55 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
         header: 'نام',
         sortKey: 'student_name',
         priority: 'primary',
-        cell: (row) => (
-          <div className="min-w-0">
-            <div className="font-bold text-slate-800">{row.student_name}</div>
-            <div className="text-[11px] text-slate-500 font-normal mt-0.5 tabular-nums">
-              {getExamTypeLabel(row.exam_type)}
-              {row.rank ? ` · رتبه ${toPersianDigits(String(row.rank))}` : ''}
+        cell: (row) => {
+          const rec = row.record;
+          const qItem = row.queueItem;
+          return (
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-bold text-slate-800">{rec.student_name}</span>
+                {row.isOutOfFilter && (
+                  <span
+                    data-testid="out-of-filter-badge"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200"
+                  >
+                    <FilterX className="w-3 h-3 shrink-0" aria-hidden="true" />
+                    <span>خارج از فیلتر فعلی</span>
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-500 font-normal tabular-nums">
+                {getExamTypeLabel(rec.exam_type)}
+                {rec.rank ? ` · رتبه ${toPersianDigits(String(rec.rank))}` : ''}
+              </div>
+              {qItem &&
+                (qItem.status === 'needs_edit' || qItem.status === 'failed') &&
+                qItem.errorMessage && (
+                  <div
+                    role="alert"
+                    className={`mt-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-start gap-1.5 leading-relaxed ${
+                      qItem.status === 'needs_edit'
+                        ? 'bg-amber-100/80 text-amber-900 border border-amber-200'
+                        : 'bg-rose-100/80 text-rose-900 border border-rose-200'
+                    }`}
+                  >
+                    {qItem.status === 'needs_edit' ? (
+                      <AlertTriangle
+                        className="w-3.5 h-3.5 text-amber-700 shrink-0 mt-0.5"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <WifiOff
+                        className="w-3.5 h-3.5 text-rose-700 shrink-0 mt-0.5"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <span>{qItem.errorMessage}</span>
+                  </div>
+                )}
             </div>
-          </div>
-        ),
+          );
+        },
       },
       {
         key: 'year',
@@ -295,7 +525,7 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
         priority: 'secondary',
         headerClassName: 'w-20 text-center',
         cellClassName: 'w-20 text-center tabular-nums font-bold text-slate-700',
-        cell: (row) => toPersianDigits(row.year),
+        cell: (row) => toPersianDigits(row.record.year),
       },
       {
         key: 'field_university',
@@ -303,8 +533,8 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
         priority: 'secondary',
         cell: (row) => (
           <div className="min-w-0">
-            <div className="font-semibold text-slate-800">{row.admission_title}</div>
-            <div className="text-[11px] text-[#445D84] font-medium mt-0.5">{row.field}</div>
+            <div className="font-semibold text-slate-800">{row.record.admission_title}</div>
+            <div className="text-[11px] text-[#445D84] font-medium mt-0.5">{row.record.field}</div>
           </div>
         ),
       },
@@ -313,18 +543,55 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
         header: 'وضعیت',
         sortKey: 'status',
         priority: 'secondary',
-        headerClassName: 'w-28 text-center',
-        cellClassName: 'w-28 text-center',
-        cell: (row) =>
-          row.status === 'published' ? (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-              منتشرشده
+        headerClassName: 'w-36 text-center',
+        cellClassName: 'w-36 text-center',
+        cell: (row) => {
+          const qItem = row.queueItem;
+          if (qItem?.status === 'pending') {
+            return (
+              <span
+                data-testid="admission-row-status-pending"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-sky-50 text-sky-800 border border-sky-200 whitespace-nowrap"
+              >
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden="true" />
+                <span>در حال ذخیره</span>
+              </span>
+            );
+          }
+          if (qItem?.status === 'needs_edit') {
+            return (
+              <span
+                data-testid="admission-row-status-needs-edit"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300 whitespace-nowrap"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                <span>نیازمند ویرایش</span>
+              </span>
+            );
+          }
+          if (qItem?.status === 'failed') {
+            return (
+              <span
+                data-testid="admission-row-status-failed"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 text-rose-800 border border-rose-300 whitespace-nowrap"
+              >
+                <WifiOff className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                <span>ناموفق</span>
+              </span>
+            );
+          }
+          return row.record.status === 'published' ? (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap">
+              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <span>منتشرشده</span>
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
-              پیش‌نویس
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap">
+              <Clock className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <span>پیش‌نویس</span>
             </span>
-          ),
+          );
+        },
       },
       {
         key: 'consent',
@@ -332,8 +599,19 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
         priority: 'secondary',
         headerClassName: 'w-20 text-center',
         cellClassName: 'w-20 text-center',
-        cell: (row) =>
-          row.consent_obtained ? (
+        cell: (row) => {
+          // Do not display a green checkmark on pending optimistic rows
+          if (row.queueItem?.status === 'pending') {
+            return (
+              <span
+                title="در انتظار تأیید سرور"
+                className="inline-flex items-center justify-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 text-[11px] font-semibold"
+              >
+                در انتظار
+              </span>
+            );
+          }
+          return row.record.consent_obtained ? (
             <span
               title="رضایت‌نامه ثبت شده است"
               aria-label="رضایت ثبت شده"
@@ -349,7 +627,8 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
             >
               <X className="w-4 h-4" aria-hidden="true" />
             </span>
-          ),
+          );
+        },
       },
     ],
     []
@@ -371,6 +650,17 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
 
   return (
     <div id="page-admissions" className="space-y-6">
+      {/* Screen-reader live region for queue status updates */}
+      <div
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="admissions-aria-live"
+      >
+        {queueSnap.lastAnnouncement}
+      </div>
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
@@ -386,6 +676,7 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
           type="button"
           onClick={() => {
             setEditingItem(null);
+            setEditingQueueItem(null);
             setIsFormOpen(true);
           }}
           icon={<Plus className="w-4 h-4" aria-hidden="true" />}
@@ -394,6 +685,38 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
           <span>افزودن قبولی</span>
         </ActionButton>
       </div>
+
+      {/* Compact Top-of-Page Optimistic Queue Summary */}
+      {(queueSnap.pendingCount > 0 || queueSnap.totalAttentionCount > 0) && (
+        <div
+          data-testid="admissions-queue-banner"
+          className={`rounded-2xl px-4 py-3 border flex flex-wrap items-center justify-between gap-3 text-xs font-bold ${
+            queueSnap.totalAttentionCount > 0
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : 'bg-sky-50 border-sky-200 text-sky-900'
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-2.5">
+            {queueSnap.pendingCount > 0 ? (
+              <Loader2 className="w-4 h-4 animate-spin text-sky-600 shrink-0" aria-hidden="true" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" aria-hidden="true" />
+            )}
+            <span className="tabular-nums">
+              {toPersianDigits(queueSnap.pendingCount)} در حال ذخیره،{' '}
+              {toPersianDigits(queueSnap.totalAttentionCount)} ناموفق
+            </span>
+            {queueSnap.needsEditCount > 0 && (
+              <span className="font-medium text-amber-800 tabular-nums">
+                ({toPersianDigits(queueSnap.needsEditCount)} مورد نیازمند ویرایش)
+              </span>
+            )}
+          </div>
+          <span className="text-[11px] font-medium opacity-80">
+            می‌توانید بدون توقف به کار یا ثبت مورد بعدی ادامه دهید
+          </span>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs">
@@ -495,7 +818,7 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
             <div key={n} className="h-14 rounded-xl bg-slate-100 animate-pulse" />
           ))}
         </div>
-      ) : items.length === 0 ? (
+      ) : mergedRows.length === 0 ? (
         <div className="bg-white rounded-2xl p-12 text-center border border-slate-200/80 shadow-xs space-y-3">
           <div className="w-16 h-16 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
             <Award className="w-8 h-8" aria-hidden="true" />
@@ -510,6 +833,7 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
               type="button"
               onClick={() => {
                 setEditingItem(null);
+                setEditingQueueItem(null);
                 setIsFormOpen(true);
               }}
               icon={<Plus className="w-4 h-4" aria-hidden="true" />}
@@ -521,18 +845,112 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs">
-          <DataTable<AdmissionRecord>
+          <DataTable<AdmissionDisplayRow>
             columns={columns}
-            data={items}
-            rowKey={(r) => r.id}
+            data={mergedRows}
+            rowKey={(r) => r.rowKey}
+            rowClassName={(row) => {
+              if (row.queueItem?.status === 'pending') return 'opacity-75 bg-sky-50/35';
+              if (row.queueItem?.status === 'needs_edit') return 'bg-amber-50/50';
+              if (row.queueItem?.status === 'failed') return 'bg-rose-50/50';
+              return '';
+            }}
             tableAriaLabel="جدول قبولی‌ها"
             sortController={sortCtrl}
             actionsHeader="عملیات"
-            actionsHeaderClassName="w-52 text-center"
-            actionsCellClassName="w-52 shrink-0 text-center"
+            actionsHeaderClassName="w-56 text-center"
+            actionsCellClassName="w-56 shrink-0 text-center"
             renderActions={(row) => {
-              const isPublished = row.status === 'published';
-              const isBusy = togglingId === row.id;
+              const rec = row.record;
+              const qItem = row.queueItem;
+
+              // Pending optimistic row (create or update): lock actions while saving
+              if (qItem?.status === 'pending') {
+                return (
+                  <div className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden="true" />
+                    <span>در حال ارسال...</span>
+                  </div>
+                );
+              }
+
+              // Server validation error (422): Edit (re-open pre-filled) + Dismiss (no blind retry)
+              if (qItem?.status === 'needs_edit') {
+                return (
+                  <div className="flex items-center justify-center gap-1.5">
+                    <ActionButton
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setEditingItem(null);
+                        setEditingQueueItem(qItem);
+                        setIsFormOpen(true);
+                      }}
+                      title="ویرایش و اصلاح خطاها"
+                      aria-label={`ویرایش قبولی ${rec.student_name}`}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-amber-800 bg-amber-100/70 hover:bg-amber-200/70"
+                      icon={<Pencil className="w-3.5 h-3.5" aria-hidden="true" />}
+                    >
+                      <span>ویرایش</span>
+                    </ActionButton>
+                    <ActionButton
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => admissionsQueueStore.dismiss(qItem.queueId)}
+                      title="حذف از صف"
+                      aria-label={`حذف ${rec.student_name} از صف`}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                      icon={<Trash2 className="w-3.5 h-3.5" aria-hidden="true" />}
+                    >
+                      <span>حذف از صف</span>
+                    </ActionButton>
+                  </div>
+                );
+              }
+
+              // Network / Timeout / 5xx error: Retry (same Idempotency-Key) + Dismiss
+              if (qItem?.status === 'failed') {
+                const isChecking = checkingRetryId === qItem.queueId;
+                return (
+                  <div className="flex items-center justify-center gap-1.5">
+                    <ActionButton
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      loading={isChecking}
+                      loadingText="بررسی..."
+                      onClick={() => void handleRetryQueueItem(qItem)}
+                      title="ارسال مجدد بدون پرکردن مجدد فرم"
+                      aria-label={`ارسال مجدد قبولی ${rec.student_name}`}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-rose-800 bg-rose-100/80 hover:bg-rose-200/80"
+                      icon={<RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />}
+                    >
+                      <span>ارسال مجدد</span>
+                    </ActionButton>
+                    <ActionButton
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={isChecking}
+                      onClick={() => admissionsQueueStore.dismiss(qItem.queueId)}
+                      title="حذف از صف"
+                      aria-label={`حذف ${rec.student_name} از صف`}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-200/70"
+                      icon={<Trash2 className="w-3.5 h-3.5" aria-hidden="true" />}
+                    >
+                      <span>حذف از صف</span>
+                    </ActionButton>
+                  </div>
+                );
+              }
+
+              // Normal confirmed server record
+              const isPublished = rec.status === 'published';
+              const isBusy = togglingId === rec.id;
+              const isLocked = admissionsQueueStore.isTargetLocked(rec.id);
+
               return (
                 <div className="flex items-center justify-center gap-1">
                   <ActionButton
@@ -540,23 +958,24 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
                     variant="ghost"
                     size="sm"
                     loading={isBusy}
-                    onClick={() => handleQuickToggleStatus(row)}
+                    disabled={isLocked}
+                    onClick={() => handleQuickToggleStatus(rec)}
                     title={
                       isPublished
                         ? 'لغو انتشار (تبدیل به پیش‌نویس)'
-                        : row.consent_obtained
+                        : rec.consent_obtained
                           ? 'انتشار عمومی'
                           : 'نیاز به ثبت رضایت‌نامه برای انتشار'
                     }
                     aria-label={
                       isPublished
-                        ? `لغو انتشار قبولی ${row.student_name}`
-                        : `انتشار قبولی ${row.student_name}`
+                        ? `لغو انتشار قبولی ${rec.student_name}`
+                        : `انتشار قبولی ${rec.student_name}`
                     }
                     className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold ${
                       isPublished
                         ? 'text-amber-700 hover:bg-amber-50'
-                        : row.consent_obtained
+                        : rec.consent_obtained
                           ? 'text-emerald-700 hover:bg-emerald-50'
                           : 'text-slate-400 hover:bg-slate-100'
                     }`}
@@ -575,12 +994,14 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
                     type="button"
                     variant="ghost"
                     size="sm"
+                    disabled={isLocked}
                     onClick={() => {
-                      setEditingItem(row);
+                      setEditingQueueItem(null);
+                      setEditingItem(rec);
                       setIsFormOpen(true);
                     }}
-                    title="ویرایش"
-                    aria-label={`ویرایش قبولی ${row.student_name}`}
+                    title={isLocked ? 'ویرایش این رکورد در حال ذخیره است' : 'ویرایش'}
+                    aria-label={`ویرایش قبولی ${rec.student_name}`}
                     className="p-2 rounded-lg text-[#445D84] hover:bg-slate-100"
                   >
                     <Pencil className="w-4 h-4" aria-hidden="true" />
@@ -590,9 +1011,10 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => setDeletingItem(row)}
+                    disabled={isLocked}
+                    onClick={() => setDeletingItem(rec)}
                     title="حذف"
-                    aria-label={`حذف قبولی ${row.student_name}`}
+                    aria-label={`حذف قبولی ${rec.student_name}`}
                     className="p-2 rounded-lg text-rose-600 hover:bg-rose-50"
                   >
                     <Trash2 className="w-4 h-4" aria-hidden="true" />
@@ -648,12 +1070,38 @@ export const AdmissionsPage: React.FC<AdmissionsPageProps> = ({ showToast, userR
       <AdmissionFormModal
         isOpen={isFormOpen}
         editingItem={editingItem}
+        editingQueueItem={editingQueueItem}
         onClose={() => {
           setIsFormOpen(false);
           setEditingItem(null);
+          setEditingQueueItem(null);
         }}
-        onSaved={() => loadAdmissions()}
         showToast={showToast}
+      />
+
+      {/* Ambiguous Retry Confirmation Modal */}
+      <ConfirmModal
+        isOpen={Boolean(retryConfirmState)}
+        title={
+          retryConfirmState?.duplicateFound
+            ? 'احتمال ثبت تکراری — رکورد مشابه یافت شد'
+            : 'هشدار ارسال مجدد (وضعیت نامشخص در سرور)'
+        }
+        message={
+          retryConfirmState?.duplicateFound
+            ? `یک قبولی مشابه برای «${retryConfirmState.duplicateFound.student_name}» (${retryConfirmState.duplicateFound.admission_title} - سال ${toPersianDigits(retryConfirmState.duplicateFound.year)}) هم‌اکنون در لیست سرور وجود دارد. اگر قبلاً ثبت شده است، «انصراف» را بزنید و این مورد را از صف حذف کنید.`
+            : 'درخواست قبلی پس از ارسال به سرور با Timeout یا خطای سرور مواجه شد و ممکن است قبلاً ثبت شده باشد. لطفاً لیست قبولی‌ها را بررسی کنید؛ در صورت اطمینان از عدم ثبت، ارسال مجدد را تأیید کنید.'
+        }
+        confirmText="بله، ارسال مجدد انجام شود"
+        cancelText="انصراف و بررسی لیست"
+        variant="danger"
+        onCancel={() => setRetryConfirmState(null)}
+        onConfirm={() => {
+          if (retryConfirmState) {
+            admissionsQueueStore.retry(retryConfirmState.queueItem.queueId);
+          }
+          setRetryConfirmState(null);
+        }}
       />
 
       {/* 2-Step Delete Confirm Modal */}

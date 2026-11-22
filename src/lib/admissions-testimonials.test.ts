@@ -6,6 +6,8 @@ import {
   canAccessAdminOnlySections,
   chunkBulkRejectIds,
   extractApiFieldErrors,
+  getDefaultNewAdmissionFormState,
+  getNextRapidAdmissionFormState,
   normalizeAdmission,
   normalizeTestimonial,
   shouldWarnConsentUnpublish,
@@ -68,6 +70,48 @@ test('shouldWarnConsentUnpublish triggers only when unchecking consent on a publ
     false
   );
   assert.equal(shouldWarnConsentUnpublish(null, false), false);
+});
+
+test('getDefaultNewAdmissionFormState defaults to published with consent checked, and getNextRapidAdmissionFormState preserves batch settings', () => {
+  const defaults = getDefaultNewAdmissionFormState(1405);
+  assert.equal(defaults.year, '1405');
+  assert.equal(defaults.status, 'published');
+  assert.equal(defaults.consent_obtained, true);
+  assert.equal(defaults.display_order, '0');
+
+  const nextFromZero = getNextRapidAdmissionFormState({
+    ...defaults,
+    student_name: 'سارا محمدی',
+    year: '1404',
+    exam_type: 'tizhooshan',
+    field: 'ریاضی',
+    admission_title: 'فرزانگان ۱ تهران',
+    rank: '۱۲',
+    display_order: '0',
+    status: 'published',
+    consent_obtained: true,
+  });
+  assert.equal(nextFromZero.student_name, '');
+  assert.equal(nextFromZero.admission_title, '');
+  assert.equal(nextFromZero.rank, '');
+  assert.equal(nextFromZero.year, '1404');
+  assert.equal(nextFromZero.exam_type, 'tizhooshan');
+  assert.equal(nextFromZero.field, 'ریاضی');
+  assert.equal(nextFromZero.status, 'published');
+  assert.equal(nextFromZero.consent_obtained, true);
+  assert.equal(nextFromZero.display_order, '0');
+
+  const nextIncremented = getNextRapidAdmissionFormState({
+    ...defaults,
+    student_name: 'علی رضایی',
+    admission_title: 'پزشکی تهران',
+    display_order: '3',
+    status: 'published',
+    consent_obtained: false,
+  });
+  assert.equal(nextIncremented.display_order, '4');
+  assert.equal(nextIncremented.status, 'draft');
+  assert.equal(nextIncremented.consent_obtained, false);
 });
 
 test('buildAdmissionFormData forces draft when consent is false, sends exact OpenAPI fields, and includes remove_image flag', () => {

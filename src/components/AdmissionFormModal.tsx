@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  AlertCircle,
   AlertTriangle,
   Award,
   CheckCircle2,
@@ -7,28 +8,37 @@ import {
   ShieldAlert,
   Trash2,
 } from 'lucide-react';
-import API from '../lib/api';
 import {
   ADMISSION_CONSENT_LABEL,
   ADMISSION_EXAM_TYPES,
   CONSENT_REQUIRED_MESSAGE,
-  extractApiFieldErrors,
+  getDefaultNewAdmissionFormState,
+  getNextRapidAdmissionFormState,
   shouldWarnConsentUnpublish,
   validateAdmissionForm,
   type AdmissionFormValues,
 } from '../lib/admissions-testimonials';
+import {
+  ADMISSIONS_KEEP_OPEN_STORAGE_KEY,
+  admissionsQueueStore,
+  buildOptimisticAdmissionRecord,
+  type AdmissionQueueItem,
+} from '../lib/admissions-queue';
+import { useKeepOpenPreference } from '../hooks/useOptimisticQueue';
 import { resolveEntityImageUrl } from '../lib/image-upload';
 import {
   getTodayJalali,
   normalizeIntegerInput,
   parseStrictInteger,
   toEnglishDigits,
+  toPersianDigits,
 } from '../lib/jalali';
 import type {
   AcademicField,
   AdmissionExamType,
   AdmissionRecord,
   AdmissionStatus,
+  AdmissionUpsertInput,
   ToastType,
 } from '../types';
 import { Modal } from './Modal';
@@ -45,50 +55,44 @@ const ACADEMIC_FIELDS: AcademicField[] = [
   'راهنمایی',
 ];
 
-const ADMISSION_FIELD_ALIASES: Record<string, string> = {
-  name: 'student_name',
-  jalali_year: 'year',
-  admission_year: 'year',
-  result_title: 'admission_title',
-  title: 'admission_title',
-  university: 'admission_title',
-  university_title: 'admission_title',
-  rank_value: 'rank',
-  major: 'field',
-  sort_order: 'display_order',
-  consent_confirmed: 'consent_obtained',
-  consent: 'consent_obtained',
-  has_consent: 'consent_obtained',
-  image: 'photo',
-};
+const SUBMIT_COOLDOWN_MS = 350;
 
 interface AdmissionFormModalProps {
   isOpen: boolean;
   editingItem: AdmissionRecord | null;
+  editingQueueItem?: AdmissionQueueItem | null;
   onClose: () => void;
-  onSaved: () => void | Promise<void>;
   showToast: (message: string, type?: ToastType) => void;
 }
 
 export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
   isOpen,
   editingItem,
+  editingQueueItem = null,
   onClose,
-  onSaved,
   showToast,
 }) => {
   const [todayJy] = getTodayJalali();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const studentNameInputRef = useRef<HTMLInputElement | null>(null);
+  const lastSubmitAtRef = useRef<number>(0);
+  const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Blob URLs owned by the queue store (either inherited from editingQueueItem or handed off on submit) */
+  const storeOwnedBlobUrlsRef = useRef<Set<string>>(new Set());
 
-  const [studentName, setStudentName] = useState('');
-  const [year, setYear] = useState(String(todayJy));
-  const [examType, setExamType] = useState<AdmissionExamType>('konkur');
-  const [field, setField] = useState<string>('تجربی');
-  const [admissionTitle, setAdmissionTitle] = useState('');
-  const [rank, setRank] = useState('');
-  const [displayOrder, setDisplayOrder] = useState('0');
-  const [status, setStatus] = useState<AdmissionStatus>('draft');
-  const [consentObtained, setConsentObtained] = useState(false);
+  const [keepOpen, setKeepOpen] = useKeepOpenPreference(ADMISSIONS_KEEP_OPEN_STORAGE_KEY, false);
+  const isCreateMode = !editingItem && !editingQueueItem;
+
+  const initialDefaults = getDefaultNewAdmissionFormState(todayJy);
+  const [studentName, setStudentName] = useState(initialDefaults.student_name);
+  const [year, setYear] = useState(initialDefaults.year);
+  const [examType, setExamType] = useState<AdmissionExamType>(initialDefaults.exam_type);
+  const [field, setField] = useState<string>(initialDefaults.field);
+  const [admissionTitle, setAdmissionTitle] = useState(initialDefaults.admission_title);
+  const [rank, setRank] = useState(initialDefaults.rank);
+  const [displayOrder, setDisplayOrder] = useState(initialDefaults.display_order);
+  const [status, setStatus] = useState<AdmissionStatus>(initialDefaults.status);
+  const [consentObtained, setConsentObtained] = useState(initialDefaults.consent_obtained);
 
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
@@ -96,18 +100,68 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [consentBannerError, setConsentBannerError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [serverErrorBanner, setServerErrorBanner] = useState<string | null>(null);
+  const [isCooldown, setIsCooldown] = useState(false);
+  const [sessionQueuedCount, setSessionQueuedCount] = useState(0);
   const [showUnpublishWarning, setShowUnpublishWarning] = useState(false);
+
+  const safeRevokeLocalBlobUrl = (url: string | null) => {
+    if (!url || !url.startsWith('blob:')) return;
+    if (storeOwnedBlobUrlsRef.current.has(url)) return;
+    URL.revokeObjectURL(url);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (cooldownTimerRef.current) {
+        clearTimeout(cooldownTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
     setErrors({});
     setConsentBannerError(null);
+    setServerErrorBanner(null);
     setShowUnpublishWarning(false);
+    setIsCooldown(false);
+    setSessionQueuedCount(0);
     setPhotoFile(null);
     setRemovePhoto(false);
 
-    if (editingItem) {
+    if (editingQueueItem) {
+      const p = editingQueueItem.payload;
+      setStudentName(p.student_name || '');
+      setYear(String(p.year || todayJy));
+      setExamType(p.exam_type || 'konkur');
+      setField(p.field || 'تجربی');
+      setAdmissionTitle(p.admission_title || '');
+      setRank(p.rank !== null && p.rank !== undefined ? String(p.rank) : '');
+      setDisplayOrder(String(p.display_order ?? 0));
+      setStatus(p.status || 'published');
+      setConsentObtained(Boolean(p.consent_obtained));
+      setPhotoFile(p.photo ?? null);
+      setRemovePhoto(Boolean(p.remove_photo));
+
+      if (editingQueueItem.previewUrl) {
+        storeOwnedBlobUrlsRef.current.add(editingQueueItem.previewUrl);
+        setPhotoPreviewUrl(editingQueueItem.previewUrl);
+      } else if (p.photo) {
+        setPhotoPreviewUrl(URL.createObjectURL(p.photo));
+      } else if (!p.remove_photo && editingQueueItem.optimisticRecord.photo_url) {
+        setPhotoPreviewUrl(resolveEntityImageUrl(editingQueueItem.optimisticRecord.photo_url));
+      } else {
+        setPhotoPreviewUrl(null);
+      }
+
+      setErrors(editingQueueItem.fieldErrors || {});
+      if (editingQueueItem.isConsentRequired) {
+        setConsentBannerError(editingQueueItem.errorMessage || CONSENT_REQUIRED_MESSAGE);
+      } else if (editingQueueItem.errorMessage) {
+        setServerErrorBanner(editingQueueItem.errorMessage);
+      }
+    } else if (editingItem) {
       setStudentName(editingItem.student_name || '');
       setYear(String(editingItem.year || todayJy));
       setExamType(editingItem.exam_type || 'konkur');
@@ -119,29 +173,34 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
       setConsentObtained(Boolean(editingItem.consent_obtained));
       setPhotoPreviewUrl(resolveEntityImageUrl(editingItem.photo_url));
     } else {
-      setStudentName('');
-      setYear(String(todayJy));
-      setExamType('konkur');
-      setField('تجربی');
-      setAdmissionTitle('');
-      setRank('');
-      setDisplayOrder('0');
-      setStatus('draft');
-      setConsentObtained(false);
+      const defaults = getDefaultNewAdmissionFormState(todayJy);
+      setStudentName(defaults.student_name);
+      setYear(defaults.year);
+      setExamType(defaults.exam_type);
+      setField(defaults.field);
+      setAdmissionTitle(defaults.admission_title);
+      setRank(defaults.rank);
+      setDisplayOrder(defaults.display_order);
+      setStatus(defaults.status);
+      setConsentObtained(defaults.consent_obtained);
       setPhotoPreviewUrl(null);
     }
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-  }, [isOpen, editingItem, todayJy]);
 
-  // Revoke object URL on unmount / preview change
+    const focusTimer = setTimeout(() => {
+      studentNameInputRef.current?.focus();
+    }, 30);
+    return () => clearTimeout(focusTimer);
+  }, [isOpen, editingItem, editingQueueItem, todayJy]);
+
+  // Revoke locally created object URLs on unmount / preview replacement
   useEffect(() => {
+    const currentUrl = photoPreviewUrl;
     return () => {
-      if (photoPreviewUrl && photoPreviewUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(photoPreviewUrl);
-      }
+      safeRevokeLocalBlobUrl(currentUrl);
     };
   }, [photoPreviewUrl]);
 
@@ -158,9 +217,7 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
       return;
     }
 
-    if (photoPreviewUrl && photoPreviewUrl.startsWith('blob:')) {
-      URL.revokeObjectURL(photoPreviewUrl);
-    }
+    safeRevokeLocalBlobUrl(photoPreviewUrl);
     setPhotoFile(file);
     setPhotoPreviewUrl(URL.createObjectURL(file));
     setRemovePhoto(false);
@@ -172,9 +229,7 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
   };
 
   const handleRemovePhoto = () => {
-    if (photoPreviewUrl && photoPreviewUrl.startsWith('blob:')) {
-      URL.revokeObjectURL(photoPreviewUrl);
-    }
+    safeRevokeLocalBlobUrl(photoPreviewUrl);
     setPhotoFile(null);
     setPhotoPreviewUrl(null);
     setRemovePhoto(true);
@@ -197,7 +252,24 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
     });
   };
 
-  const performSave = async (forceStatus?: AdmissionStatus) => {
+  const startSubmitCooldown = () => {
+    lastSubmitAtRef.current = Date.now();
+    setIsCooldown(true);
+    if (cooldownTimerRef.current) {
+      clearTimeout(cooldownTimerRef.current);
+    }
+    cooldownTimerRef.current = setTimeout(() => {
+      setIsCooldown(false);
+      cooldownTimerRef.current = null;
+    }, SUBMIT_COOLDOWN_MS);
+  };
+
+  const enqueueSave = (forceStatus?: AdmissionStatus) => {
+    const now = Date.now();
+    if (now - lastSubmitAtRef.current < SUBMIT_COOLDOWN_MS) {
+      return;
+    }
+
     const effectiveStatus: AdmissionStatus = forceStatus ?? (consentObtained ? status : 'draft');
     const formValues: AdmissionFormValues = {
       student_name: studentName,
@@ -220,55 +292,136 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
       return;
     }
 
-    setSubmitting(true);
+    const savedName = studentName.trim();
+    const payload: AdmissionUpsertInput = {
+      student_name: savedName,
+      year: parseStrictInteger(year) ?? todayJy,
+      exam_type: examType,
+      field: field.trim(),
+      admission_title: admissionTitle.trim(),
+      rank: rank.trim() ? toEnglishDigits(rank).trim() : null,
+      display_order: parseStrictInteger(displayOrder) ?? 0,
+      status: effectiveStatus,
+      consent_obtained: consentObtained,
+      photo: photoFile,
+      remove_photo: removePhoto,
+    };
+
+    // Transfer blob URL ownership to the queue store if a local File is attached
+    let queuePreviewUrl: string | null = null;
+    if (photoFile) {
+      if (photoPreviewUrl && photoPreviewUrl.startsWith('blob:')) {
+        storeOwnedBlobUrlsRef.current.add(photoPreviewUrl);
+        queuePreviewUrl = photoPreviewUrl;
+      } else {
+        queuePreviewUrl = URL.createObjectURL(photoFile);
+        storeOwnedBlobUrlsRef.current.add(queuePreviewUrl);
+      }
+    } else if (editingQueueItem?.previewUrl && !removePhoto) {
+      queuePreviewUrl = editingQueueItem.previewUrl;
+    }
+
+    const existingPhotoUrl = removePhoto
+      ? null
+      : editingItem?.photo_url ??
+        (editingQueueItem && !editingQueueItem.previewUrl
+          ? editingQueueItem.optimisticRecord.photo_url
+          : null);
+
     setErrors({});
     setConsentBannerError(null);
+    setServerErrorBanner(null);
+    setShowUnpublishWarning(false);
 
-    try {
-      const payload = {
-        student_name: studentName.trim(),
-        year: parseStrictInteger(year) ?? todayJy,
-        exam_type: examType,
-        field: field.trim(),
-        admission_title: admissionTitle.trim(),
-        rank: rank.trim() ? toEnglishDigits(rank).trim() : null,
-        display_order: parseStrictInteger(displayOrder) ?? 0,
-        status: effectiveStatus,
-        consent_obtained: consentObtained,
-        photo: photoFile,
-        remove_photo: removePhoto,
-      };
-
-      if (editingItem) {
-        await API.updateAdmission(editingItem.id, payload);
-        showToast('اطلاعات قبولی با موفقیت ویرایش شد', 'success');
-      } else {
-        await API.createAdmission(payload);
-        showToast('قبولی جدید با موفقیت ثبت شد', 'success');
+    // Case 1: Re-submitting a failed/needs_edit item from the queue
+    if (editingQueueItem) {
+      const optimisticRecord = buildOptimisticAdmissionRecord(payload, {
+        id: editingQueueItem.targetId ?? editingQueueItem.tempId,
+        existingPhotoUrl,
+        previewUrl: queuePreviewUrl,
+      });
+      const ok = admissionsQueueStore.updateAndResubmit(editingQueueItem.queueId, {
+        payload,
+        optimisticRecord,
+        previewUrl: queuePreviewUrl,
+      });
+      if (!ok) {
+        showToast('این مورد هم‌اکنون در حال ارسال است.', 'warning');
+        return;
       }
-
-      setShowUnpublishWarning(false);
-      await onSaved();
+      startSubmitCooldown();
       onClose();
-    } catch (err) {
-      const parsed = extractApiFieldErrors(err, ADMISSION_FIELD_ALIASES);
-      if (Object.keys(parsed.fieldErrors).length > 0) {
-        setErrors(parsed.fieldErrors);
+      return;
+    }
+
+    // Case 2: Optimistic update of an existing server record
+    if (editingItem) {
+      if (admissionsQueueStore.isTargetLocked(editingItem.id)) {
+        showToast('ویرایش قبلی این رکورد هنوز در حال ذخیره است. لطفاً لحظه‌ای صبر کنید.', 'warning');
+        return;
       }
-      if (parsed.isConsentRequired) {
-        setConsentBannerError(parsed.message || CONSENT_REQUIRED_MESSAGE);
-        showToast(parsed.message || CONSENT_REQUIRED_MESSAGE, 'error');
-      } else {
-        showToast(parsed.message, 'error');
+      const optimisticRecord = buildOptimisticAdmissionRecord(payload, {
+        id: editingItem.id,
+        existingPhotoUrl,
+        previewUrl: queuePreviewUrl,
+      });
+      const queued = admissionsQueueStore.enqueueUpdate({
+        targetId: editingItem.id,
+        payload,
+        optimisticRecord,
+        previewUrl: queuePreviewUrl,
+      });
+      if (!queued) {
+        showToast('ویرایش قبلی این رکورد هنوز در حال ذخیره است.', 'warning');
+        return;
       }
-    } finally {
-      setSubmitting(false);
+      startSubmitCooldown();
+      onClose();
+      return;
+    }
+
+    // Case 3: Optimistic create
+    const optimisticRecord = buildOptimisticAdmissionRecord(payload, {
+      id: -Date.now(),
+      existingPhotoUrl: null,
+      previewUrl: queuePreviewUrl,
+    });
+    admissionsQueueStore.enqueueCreate({
+      payload,
+      optimisticRecord,
+      previewUrl: queuePreviewUrl,
+    });
+    startSubmitCooldown();
+
+    if (keepOpen) {
+      const nextState = getNextRapidAdmissionFormState(formValues);
+      setStudentName(nextState.student_name);
+      setYear(nextState.year);
+      setExamType(nextState.exam_type);
+      setField(nextState.field);
+      setAdmissionTitle(nextState.admission_title);
+      setRank(nextState.rank);
+      setDisplayOrder(nextState.display_order);
+      setStatus(nextState.status);
+      setConsentObtained(nextState.consent_obtained);
+      setPhotoFile(null);
+      setPhotoPreviewUrl(null);
+      setRemovePhoto(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      setSessionQueuedCount((c) => c + 1);
+      requestAnimationFrame(() => {
+        studentNameInputRef.current?.focus();
+      });
+    } else {
+      onClose();
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitting) return;
+    if (isCooldown) return;
 
     // Pre-save warning if removing consent on a currently published record
     if (shouldWarnConsentUnpublish(editingItem, consentObtained)) {
@@ -291,7 +444,7 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
       return;
     }
 
-    await performSave();
+    enqueueSave();
   };
 
   const clearFieldError = (key: string) => {
@@ -303,46 +456,111 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
     });
   };
 
+  const modalTitle = editingQueueItem
+    ? 'ویرایش و ارسال مجدد قبولی'
+    : editingItem
+      ? 'ویرایش قبولی'
+      : 'افزودن قبولی جدید';
+
+  const modalSubtitle = editingQueueItem
+    ? 'خطاهای اعلام‌شده توسط سرور را اصلاح کنید و دوباره ارسال نمایید'
+    : editingItem
+      ? `ویرایش رکورد «${editingItem.student_name}»`
+      : 'ثبت سریع و غیرمسدودکننده — ذخیره در پس‌زمینه انجام می‌شود';
+
+  const submitLabel = editingQueueItem
+    ? 'اصلاح و ارسال مجدد'
+    : editingItem
+      ? 'ذخیره تغییرات'
+      : 'ثبت';
+
   return (
     <>
       <Modal
         isOpen={isOpen}
-        onClose={() => {
-          if (!submitting) onClose();
-        }}
-        title={editingItem ? 'ویرایش قبولی' : 'افزودن قبولی جدید'}
-        subtitle={
-          editingItem
-            ? `ویرایش رکورد «${editingItem.student_name}»`
-            : 'ثبت مشخصات قبولی برای نمایش در بخش افتخارات سایت'
-        }
+        onClose={onClose}
+        title={modalTitle}
+        subtitle={modalSubtitle}
         icon={<Award className="w-5 h-5" />}
         size="lg"
         footer={
-          <div className="flex items-center justify-end gap-2.5">
-            <ActionButton
-              type="button"
-              variant="secondary"
-              disabled={submitting}
-              onClick={onClose}
-              className="px-4 py-2.5"
-            >
-              انصراف
-            </ActionButton>
-            <ActionButton
-              type="submit"
-              form="admission-upsert-form"
-              loading={submitting}
-              loadingText="در حال ذخیره..."
-              icon={<CheckCircle2 className="w-4 h-4" />}
-              className="px-5 py-2.5"
-            >
-              {editingItem ? 'ذخیره تغییرات' : 'ثبت قبولی'}
-            </ActionButton>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              {isCreateMode && (
+                <label
+                  htmlFor="admissionKeepOpenCheckbox"
+                  className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer select-none"
+                >
+                  <input
+                    id="admissionKeepOpenCheckbox"
+                    type="checkbox"
+                    checked={keepOpen}
+                    onChange={(e) => setKeepOpen(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-[#445D84] focus:ring-[#445D84] cursor-pointer"
+                  />
+                  <span>باز نگه داشتن مودال برای ثبت بعدی</span>
+                </label>
+              )}
+              {isCreateMode && sessionQueuedCount > 0 && (
+                <span
+                  data-testid="admission-session-saved-count"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-50 border border-sky-200 text-sky-800 text-xs font-bold tabular-nums"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>{toPersianDigits(sessionQueuedCount)} مورد به صف اضافه شد</span>
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2.5">
+              <ActionButton
+                type="button"
+                variant="secondary"
+                onClick={onClose}
+                className="px-4 py-2.5"
+              >
+                {sessionQueuedCount > 0 ? 'بستن' : 'انصراف'}
+              </ActionButton>
+              <ActionButton
+                type="submit"
+                form="admission-upsert-form"
+                disabled={isCooldown}
+                icon={<CheckCircle2 className="w-4 h-4" />}
+                className="px-5 py-2.5"
+              >
+                {submitLabel}
+              </ActionButton>
+            </div>
           </div>
         }
       >
         <form id="admission-upsert-form" onSubmit={handleSubmit} className="space-y-4" noValidate>
+          {serverErrorBanner && (
+            <div
+              role="alert"
+              data-testid="admission-server-error-banner"
+              className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold flex items-start gap-2.5"
+            >
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" aria-hidden="true" />
+              <div className="space-y-0.5">
+                <div className="font-bold">پیام اعتبارسنجی سرور</div>
+                <p className="font-normal leading-relaxed">{serverErrorBanner}</p>
+              </div>
+            </div>
+          )}
+
+          {editingQueueItem?.hasDetachedFileAfterReload && (
+            <div
+              role="note"
+              className="p-3 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 text-xs flex items-start gap-2"
+            >
+              <AlertTriangle className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" aria-hidden="true" />
+              <p className="leading-relaxed">
+                به‌دلیل بارگذاری مجدد صفحه، فایل تصویر قبلاً انتخاب‌شده در دسترس نیست. در صورت نیاز
+                تصویر دانش‌آموز را دوباره انتخاب کنید.
+              </p>
+            </div>
+          )}
+
           {consentBannerError && (
             <div
               role="alert"
@@ -416,6 +634,7 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
                 نام و نام خانوادگی <span className="text-red-500">*</span>
               </label>
               <input
+                ref={studentNameInputRef}
                 id="admissionStudentName"
                 type="text"
                 value={studentName}
@@ -636,7 +855,7 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
             >
               <option value="draft">پیش‌نویس (عدم نمایش عمومی)</option>
               <option value="published" disabled={!consentObtained}>
-                منتشرشده (نمایش عمومی در سایت)
+                منتشرشده (آماده انتشار عمومی در سایت)
               </option>
             </select>
             {!consentObtained && (
@@ -656,10 +875,9 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
         confirmText="بله، ذخیره و لغو انتشار"
         cancelText="بازگشت"
         variant="danger"
-        loading={submitting}
         onCancel={() => setShowUnpublishWarning(false)}
-        onConfirm={async () => {
-          await performSave('draft');
+        onConfirm={() => {
+          enqueueSave('draft');
         }}
       />
     </>

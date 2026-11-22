@@ -282,6 +282,9 @@ class FamoApiClient {
     try {
       json = (await res.json()) as ApiEnvelope<T>;
     } catch {
+      if (!res.ok) {
+        throw new ApiRequestError(defaultErrorMsg, { status: res.status });
+      }
       throw new Error(defaultErrorMsg);
     }
 
@@ -3250,8 +3253,15 @@ class FamoApiClient {
   /**
    * POST /api/v1/admissions (multipart/form-data)
    */
-  async createAdmission(input: AdmissionUpsertInput): Promise<ApiEnvelope<AdmissionRecord>> {
+  async createAdmission(
+    input: AdmissionUpsertInput,
+    options?: { idempotencyKey?: string; signal?: AbortSignal }
+  ): Promise<ApiEnvelope<AdmissionRecord>> {
     const formData = buildAdmissionFormData(input);
+    const extraHeaders: Record<string, string> = {};
+    if (options?.idempotencyKey) {
+      extraHeaders['Idempotency-Key'] = options.idempotencyKey;
+    }
     const res = await this.requestJson<
       Record<string, unknown> | { admission?: Record<string, unknown> }
     >(
@@ -3259,6 +3269,8 @@ class FamoApiClient {
       {
         method: 'POST',
         body: formData,
+        headers: Object.keys(extraHeaders).length > 0 ? extraHeaders : undefined,
+        signal: options?.signal,
       },
       'خطا در ثبت قبولی جدید'
     );
@@ -3277,9 +3289,14 @@ class FamoApiClient {
    */
   async updateAdmission(
     id: number,
-    input: AdmissionUpsertInput
+    input: AdmissionUpsertInput,
+    options?: { idempotencyKey?: string; signal?: AbortSignal }
   ): Promise<ApiEnvelope<AdmissionRecord>> {
     const formData = buildAdmissionFormData(input);
+    const extraHeaders: Record<string, string> = {};
+    if (options?.idempotencyKey) {
+      extraHeaders['Idempotency-Key'] = options.idempotencyKey;
+    }
     const res = await this.requestJson<
       Record<string, unknown> | { admission?: Record<string, unknown> }
     >(
@@ -3287,6 +3304,8 @@ class FamoApiClient {
       {
         method: 'POST',
         body: formData,
+        headers: Object.keys(extraHeaders).length > 0 ? extraHeaders : undefined,
+        signal: options?.signal,
       },
       'خطا در ویرایش اطلاعات قبولی'
     );

@@ -265,6 +265,47 @@ export function shouldWarnConsentUnpublish(
   return original.status === 'published' && !nextConsent;
 }
 
+/**
+ * Default values when creating a new admission record:
+ * consent checked by default and status ready for public publishing.
+ */
+export function getDefaultNewAdmissionFormState(todayJalaliYear: number): AdmissionFormValues {
+  return {
+    student_name: '',
+    year: String(todayJalaliYear),
+    exam_type: 'konkur',
+    field: 'تجربی',
+    admission_title: '',
+    rank: '',
+    display_order: '0',
+    status: 'published',
+    consent_obtained: true,
+  };
+}
+
+/**
+ * Computes the next form state after "Save & Add Another" (ذخیره و ثبت بعدی):
+ * clears student-specific fields while keeping batch settings (year, exam_type,
+ * field, consent, status) and auto-incrementing positive display_order values.
+ */
+export function getNextRapidAdmissionFormState(prev: AdmissionFormValues): AdmissionFormValues {
+  const prevOrder = parseStrictInteger(prev.display_order) ?? 0;
+  const nextOrder = prevOrder > 0 ? String(prevOrder + 1) : '0';
+  const nextStatus: AdmissionStatus = prev.consent_obtained ? prev.status : 'draft';
+
+  return {
+    student_name: '',
+    year: prev.year,
+    exam_type: prev.exam_type,
+    field: prev.field,
+    admission_title: '',
+    rank: '',
+    display_order: nextOrder,
+    status: nextStatus,
+    consent_obtained: prev.consent_obtained,
+  };
+}
+
 export function buildAdmissionFormData(input: AdmissionUpsertInput): FormData {
   const fd = new FormData();
   const cleanName = input.student_name.trim();
